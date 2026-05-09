@@ -1,0 +1,32 @@
+# CODEOWNERS — pgman-proxy
+#
+# The constitution (.specify/memory/constitution.md v1.1.0) names three
+# load-bearing review surfaces. Owners listed here are the default
+# reviewers GitHub auto-assigns; per-PR additions are still welcome.
+#
+# Replace the placeholder team handles with concrete individuals or
+# GitHub teams before publishing. The rows are STABLE — adding new
+# packages above an existing rule wins per CODEOWNERS spec (last match).
+
+# Default — anything not covered below.
+*                                                       @f1bonacc1/pgman-proxy-maintainers
+
+# Wire-protocol fidelity (Constitution Principle I) — data-plane proxy
+# config + the runtime that wires it.
+/internal/runtime/                                      @f1bonacc1/pgman-proxy-wire-fidelity
+/cmd/pgman-proxy/main.go                                @f1bonacc1/pgman-proxy-wire-fidelity
+
+# Fail-closed safety (Constitution Principle II) — config validation,
+# audit fail-closed gate, lifecycle exit codes.
+/internal/config/                                       @f1bonacc1/pgman-proxy-fail-closed
+/internal/control/audit.go                              @f1bonacc1/pgman-proxy-fail-closed
+/internal/control/auth.go                               @f1bonacc1/pgman-proxy-fail-closed
+
+# Active/active coordination correctness (Constitution Principle III) —
+# cluster wiring, leader-routing, NATS adapter assembly.
+/internal/cluster/                                      @f1bonacc1/pgman-proxy-coordination
+/internal/control/route.go                              @f1bonacc1/pgman-proxy-coordination
+
+# Constitutional gates — every change to these requires a doc-owner sign-off.
+/.specify/memory/constitution.md                        @f1bonacc1/pgman-proxy-constitution
+/specs/                                                 @f1bonacc1/pgman-proxy-constitution

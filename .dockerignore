@@ -1,0 +1,22 @@
+# Keep the OCI build context tiny; the binary is the only artefact we copy.
+.git
+.github
+.specify
+.claude
+specs
+tests
+examples
+deploy/compose
+deploy/systemd
+docs
+*.md
+*.yml
+*.yaml
+.gitignore
+.dockerignore
+.golangci.yml
+.goreleaser.yaml
+Makefile
+go.sum
+internal
+cmd

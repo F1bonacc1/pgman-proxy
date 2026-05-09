@@ -1,0 +1,55 @@
+# golangci-lint v2 configuration for pgman-proxy.
+# Mirrors ../pg-manager/.golangci.yml posture: strict but practical, with
+# extra emphasis on credentials/observability surfaces (Constitution II + V).
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - revive
+    - bodyclose
+    - misspell
+    - prealloc
+    - unconvert
+    - unparam
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment is layout-pedantic and prioritises memory packing
+        # over field grouping by responsibility. Skipping it for v1; we
+        # can revisit during Phase 7 polish if the binary footprint grows.
+        - fieldalignment
+    gosec:
+      excludes:
+        - G104 # errcheck handles this with better context
+    revive:
+      rules:
+        - name: var-naming
+        - name: package-comments
+        - name: exported
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - revive
+      - path: examples/
+        linters:
+          - revive
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

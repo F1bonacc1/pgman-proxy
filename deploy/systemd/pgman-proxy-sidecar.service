@@ -1,0 +1,29 @@
+[Unit]
+Description=pgman-proxy (sidecar — colocated with PostgreSQL)
+Documentation=https://github.com/f1bonacc1/pgman-proxy
+After=network-online.target postgresql.service
+Wants=network-online.target
+BindsTo=postgresql.service
+
+[Service]
+Type=simple
+User=pgman-proxy
+Group=pgman-proxy
+EnvironmentFile=/etc/pgman-proxy/env
+ExecStart=/usr/local/bin/pgman-proxy --config /etc/pgman-proxy/config.yaml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/log/pgman-proxy
+
+[Install]
+WantedBy=multi-user.target

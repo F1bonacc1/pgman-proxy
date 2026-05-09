@@ -1,0 +1,66 @@
+# SC-013 — LCM-discipline guard.
+#
+# All Postgres lifecycle mechanics (initdb / pg_basebackup / pg_rewind /
+# pg_upgrade / pg_ctl promote / replication-slot DDL) live inside
+# `../pg-manager`, NOT in this repo. The constitutional principle here
+# is "Thin scaffold over pg-manager" (Constitution IV).
+#
+# This workflow grep-gates production Go source (excluding tests, the
+# integration-test Dockerfile that documents what the engine does, and
+# the examples/backup-fs reference, which legitimately shells out to
+# pg_basebackup as a host-supplied executor) on every PR.
+
+name: lcm-discipline-gate
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  forbidden-engine-calls:
+    name: SC-013 engine-mechanics grep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: grep for engine mechanics in non-test Go source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tokens='initdb|pg_basebackup|pg_rewind|pg_upgrade|pg_ctl[[:space:]]promote|CREATE_REPLICATION_SLOT|DROP_REPLICATION_SLOT'
+          # Production source only. Tests and the reference filesystem
+          # backup example legitimately reference pg_basebackup because
+          # they shell out to it as a host-supplied BackupExecutor (FR-030).
+          hits=$(grep -RInE "($tokens)" \
+              --include='*.go' \
+              --exclude-dir=.git --exclude-dir=specs --exclude-dir=.github \
+              --exclude-dir=tests --exclude-dir=examples \
+              --exclude-dir=node_modules --exclude-dir=vendor \
+              --exclude='*_test.go' \
+              cmd internal || true)
+          if [[ -z "$hits" ]]; then
+            echo "lcm-discipline-gate: clean."
+            exit 0
+          fi
+          # Drop comment-only lines (//... or  * ... in a /* */ block).
+          # Comments in this repo legitimately reference what pg-manager
+          # does — that's the documentation half of the constitutional
+          # "thin scaffold" principle.
+          code_hits=$(echo "$hits" | grep -vE ':[[:space:]]*//' | grep -vE ':[[:space:]]*\*' || true)
+          # Drop lines that only mention these tokens inside string
+          # literals naming files we patch as scaffolding (pg_hba.conf,
+          # postgresql.conf).
+          unallowed=$(echo "$code_hits" \
+              | grep -v '"pg_hba.conf"' \
+              | grep -v '"postgresql.conf"' \
+              || true)
+          if [[ -n "$unallowed" ]]; then
+            echo "lcm-discipline-gate: engine mechanics referenced in production source (SC-013 / Constitution IV):"
+            echo "$unallowed"
+            echo
+            echo "All Postgres lifecycle work belongs in ../pg-manager. If this is scaffolding"
+            echo "(e.g. a config-file patch hook), refactor to NOT name the engine command."
+            exit 1
+          fi
+          echo "lcm-discipline-gate: hits matched allow-list."

@@ -1,0 +1,61 @@
+# Primary CI: build / lint / unit + smoke tests on every PR. Integration
+# tests (`make integration`) require docker-compose and run on a
+# separate workflow with a longer timeout — kept out of this gate so
+# the per-PR feedback loop stays fast.
+
+name: ci
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build / vet / test / lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: pgman-proxy
+
+      # The replace directive in pgman-proxy/go.mod points at ../pg-manager;
+      # CI clones the sibling repo so the module graph resolves the way
+      # local development does. Tagged releases pin pg-manager via the
+      # release-build replacement (constitution).
+      - uses: actions/checkout@v4
+        with:
+          repository: f1bonacc1/pg-manager
+          path: pg-manager
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: pgman-proxy/go.mod
+          cache-dependency-path: pgman-proxy/go.sum
+
+      - name: build
+        working-directory: pgman-proxy
+        run: go build ./...
+
+      - name: vet
+        working-directory: pgman-proxy
+        run: go vet ./...
+
+      - name: test (race + coverage)
+        working-directory: pgman-proxy
+        run: go test -race -count=1 -coverprofile=coverage.out ./internal/...
+
+      - name: smoke
+        working-directory: pgman-proxy
+        run: go test -tags=smoke -count=1 -timeout=5m ./tests/smoke/...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.0.0
+          working-directory: pgman-proxy

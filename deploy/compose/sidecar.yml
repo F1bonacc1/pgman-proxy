@@ -1,0 +1,51 @@
+# Sidecar deployment template — Postgres + pgman-proxy as siblings under
+# a single tini PID-1 supervisor. Use as a reference; production should
+# bake the binary into a custom image rather than mounting source.
+#
+# Key differences from a microservice topology:
+#   * Both services share the same network namespace (network_mode: service)
+#     so loopback binds remain reachable to the colocated app stack but
+#     hidden from the outside world (FR-013).
+#   * pgman-proxy is restarted in lockstep with its Postgres via
+#     restart: unless-stopped + depends_on healthcheck.
+#   * No host port bindings — the sidecar is reachable only via the
+#     compose network or via the colocated app container that mounts
+#     into the same network namespace.
+
+services:
+  postgres-sidecar:
+    image: postgres:17
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - pg-sidecar-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  pgman-proxy-sidecar:
+    image: ghcr.io/f1bonacc1/pgman-proxy:latest
+    network_mode: "service:postgres-sidecar"
+    depends_on:
+      postgres-sidecar:
+        condition: service_healthy
+    environment:
+      PGMAN_PROXY_DEPLOYMENT_MODE: sidecar
+      PGMAN_PROXY_CLUSTER_ID: demo
+      PGMAN_PROXY_NODE_ID: node-a
+      PGMAN_PROXY_PEERS: node-a,node-b,node-c
+      PGMAN_PROXY_NATS_URL: nats://nats.internal:4222
+      # Listener addresses deliberately unset — sidecar mode rewrites
+      # the documented defaults to 127.0.0.1:* automatically.
+      PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
+      PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
+      PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
+      LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
+      PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN
+      PGMAN_PROXY_CONTROL_TOKEN: "replace-me-in-production"
+
+volumes:
+  pg-sidecar-data:

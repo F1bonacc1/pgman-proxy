@@ -1,0 +1,62 @@
+# SC-006 — out-of-scope guard.
+#
+# pgman-proxy MUST NOT contain Kubernetes, Helm, CRD, controller-runtime,
+# or admission-webhook surfaces. Spec FR-015 puts every k8s artefact in
+# a separate project. This workflow grep-gates the source tree on every
+# PR so a stray import / file / config never lands.
+#
+# A real reference to one of the forbidden tokens — say, calling out
+# in a comment that a particular feature is "out of scope vs. a future
+# k8s sidecar" — is allowed by adding the line to .github/scope-allow.txt
+# (one literal grep match per line, no regex). The workflow excludes
+# both .github/ and the spec/ tree from the grep so this YAML and the
+# spec text don't trip the gate themselves.
+
+name: scope-gate
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  forbidden-tokens:
+    name: SC-006 forbidden-token grep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: grep for k8s / helm / CRD references
+        shell: bash
+        run: |
+          set -euo pipefail
+          tokens='kubernetes|helm|crd|controller-runtime|admission-webhook'
+          allow=".github/scope-allow.txt"
+          # Search the source tree, excluding spec docs (which legitimately
+          # name what's out of scope), .git, generated dirs, and this
+          # workflow file.
+          hits=$(grep -RInE "($tokens)" \
+              --include='*.go' --include='*.md' --include='*.yaml' \
+              --include='*.yml' --include='*.toml' --include='Makefile' \
+              --include='Dockerfile*' \
+              --exclude-dir=.git --exclude-dir=specs --exclude-dir=.github \
+              --exclude-dir=.claude --exclude-dir=.specify \
+              --exclude-dir=node_modules --exclude-dir=vendor . || true)
+          if [[ -z "$hits" ]]; then
+            echo "scope-gate: clean."
+            exit 0
+          fi
+          if [[ -f "$allow" ]]; then
+            unallowed=$(echo "$hits" | grep -vFf "$allow" || true)
+          else
+            unallowed="$hits"
+          fi
+          if [[ -n "$unallowed" ]]; then
+            echo "scope-gate: forbidden tokens found (SC-006 / FR-015):"
+            echo "$unallowed"
+            echo
+            echo "If a hit is intentional (e.g., a doc reference explaining what's out of scope),"
+            echo "add the literal line to $allow."
+            exit 1
+          fi
+          echo "scope-gate: hits matched allow-list."
