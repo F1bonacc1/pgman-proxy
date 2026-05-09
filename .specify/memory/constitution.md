@@ -1,6 +1,35 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.1.0 → 1.2.0
+Bump rationale: MINOR — broadened the Architecture Overview and the
+"Topology & Dependencies" subsection of Additional Constraints to
+reflect feature 002 (embedded NATS cluster). NATS is now embedded in
+every proxy peer; the project ships with a bundled NATS server and MUST
+NOT require an external NATS service. No principle removed or redefined;
+existing principles unchanged in intent. References to external-NATS
+provisioning are removed; the "minimum required NATS feature set"
+documentation requirement is preserved and now applies to the bundled
+version.
+
+Modified principles: none (text unchanged).
+
+Added sections: none.
+
+Removed sections: none.
+
+Templates requiring updates:
+- ✅ .specify/templates/plan-template.md — generic; no NATS anchors.
+- ✅ .specify/templates/spec-template.md — no NATS anchors.
+- ✅ .specify/templates/tasks-template.md — sample tasks only.
+- ✅ .specify/templates/checklist-template.md — generic.
+- ✅ CLAUDE.md — points readers to the current plan; no NATS anchors.
+
+Follow-up TODOs: README.md cites this constitution; once 002 ships it
+MUST replace the "operator-provisioned NATS" sentence with the bundled
+language.
+
+==================
 Version change: 1.0.0 → 1.1.0
 Bump rationale: MINOR — added two principles (III. Active/Active Coordination
 Correctness, IV. Thin Scaffold over pg-manager) and broadened scope guidance
@@ -57,8 +86,12 @@ and code reviews MUST verify compliance with these principles.
 
 The proxy itself is a thin scaffold. The protocol- and management-level work
 lives in `pg-manager`; coordination across active replicas (leader election,
-membership, control-plane events) flows through NATS. `pgman-proxy` MUST stay
-deployment-mode-neutral: nothing in the codebase may assume Kubernetes, Helm,
+membership, control-plane events) flows through a NATS cluster **embedded
+in the proxy peers themselves** — every replica boots its own in-process
+NATS server, and the replicas mesh into a single coordination cluster via
+NATS routes. The project does NOT depend on, ship with, or require an
+external `nats-server` process. `pgman-proxy` MUST stay deployment-mode-
+neutral: nothing in the codebase may assume Kubernetes, Helm,
 service-mesh, or any specific orchestrator.
 
 ## Core Principles
@@ -217,12 +250,16 @@ deployment platform and break the standalone/microservice/sidecar promise.
 **Topology & Dependencies:**
 - `pg-manager` (sibling module) is the wrapped engine; the proxy MUST depend on
   it as an external Go module.
-- NATS is a hard runtime dependency for clustered operation. The proxy MUST
-  document the minimum required NATS feature set (e.g., JetStream KV) in its
-  README and pin a tested version range.
+- NATS is **embedded in every proxy peer** via the upstream
+  `github.com/nats-io/nats-server/v2` Go module; the binary MUST NOT
+  require an external `nats-server` process, container, or service for
+  any clustered operation. The proxy MUST document the minimum required
+  NATS feature set (e.g., JetStream KV) and pin the bundled NATS version
+  in its README; bundled-version bumps that change wire compatibility or
+  on-disk format are MAJOR-version events for the proxy.
 - Three supported deployment modes MUST all be exercised in CI smoke tests:
-  1. **Standalone process** — single binary, single proxy peer, NATS optional
-     for single-node mode but required for any HA mode.
+  1. **Standalone process** — single binary, single proxy peer; embedded
+     NATS handles single-peer and multi-peer modes uniformly.
   2. **Microservice** — multi-replica deployment behind a load balancer.
   3. **Sidecar** — colocated with a PostgreSQL instance in the same pod / VM /
      container group.
@@ -321,4 +358,4 @@ for principle compliance and file an issue if drift is detected.
 lives in `CLAUDE.md` (and `README.md` once the project gains source code).
 Those files MUST cite this constitution; they do not redefine it.
 
-**Version**: 1.1.0 | **Ratified**: 2026-05-09 | **Last Amended**: 2026-05-09
+**Version**: 1.2.0 | **Ratified**: 2026-05-09 | **Last Amended**: 2026-05-09
