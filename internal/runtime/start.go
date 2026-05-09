@@ -158,6 +158,23 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	}
 	res.Cluster = handles
 
+	// Open the cluster KV bucket so we can publish our local Postgres
+	// replication address and serve as the back-end for the
+	// PeerDSNResolver pg-manager calls when seeding a follower.
+	clusterKV, err := embedded.OpenClusterKV(ctx, conn, cfg.Cluster.ID)
+	if err != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: open cluster KV: %w", err)}
+	}
+	if cfg.Postgres.ReplicationAddr != "" {
+		if err := cluster.PublishPeerAddress(ctx, clusterKV, cfg.Node.ID, cfg.Postgres.ReplicationAddr); err != nil {
+			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: publish peer address: %w", err)}
+		}
+		res.Logger.Info("published peer replication address",
+			pgmanager.Field{Key: "node_id", Value: cfg.Node.ID},
+			pgmanager.Field{Key: "addr", Value: cfg.Postgres.ReplicationAddr})
+	}
+	peerDSNResolver := cluster.PeerAddressResolver(clusterKV)
+
 	// Now that the leadership handle exists, wire the storage monitor
 	// (the fence callback references it).
 	storageMon := embedded.NewStorageMonitor(
@@ -206,12 +223,13 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		Events:     handles.Bus,
 		FS:         osfs.New(),
 		Topology: pgmanager.Topology{
-			NodeID:   pgmanager.NodeID(cfg.Node.ID),
-			Peers:    nodeIDs(cfg.Peers),
-			DataDir:  cfg.Postgres.DataDir,
-			BinDir:   cfg.Postgres.BinDir,
-			Port:     cfg.Topology.Port,
-			PeerDSNs: peerDSNsForConfig(cfg),
+			NodeID:           pgmanager.NodeID(cfg.Node.ID),
+			Peers:            nodeIDs(cfg.Peers),
+			DataDir:          cfg.Postgres.DataDir,
+			BinDir:           cfg.Postgres.BinDir,
+			Port:             cfg.Topology.Port,
+			PeerDSNs:         peerDSNsForConfig(cfg),
+			PeerDSNResolver:  peerDSNResolver,
 		},
 		Policy: pgmanager.Policy{
 			FailoverDelay:    cfg.Policy.FailoverDelay,

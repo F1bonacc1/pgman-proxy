@@ -114,6 +114,14 @@ type PostgresConfig struct {
 	DataDir               string            `yaml:"data_dir"                 json:"data_dir"`
 	Port                  int               `yaml:"port"                     json:"port"`
 	LocalDSNEnv           string            `yaml:"local_dsn_env"            json:"local_dsn_env"`
+	// ReplicationAddr is the host:port that OTHER peers use to reach
+	// this node's local Postgres for replication (pg_basebackup,
+	// walsender). Distinct from LocalDSNEnv: in K8s the local view
+	// (127.0.0.1) is not reachable from peers. Required when more than
+	// one peer is configured. Published to the cluster KV at startup so
+	// pg-manager's PeerDSNResolver can hand it to followers seeding from
+	// this node.
+	ReplicationAddr       string            `yaml:"replication_addr"         json:"replication_addr"`
 	TLSMode               string            `yaml:"tls_mode"                 json:"tls_mode"`
 	TLSDisableExplicitAck bool              `yaml:"tls_disable_explicit_ack" json:"tls_disable_explicit_ack"`
 	PeerDSNs              map[string]string `yaml:"peer_dsns"                json:"peer_dsns"`

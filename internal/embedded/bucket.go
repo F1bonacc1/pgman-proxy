@@ -158,6 +158,31 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 	return nil
 }
 
+// OpenClusterKV returns a handle to the cluster KV bucket
+// (`pgmgr_<sanitized-cluster-id>`), assumed to already exist via a
+// prior `PreCreateClusterKV` call. Used by host-level wiring that
+// needs to publish/read non-pg-manager keys (e.g. peer reachability)
+// in the shared bucket.
+func OpenClusterKV(ctx context.Context, conn *nats.Conn, clusterID string) (jetstream.KeyValue, error) {
+	if conn == nil {
+		return nil, errors.New("OpenClusterKV: nats connection is nil")
+	}
+	if clusterID == "" {
+		return nil, errors.New("OpenClusterKV: clusterID is empty")
+	}
+	js, err := jetstream.New(conn)
+	if err != nil {
+		return nil, fmt.Errorf("jetstream context: %w", err)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	kv, err := js.KeyValue(callCtx, bucketName(clusterID))
+	if err != nil {
+		return nil, fmt.Errorf("open cluster KV bucket %q: %w", bucketName(clusterID), err)
+	}
+	return kv, nil
+}
+
 // bucketName mirrors pg-manager/adapters/nats/bucket.go:bucketName.
 // MUST stay in sync with the upstream until T007's WithReplicas option
 // lands and UpgradeBucketReplicas is retired.

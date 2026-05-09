@@ -177,6 +177,7 @@ processes:
         -e POSTGRES_USER=postgres \
         -e POSTGRES_DB=postgres \
         -v pgman-pc-pgsql-a-data:/var/lib/postgresql \
+        -v "$(pwd)/dev/pg-init/01-replication-trust.sh:/docker-entrypoint-initdb.d/01-replication-trust.sh:ro" \
         pgman-pc-pgsql:dev
     is_daemon: false
     availability:
@@ -203,6 +204,7 @@ processes:
         -e POSTGRES_USER=postgres \
         -e POSTGRES_DB=postgres \
         -v pgman-pc-pgsql-b-data:/var/lib/postgresql \
+        -v "$(pwd)/dev/pg-init/01-replication-trust.sh:/docker-entrypoint-initdb.d/01-replication-trust.sh:ro" \
         pgman-pc-pgsql:dev
     is_daemon: false
     availability:
@@ -229,6 +231,7 @@ processes:
         -e POSTGRES_USER=postgres \
         -e POSTGRES_DB=postgres \
         -v pgman-pc-pgsql-c-data:/var/lib/postgresql \
+        -v "$(pwd)/dev/pg-init/01-replication-trust.sh:/docker-entrypoint-initdb.d/01-replication-trust.sh:ro" \
         pgman-pc-pgsql:dev
     is_daemon: false
     availability:
@@ -293,6 +296,7 @@ processes:
       - "PGMAN_PROXY_POSTGRES_DATA_DIR=./.cache/pgman-pc/node-a/pgdata"
       - "PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN"
       - "LOCAL_DSN=host=127.0.0.1 port=15432 user=postgres dbname=postgres sslmode=disable"
+      - "PGMAN_PROXY_POSTGRES_REPLICATION_ADDR=127.0.0.1:15432"
       - "PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN"
     readiness_probe:
       http_get:
@@ -343,6 +347,7 @@ processes:
       - "PGMAN_PROXY_POSTGRES_DATA_DIR=./.cache/pgman-pc/node-b/pgdata"
       - "PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN"
       - "LOCAL_DSN=host=127.0.0.1 port=15433 user=postgres dbname=postgres sslmode=disable"
+      - "PGMAN_PROXY_POSTGRES_REPLICATION_ADDR=127.0.0.1:15433"
       - "PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN"
     readiness_probe:
       http_get:
@@ -393,6 +398,7 @@ processes:
       - "PGMAN_PROXY_POSTGRES_DATA_DIR=./.cache/pgman-pc/node-c/pgdata"
       - "PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN"
       - "LOCAL_DSN=host=127.0.0.1 port=15434 user=postgres dbname=postgres sslmode=disable"
+      - "PGMAN_PROXY_POSTGRES_REPLICATION_ADDR=127.0.0.1:15434"
       - "PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN"
     readiness_probe:
       http_get:
