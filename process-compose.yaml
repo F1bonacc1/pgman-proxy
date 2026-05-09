@@ -78,7 +78,7 @@ processes:
   # this binary directly.
   # ───────────────────────────────────────────────────────────────────
   compile:
-    description: "go build -> ./bin/pgman-proxy (host binary)"
+    description: "go build -> ./bin/{pgman-proxy,chaos-workload} (host binaries)"
     command: |
       mkdir -p ./bin
       CGO_ENABLED=0 go build \
@@ -86,6 +86,10 @@ processes:
         -ldflags="-s -w -X main.version=process-compose-dev" \
         -o ./bin/pgman-proxy \
         ./cmd/pgman-proxy
+      CGO_ENABLED=0 go build \
+        -trimpath \
+        -o ./bin/chaos-workload \
+        ./cmd/chaos-workload
     working_dir: "."
     is_daemon: false
     availability:
@@ -399,3 +403,34 @@ processes:
       initial_delay_seconds: 3
       period_seconds: 3
       failure_threshold: 60
+
+  # ───────────────────────────────────────────────────────────────────
+  # chaos-workload: synthetic writer/reader. Inserts monotonically
+  # numbered rows through the proxy fleet (multi-host DSN, libpq fails
+  # over across all 3 peers) and periodically verifies every
+  # acknowledged commit is still readable. A "DATA LOSS" log line means
+  # the server told us a commit succeeded but the row is no longer
+  # there — that's a real bug in the proxy or pg-manager.
+  #
+  # The operator drives the chaos manually: kill -9 a pgsql container,
+  # `process-compose stop pgman-proxy-X`, etc. Workload should keep
+  # running and `data_loss_total` should stay 0.
+  # ───────────────────────────────────────────────────────────────────
+  chaos-workload:
+    description: "synthetic writer/reader through proxy fleet (chaos verifier)"
+    command: exec ./bin/chaos-workload
+    working_dir: "."
+    is_daemon: false
+    availability:
+      restart: "always"
+    depends_on:
+      compile:
+        condition: process_completed_successfully
+      pgman-proxy-a:
+        condition: process_healthy
+      pgman-proxy-b:
+        condition: process_healthy
+      pgman-proxy-c:
+        condition: process_healthy
+    environment:
+      - "CHAOS_DSN=host=127.0.0.1,127.0.0.1,127.0.0.1 port=16432,16433,16434 user=postgres dbname=postgres sslmode=disable connect_timeout=2"
