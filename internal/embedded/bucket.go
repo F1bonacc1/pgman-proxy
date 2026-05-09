@@ -11,25 +11,82 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// PreCreateClusterKV is the RD-002 fallback path. It pre-creates the
-// JetStream KV bucket that pg-manager's `adapters/nats` uses (for
-// leadership lease + state-store), with the desired Replicas count
-// derived from the FR-011a / RD-004 table.
+// WaitForJetStreamResponsive blocks until the embedded JetStream
+// subsystem can answer a trivial API call (`js.AccountInfo`) — i.e. the
+// meta-cluster Raft node has elected a leader and is serving requests.
+// Necessary because the JS client's internal per-request timeout is
+// only 5 s; without this gate, the first JS RPC issued by
+// pg-manager's NewLeadership (in cluster.BuildHandles) hits that
+// timeout on a fresh cold start before the meta cluster is up.
 //
-// IMPORTANT (Constitution-IV exception logged in plan.md): the bucket
-// name format is replicated here from
+// Each probe attempt has a 3 s deadline; on failure the function backs
+// off `interval` (defaulting to 500 ms) and retries within the parent
+// ctx budget.
+func WaitForJetStreamResponsive(ctx context.Context, conn *nats.Conn, interval time.Duration) error {
+	if conn == nil {
+		return errors.New("WaitForJetStreamResponsive: nats connection is nil")
+	}
+	if interval <= 0 {
+		interval = 500 * time.Millisecond
+	}
+	js, err := jetstream.New(conn)
+	if err != nil {
+		return fmt.Errorf("jetstream context: %w", err)
+	}
+	for {
+		probeCtx, probeCancel := context.WithTimeout(ctx, 3*time.Second)
+		_, err := js.AccountInfo(probeCtx)
+		probeCancel()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+// PreCreateClusterKV ensures the JetStream KV bucket that pg-manager's
+// `adapters/nats` uses (for leadership lease + state-store) exists with
+// the operator-specified Replicas count, BEFORE pg-manager's adapter
+// touches it. pg-manager's ensureBucket creates with the default
+// Replicas=1 if absent; calling this first guarantees the adapter sees
+// an existing bucket with the desired replication factor on its first
+// lookup. RD-002 fallback for the not-yet-upstreamed `WithReplicas(int)`
+// option (T007 of tasks.md); once T007 lands this collapses to a no-op
+// forwarder.
+//
+// Idempotent and safe to call concurrently from every peer:
+//
+//   - Bucket missing → create with Replicas=N. If another peer wins the
+//     create race we get ErrBucketExists / ErrStreamNameAlreadyInUse;
+//     re-fetch and continue (matches pg-manager's upstream race-tolerance
+//     pattern in adapters/nats/bucket.go).
+//   - Bucket present with matching Replicas → no-op.
+//   - Bucket present with smaller Replicas → upgrade via
+//     UpdateKeyValue. Defensive: with WaitForRouteMesh +
+//     WaitForJetStreamResponsive ahead of this call and pg-manager's
+//     ensureBucket only running afterward, this branch is unreachable
+//     in steady state — but it keeps the function safe if call ordering
+//     changes upstream.
+//   - Bucket present with larger Replicas → refuse. Shrinking would
+//     require an operator-driven mass-resync.
+//
+// The caller MUST gate this behind WaitForRouteMesh +
+// WaitForJetStreamResponsive: a peer running alone with no quorate
+// meta cluster cannot place N>1 replicas, leaving a degraded bucket
+// that subsequent peers reject.
+//
+// The bucket name format is replicated from
 // `github.com/f1bonacc1/pg-manager/adapters/nats/bucket.go` —
 // `pgmgr_<sanitized-cluster-id>` with non-[A-Za-z0-9_-] runes mapped
-// to `_`. This is a temporary coupling. When pg-manager exposes a
-// `WithReplicas(int)` adapter option upstream (T007 of tasks.md),
-// this function collapses to a no-op forwarder.
-//
-// The function is idempotent: if the bucket already exists with a
-// compatible configuration, the existing bucket is returned without
-// re-creation. If it exists with the wrong Replicas count, a clear
-// error is returned — the operator must drop the bucket before
-// re-running (this is a one-time bootstrap concern, not a steady-
-// state code path).
+// to `_`. This coupling is the Constitution-IV exception logged in
+// plan.md.
 func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, replicas int) error {
 	if conn == nil {
 		return errors.New("PreCreateClusterKV: nats connection is nil")
@@ -47,52 +104,63 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 	}
 
 	name := bucketName(clusterID)
+	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
-	// Bucket already exists?
-	kv, err := js.KeyValue(ctx, name)
-	if err == nil {
-		// Verify the existing bucket's Replicas matches what we want
-		// to commit to. If it doesn't, the operator must reconcile —
-		// we don't silently mutate an existing bucket's replication
-		// factor (mutation is a mass-resync event).
-		status, err := kv.Status(ctx)
+	kv, err := js.KeyValue(callCtx, name)
+	if err != nil {
+		if !errors.Is(err, jetstream.ErrBucketNotFound) {
+			return fmt.Errorf("look up cluster KV bucket %q: %w", name, err)
+		}
+		kv, err = js.CreateKeyValue(callCtx, jetstream.KeyValueConfig{
+			Bucket:   name,
+			History:  8,
+			Replicas: replicas,
+		})
 		if err != nil {
-			return fmt.Errorf("read existing bucket status: %w", err)
+			if !errors.Is(err, jetstream.ErrBucketExists) && !errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
+				return fmt.Errorf("create cluster KV bucket %q with replicas=%d: %w", name, replicas, err)
+			}
+			// Race lost: another peer created the bucket between our
+			// lookup and create. Re-fetch and verify Replicas.
+			kv, err = js.KeyValue(callCtx, name)
+			if err != nil {
+				return fmt.Errorf("re-fetch cluster KV bucket %q after create-race: %w", name, err)
+			}
 		}
-		if existing := replicasFromStatus(status); existing != replicas {
-			return fmt.Errorf(
-				"cluster KV bucket %q already exists with Replicas=%d, expected %d (FR-011a / RD-004); "+
-					"drop the bucket via the operator's recovery procedure before changing the cluster's declared size",
-				name, existing, replicas,
-			)
-		}
+	}
+
+	status, err := kv.Status(callCtx)
+	if err != nil {
+		return fmt.Errorf("read cluster KV bucket %q status: %w", name, err)
+	}
+	current := status.Config().Replicas
+	if current == replicas {
 		return nil
 	}
-	if !errors.Is(err, jetstream.ErrBucketNotFound) {
-		return fmt.Errorf("look up existing bucket %q: %w", name, err)
+	if current > replicas {
+		return fmt.Errorf(
+			"cluster KV bucket %q has Replicas=%d, target %d (would shrink — FR-011a / RD-004); "+
+				"drop the bucket via the operator's recovery procedure to reduce the cluster's declared size",
+			name, current, replicas,
+		)
 	}
-
-	// Bucket does not exist — create it with the operator-specified
-	// Replicas. History matches the value pg-manager uses today (8) so
-	// the adapter sees an indistinguishable bucket. If pg-manager
-	// later changes its History default, this function MUST be kept
-	// in sync (the coupling that motivates T007's upstream PR).
-	createCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	_, err = js.CreateKeyValue(createCtx, jetstream.KeyValueConfig{
+	if _, err := js.UpdateKeyValue(callCtx, jetstream.KeyValueConfig{
 		Bucket:   name,
 		History:  8,
 		Replicas: replicas,
-	})
-	if err != nil {
-		return fmt.Errorf("create cluster KV bucket %q with replicas=%d: %w", name, replicas, err)
+	}); err != nil {
+		return fmt.Errorf(
+			"upgrade cluster KV bucket %q Replicas %d -> %d: %w",
+			name, current, replicas, err,
+		)
 	}
 	return nil
 }
 
 // bucketName mirrors pg-manager/adapters/nats/bucket.go:bucketName.
 // MUST stay in sync with the upstream until T007's WithReplicas option
-// lands and PreCreateClusterKV is retired.
+// lands and UpgradeBucketReplicas is retired.
 func bucketName(clusterID string) string {
 	var b strings.Builder
 	b.WriteString("pgmgr_")
@@ -108,23 +176,4 @@ func bucketName(clusterID string) string {
 		}
 	}
 	return b.String()
-}
-
-// replicasFromStatus reads the Replicas field out of a KV status.
-// jetstream.KeyValueStatus is an interface; the concrete returned
-// value carries Replicas via the underlying StreamConfig. The
-// function isolates the field access so future API changes only
-// require an update here.
-func replicasFromStatus(status jetstream.KeyValueStatus) int {
-	type replicasReporter interface {
-		Replicas() int
-	}
-	if rr, ok := status.(replicasReporter); ok {
-		return rr.Replicas()
-	}
-	// Fall back to inspecting the raw stream info if the interface
-	// changes shape. Returning 0 here means "unknown" — the caller's
-	// equality check below will then refuse to proceed, which is the
-	// correct conservative behaviour.
-	return 0
 }

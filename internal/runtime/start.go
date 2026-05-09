@@ -102,11 +102,44 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	res.Conn = conn
 	res.Health.SetNATSUp(true)
 
-	// Gate #4c (feature 002 / RD-002 fallback): pre-create the cluster
-	// JetStream KV bucket with the cluster-size-derived Replicas count.
-	// This is the upstream-pg-manager-WithReplicas exception logged in
-	// plan.md Complexity Tracking. When that upstream lands (T007),
-	// this call collapses to a no-op forwarder.
+	// Phase 1 (feature 002): cluster-substrate formation.
+	//
+	// Layered to keep cluster-formation concerns out of pg-manager:
+	//
+	//   1a. Wait for the embedded NATS routes mesh so JetStream
+	//       meta-cluster election has the quorum it needs.
+	//   1b. Wait until the JS subsystem answers a trivial RPC. The JS
+	//       client's internal per-request timeout is 5 s, so without
+	//       this gate the first call inside cluster.BuildHandles
+	//       (NewLeadership → ensureBucket → js.KeyValue) fails-closed
+	//       on a fresh cold start.
+	//   1c. Pre-create the cluster KV bucket with the cluster-size-
+	//       derived Replicas count (FR-011a / RD-004). Race-tolerant:
+	//       all peers call this concurrently, one wins the create, the
+	//       rest re-fetch. Runs before BuildHandles so pg-manager's
+	//       ensureBucket sees an existing correctly-replicated bucket
+	//       and skips the create entirely (which would otherwise have
+	//       defaulted to Replicas=1). Retired by upstream T007 once
+	//       pg-manager exposes WithReplicas(int).
+	//   1d. Build cluster handles (pg-manager NewLeadership, state
+	//       store, event bus). The substrate is now fully formed; any
+	//       transient JS RPC errors during pg-manager bootstrap are
+	//       absorbed by the upstream SingletonClaimRetryPolicy which
+	//       classifies context.DeadlineExceeded as retryable.
+	meshCtx, meshCancel := context.WithTimeout(ctx, 2*time.Minute)
+	if err := embSrv.WaitForRouteMesh(meshCtx, cfg.Cluster.DeclaredSize, 200*time.Millisecond); err != nil {
+		meshCancel()
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: route mesh: %w", err)}
+	}
+	meshCancel()
+
+	jsProbeCtx, jsProbeCancel := context.WithTimeout(ctx, 2*time.Minute)
+	if err := embedded.WaitForJetStreamResponsive(jsProbeCtx, conn, 500*time.Millisecond); err != nil {
+		jsProbeCancel()
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: jetstream not responsive: %w", err)}
+	}
+	jsProbeCancel()
+
 	replicaDecision := embedded.DecideReplicas(cfg.Cluster.DeclaredSize, cfg.Cluster.ReplicationFactorOverride)
 	if replicaDecision.Warning != "" {
 		res.Logger.Warn("embedded_nats.replica_advisory",
@@ -116,20 +149,12 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			pgmanager.Field{Key: "warning", Value: replicaDecision.Warning})
 	}
 	if err := embedded.PreCreateClusterKV(ctx, conn, cfg.Cluster.ID, replicaDecision.Effective()); err != nil {
-		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("pre-create cluster KV: %w", err)}
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: pre-create cluster KV: %w", err)}
 	}
 
-	// Gate #4d (feature 002 / FR-013 / Constitution III): start the
-	// storage-degraded monitor for the embedded NATS JetStream
-	// directory. On detected degradation it emits a structured
-	// `storage_degraded` event AND releases the pg-manager leadership
-	// lease so this peer self-fences. Only relevant in multi-peer
-	// shapes where durability matters; single-peer in-memory mode
-	// returns nil from NewStorageMonitor.
-	// Gate #5: NATS adapters.
 	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger)
 	if err != nil {
-		return res, &StartupError{Code: ExitDeps, Err: err}
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: build handles: %w", err)}
 	}
 	res.Cluster = handles
 
@@ -554,3 +579,4 @@ func appendLines(path, body string) error {
 	_, err = f.WriteString(body)
 	return err
 }
+

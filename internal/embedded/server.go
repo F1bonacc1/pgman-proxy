@@ -147,6 +147,40 @@ func (s *Server) NumRoutes() int {
 	return s.srv.NumRoutes()
 }
 
+// WaitForRouteMesh blocks until at least `expectedPeers - 1` sibling
+// cluster routes have meshed. Trivially returns on single-peer
+// (expectedPeers <= 1). Used as the first phase of cluster formation:
+// once routes are up, JetStream meta-cluster election can complete and
+// pg-manager's Leadership campaign converges on a stable leader.
+func (s *Server) WaitForRouteMesh(ctx context.Context, expectedPeers int, interval time.Duration) error {
+	if s == nil || s.srv == nil {
+		return errors.New("embedded.Server.WaitForRouteMesh: server is not running")
+	}
+	if interval <= 0 {
+		interval = 200 * time.Millisecond
+	}
+	required := 0
+	if expectedPeers > 1 {
+		required = expectedPeers - 1
+	}
+	if s.srv.NumRoutes() >= required {
+		return nil
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for route mesh (have %d, need %d): %w",
+				s.srv.NumRoutes(), required, ctx.Err())
+		case <-t.C:
+			if s.srv.NumRoutes() >= required {
+				return nil
+			}
+		}
+	}
+}
+
 // Shutdown drains the embedded NATS server cleanly. Blocks until the
 // server has released its listeners and goroutines. Idempotent — a
 // second call after a successful shutdown is a no-op.
