@@ -39,6 +39,16 @@ type MetricSet struct {
 	LCMInFlight             *prometheus.GaugeVec
 	LCMAuditEmitFailuresTot *prometheus.CounterVec
 	LCMLeaderRouteTotal     *prometheus.CounterVec
+
+	// Embedded NATS metrics (feature 002 / contracts/observability.md).
+	EmbeddedNATSUp                   prometheus.Gauge
+	EmbeddedNATSRoutesMeshed         prometheus.Gauge
+	EmbeddedNATSReplicasFactor       *prometheus.GaugeVec
+	EmbeddedNATSStorageBytes         prometheus.Gauge
+	EmbeddedNATSStorageDegraded      *prometheus.GaugeVec
+	EmbeddedNATSLifecycleEventsTotal *prometheus.CounterVec
+	EmbeddedNATSRouteAuthFailures    *prometheus.CounterVec
+	EmbeddedNATSReloadOutcomes       *prometheus.CounterVec
 }
 
 // latencyBuckets is the histogram bucket set used for latency-shaped
@@ -143,6 +153,40 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		ConstLabels: constLabels,
 	}, []string{"operation", "disposition"})
 
+	// Embedded NATS metrics (feature 002 / contracts/observability.md).
+	m.EmbeddedNATSUp = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "pgman_proxy_embedded_nats_up", Help: "1 iff the embedded NATS server is in the ready state.",
+		ConstLabels: constLabels,
+	})
+	m.EmbeddedNATSRoutesMeshed = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "pgman_proxy_embedded_nats_routes_meshed", Help: "Currently-meshed sibling cluster-route count (excluding self).",
+		ConstLabels: constLabels,
+	})
+	m.EmbeddedNATSReplicasFactor = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pgman_proxy_embedded_nats_replicas_factor", Help: "Replication factor in effect for the cluster KV bucket (FR-011a).",
+		ConstLabels: constLabels,
+	}, []string{"overridden"})
+	m.EmbeddedNATSStorageBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "pgman_proxy_embedded_nats_storage_bytes", Help: "Bytes used by the embedded NATS JetStream storage directory (0 in in-memory mode).",
+		ConstLabels: constLabels,
+	})
+	m.EmbeddedNATSStorageDegraded = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pgman_proxy_embedded_nats_storage_degraded", Help: "1 iff the embedded NATS server is in a degraded-storage state, with kind label.",
+		ConstLabels: constLabels,
+	}, []string{"kind"})
+	m.EmbeddedNATSLifecycleEventsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pgman_proxy_embedded_nats_lifecycle_events_total", Help: "Tally of embedded NATS lifecycle events.",
+		ConstLabels: constLabels,
+	}, []string{"event"})
+	m.EmbeddedNATSRouteAuthFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pgman_proxy_embedded_nats_route_auth_failures_total", Help: "Inbound cluster-route auth rejections, by kind (RD-001a).",
+		ConstLabels: constLabels,
+	}, []string{"kind"})
+	m.EmbeddedNATSReloadOutcomes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pgman_proxy_embedded_nats_sighup_reload_outcomes_total", Help: "Tally of SIGHUP-driven reload outcomes (FR-014a).",
+		ConstLabels: constLabels,
+	}, []string{"result"})
+
 	reg.MustRegister(
 		m.ConnectionsOpen, m.ConnectionsAcceptedTot, m.ConnectionsClosedTot, m.ConnectionDuration,
 		m.QueryLatency, m.ErrorsTotal,
@@ -150,6 +194,9 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		m.NATSRoundTrip, m.NATSDisconnectsTotal, m.CoordinationEventsTotal,
 		m.LCMRequestsTotal, m.LCMRequestLatency, m.LCMEngineLatency, m.LCMInFlight,
 		m.LCMAuditEmitFailuresTot, m.LCMLeaderRouteTotal,
+		m.EmbeddedNATSUp, m.EmbeddedNATSRoutesMeshed, m.EmbeddedNATSReplicasFactor,
+		m.EmbeddedNATSStorageBytes, m.EmbeddedNATSStorageDegraded,
+		m.EmbeddedNATSLifecycleEventsTotal, m.EmbeddedNATSRouteAuthFailures, m.EmbeddedNATSReloadOutcomes,
 	)
 	return m
 }

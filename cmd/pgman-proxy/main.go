@@ -39,13 +39,25 @@ func main() {
 }
 
 func run(args []string) int {
+	// Subcommand dispatch (feature 002 / RD-003): operator-facing
+	// utilities live as `pgman-proxy <subcmd>` rather than top-level
+	// flags so the flag namespace stays focused on the daemon-mode
+	// invocation. Currently the only registered subcommand is
+	// `cluster-secret-gen`.
+	if len(args) > 0 {
+		switch args[0] {
+		case "cluster-secret-gen":
+			return runClusterSecretGen(args[1:])
+		}
+	}
+
 	fs := flag.NewFlagSet("pgman-proxy", flag.ContinueOnError)
 	var (
 		configPath   string
 		clusterID    string
+		clusterName  string
 		nodeID       string
 		peers        string
-		natsURL      string
 		listenAddr   string
 		switchPolicy string
 		logLevel     string
@@ -55,9 +67,11 @@ func run(args []string) int {
 	)
 	fs.StringVar(&configPath, "config", "", "YAML configuration file path")
 	fs.StringVar(&clusterID, "cluster-id", "", "override cluster.id")
+	fs.StringVar(&clusterName, "cluster-name", "", "override cluster.name (feature 002 — embedded NATS cluster)")
 	fs.StringVar(&nodeID, "node-id", "", "override node.id")
 	fs.StringVar(&peers, "peers", "", "override peers (CSV)")
-	fs.StringVar(&natsURL, "nats", "", "override nats.url")
+	// Feature 002: --nats flag removed; external NATS is no longer
+	// supported. Coordination plane is embedded in-process.
 	fs.StringVar(&listenAddr, "listen", "", "override proxy.listen_addr")
 	fs.StringVar(&switchPolicy, "switch-policy", "", "override proxy.switch_policy (hard_close|drain|pause)")
 	fs.StringVar(&logLevel, "log-level", "", "override obs.log_level (debug|info|warn|error)")
@@ -93,8 +107,8 @@ func run(args []string) int {
 	if peers != "" {
 		flagOverrides["peers"] = peers
 	}
-	if natsURL != "" {
-		flagOverrides["nats"] = natsURL
+	if clusterName != "" {
+		flagOverrides["cluster-name"] = clusterName
 	}
 	if listenAddr != "" {
 		flagOverrides["listen"] = listenAddr
@@ -254,6 +268,17 @@ func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
 		steps = append(steps, runtime.DrainStep{
 			Name: "event-subscription",
 			Stop: func(_ context.Context) error { return sub.Unsubscribe() },
+		})
+	}
+	// Feature 002: embedded NATS server drains LAST. Order matters —
+	// pg-manager adapters must release their leadership lease through
+	// the embedded server before the server exits, otherwise the lease
+	// stays held in the cluster's view until expiry
+	// (contracts/lifecycle.md § Shutdown sequence).
+	if res.Embedded != nil {
+		steps = append(steps, runtime.DrainStep{
+			Name: "embedded-nats",
+			Stop: func(ctx context.Context) error { return res.Embedded.Shutdown(ctx) },
 		})
 	}
 	return steps

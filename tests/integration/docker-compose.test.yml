@@ -20,19 +20,11 @@
 # (self) into a single Go module graph honouring the `replace` directive
 # in pgman-proxy/go.mod.
 
-services:
-  nats:
-    image: nats:2.12-alpine
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "14222:4222"
-      - "18222:8222"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
-      interval: 3s
-      timeout: 2s
-      retries: 10
+# Feature 002: the external `nats` service has been removed. Each peer
+# embeds a NATS server in-process (specs/002-embedded-nats-cluster/).
+# Routes mesh on TCP/6222 between peer containers.
 
+services:
   node-a:
     build:
       context: ../../..
@@ -42,7 +34,9 @@ services:
       PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
       PGMAN_PROXY_NODE_ID: node-a
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats:4222
+      # Feature 002: PGMAN_PROXY_NATS_URL removed (embedded NATS).
+      # Cluster credential and route_peers are configured via
+      # cluster.* keys; integration tests will wire them per scenario.
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
@@ -60,9 +54,6 @@ services:
       # auth in production). The leader's PostInitDB hook applies these.
       PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
       PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
-    depends_on:
-      nats:
-        condition: service_healthy
     ports:
       - "16432:6432"
       - "19090:9090"
@@ -73,7 +64,9 @@ services:
       PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
       PGMAN_PROXY_NODE_ID: node-b
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats:4222
+      # Feature 002: PGMAN_PROXY_NATS_URL removed (embedded NATS).
+      # Cluster credential and route_peers are configured via
+      # cluster.* keys; integration tests will wire them per scenario.
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
@@ -92,8 +85,6 @@ services:
       PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
       PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
     depends_on:
-      nats:
-        condition: service_healthy
       node-a:
         condition: service_started
     ports:
@@ -106,7 +97,9 @@ services:
       PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
       PGMAN_PROXY_NODE_ID: node-c
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats:4222
+      # Feature 002: PGMAN_PROXY_NATS_URL removed (embedded NATS).
+      # Cluster credential and route_peers are configured via
+      # cluster.* keys; integration tests will wire them per scenario.
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
@@ -125,8 +118,6 @@ services:
       PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
       PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
     depends_on:
-      nats:
-        condition: service_healthy
       node-a:
         condition: service_started
     ports:

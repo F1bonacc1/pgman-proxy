@@ -9,7 +9,7 @@ common operator surfaces; tune them to your fleet before enabling.
 | Mode | Unit | Default bind | Restart on PG restart? | Typical hosting |
 |------|------|--------------|------------------------|-----------------|
 | `standalone` | `pgman-proxy.service` | all-interfaces | n/a (no colocated PG) | dedicated VM in front of one PostgreSQL primary |
-| `microservice` | `pgman-proxy.service` (3+ peers) | all-interfaces | n/a | one peer per host, NATS-coordinated |
+| `microservice` | `pgman-proxy.service` (3+ peers) | all-interfaces | n/a | one peer per host, embedded-NATS coordinated (feature 002) |
 | `sidecar` | `pgman-proxy-sidecar.service` | **loopback** | yes — `BindsTo=postgresql.service` | one peer colocated with one PostgreSQL instance |
 
 Mode is selected by the `PGMAN_PROXY_DEPLOYMENT_MODE` env var (or
@@ -28,10 +28,15 @@ Drop a unit-override fragment under `/etc/systemd/system/pgman-proxy.service.d/`
 [Service]
 Environment="PGMAN_PROXY_DEPLOYMENT_MODE=microservice"
 Environment="PGMAN_PROXY_CLUSTER_ID=prod"
+Environment="PGMAN_PROXY_CLUSTER_NAME=pgman-proxy-prod"
+Environment="PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3"
 Environment="PGMAN_PROXY_NODE_ID=node-a"
 Environment="PGMAN_PROXY_PEERS=node-a,node-b,node-c"
-Environment="PGMAN_PROXY_NATS_URL=nats://nats.internal:4222"
-EnvironmentFile=-/etc/pgman-proxy/secrets.env   # holds PGMAN_PROXY_CONTROL_TOKEN, LOCAL_DSN
+Environment="PGMAN_PROXY_CLUSTER_ROUTE_PEERS=node-b.internal:6222,node-c.internal:6222"
+Environment="PGMAN_PROXY_CLUSTER_USERNAME=pgman-proxy-prod"
+Environment="PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_PROXY_CLUSTER_PASSWORD"
+Environment="PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=/var/lib/pgman-proxy/jetstream"
+EnvironmentFile=-/etc/pgman-proxy/secrets.env   # holds PGMAN_PROXY_CLUSTER_PASSWORD, PGMAN_PROXY_CONTROL_TOKEN, LOCAL_DSN
 ```
 
 Reload + enable:
@@ -59,9 +64,14 @@ local Postgres, the sidecar is taken with it. This matches the spec's
 [Service]
 Environment="PGMAN_PROXY_DEPLOYMENT_MODE=sidecar"
 Environment="PGMAN_PROXY_CLUSTER_ID=prod"
+Environment="PGMAN_PROXY_CLUSTER_NAME=pgman-proxy-prod"
+Environment="PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3"
 Environment="PGMAN_PROXY_NODE_ID=node-a"
 Environment="PGMAN_PROXY_PEERS=node-a,node-b,node-c"
-Environment="PGMAN_PROXY_NATS_URL=nats://nats.internal:4222"
+Environment="PGMAN_PROXY_CLUSTER_ROUTE_PEERS=node-b.internal:6222,node-c.internal:6222"
+Environment="PGMAN_PROXY_CLUSTER_USERNAME=pgman-proxy-prod"
+Environment="PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_PROXY_CLUSTER_PASSWORD"
+Environment="PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=/var/lib/pgman-proxy/jetstream"
 Environment="PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/17/main"
 Environment="PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/17/bin"
 EnvironmentFile=-/etc/pgman-proxy/secrets.env
@@ -74,9 +84,11 @@ addresses pass through unchanged.
 ## Restart semantics
 
 `pgman-proxy` stores no local state that must persist across restarts.
-A peer that crashes, gets killed, or is replaced rejoins via the NATS
-state store; its cluster membership is canonical there, not on disk
-(see `contracts/lifecycle.md` § Restart-in-place semantics).
+A peer that crashes, gets killed, or is replaced rejoins via the
+embedded-NATS cluster (feature 002); its cluster membership is
+canonical in the JetStream KV bucket replicated across peers, not
+locked to a single peer's disk (see `contracts/lifecycle.md` §
+Restart-in-place semantics).
 
 Common operator-facing exit codes (`contracts/lifecycle.md`):
 
@@ -84,7 +96,7 @@ Common operator-facing exit codes (`contracts/lifecycle.md`):
 |------|------|----------|-------|
 | 0 | `EX_OK` | n/a | clean shutdown after SIGTERM |
 | 74 | `EX_OBS` | yes | metrics port busy at startup |
-| 75 | `EX_DEPS` | yes | NATS unreachable / adapter init failed |
+| 75 | `EX_DEPS` | yes | embedded NATS startup failed / pg-manager adapter init failed |
 | 76 | `EX_LISTEN` | yes | data-plane port busy |
 | 77 | `EX_SINGLETON` | yes (rare) | singleton-claim retry budget exhausted |
 | 78 | `EX_CONFIG` | **no** | configuration error — operator MUST fix |

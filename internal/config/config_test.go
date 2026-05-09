@@ -18,7 +18,11 @@ func validBaseConfig() Config {
 	cfg.Cluster.ID = "demo"
 	cfg.Node.ID = "node-a"
 	cfg.Peers = []string{"node-a", "node-b", "node-c"}
-	cfg.NATS.URL = "nats://nats:4222"
+	// Feature 002: nats.url is REJECTED (not required). Use the
+	// loopback-only routes listener so the fixture exercises the
+	// embedded-NATS validation path without triggering FR-009/FR-010b.
+	cfg.Cluster.DeclaredSize = 1
+	cfg.Cluster.RoutesListen = RoutesListenCfg{Host: "127.0.0.1", Port: 6222, Enabled: false}
 	cfg.Proxy.ListenAddr = "0.0.0.0:6432"
 	cfg.Postgres.BinDir = "/usr/lib/postgresql/17/bin"
 	cfg.Postgres.DataDir = "/var/lib/postgresql/data"
@@ -43,7 +47,8 @@ func TestValidate_RequiredKeysMissing(t *testing.T) {
 		{"node.id missing", func(c *Config) { c.Node.ID = "" }, []string{"node.id is required"}},
 		{"peers empty", func(c *Config) { c.Peers = nil }, []string{"peers must contain at least one entry"}},
 		{"node.id not in peers", func(c *Config) { c.Peers = []string{"node-x"} }, []string{`peers must contain node.id "node-a"`}},
-		{"nats.url missing", func(c *Config) { c.NATS.URL = "" }, []string{"nats.url is required"}},
+		{"nats.url present (legacy 001 config) → fail-closed (FR-002)", func(c *Config) { c.NATS.URL = "nats://legacy:4222" }, []string{"nats.url is no longer supported"}},
+		{"nats.creds_file present (legacy 001 config) → fail-closed", func(c *Config) { c.NATS.CredsFile = "/tmp/old.creds" }, []string{"nats.creds_file"}},
 		{"proxy.listen_addr missing", func(c *Config) { c.Proxy.ListenAddr = "" }, []string{"proxy.listen_addr is required"}},
 		{"postgres.bin_dir missing", func(c *Config) { c.Postgres.BinDir = "" }, []string{"postgres.bin_dir is required"}},
 		{"postgres.data_dir missing", func(c *Config) { c.Postgres.DataDir = "" }, []string{"postgres.data_dir is required"}},
@@ -158,11 +163,17 @@ func TestValidate_ControlPlaneTLS_NonLoopbackRequiresTLSorAck(t *testing.T) {
 }
 
 func TestLoad_EnvOverridesYAML(t *testing.T) {
+	// Feature 002: the legacy `nats:` YAML block is fail-closed at
+	// Validate(); the loader still tolerates parsing it (so the
+	// migration error fires later), but a passing Load() doesn't
+	// require it. Use cluster.name as the YAML-survives-when-env-absent
+	// witness instead.
 	yaml := `
-cluster: { id: from-yaml }
+cluster:
+  id: from-yaml
+  name: from-yaml-cluster
 node: { id: node-a }
 peers: [node-a]
-nats: { url: nats://from-yaml:4222 }
 proxy: { listen_addr: 0.0.0.0:6432 }
 postgres:
   bin_dir: /usr/lib/postgresql/17/bin
@@ -188,15 +199,18 @@ control:
 	if cfg.Cluster.ID != "from-env" {
 		t.Errorf("env should win over yaml; got %q", cfg.Cluster.ID)
 	}
-	if cfg.NATS.URL != "nats://from-yaml:4222" {
-		t.Errorf("yaml value should survive when env absent; got %q", cfg.NATS.URL)
+	if cfg.Cluster.Name != "from-yaml-cluster" {
+		t.Errorf("yaml value should survive when env absent; got %q", cfg.Cluster.Name)
 	}
 }
 
 func TestLoad_BackwardCompatAliases(t *testing.T) {
 	cfg, src, err := Load(LoadOptions{
 		Env: envFn(map[string]string{
-			"NATS_URL":     "nats://alias:4222",
+			// Feature 002: NATS_URL alias removed; legacy YAML key
+			// triggers fail-closed via Validate(). The remaining
+			// aliases (CLUSTER_ID/NODE_ID/PEERS/PROXY_LISTEN) carry
+			// forward unchanged.
 			"CLUSTER_ID":   "alias-cluster",
 			"NODE_ID":      "node-a",
 			"PEERS":        "node-a,node-b",
@@ -206,35 +220,34 @@ func TestLoad_BackwardCompatAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.NATS.URL != "nats://alias:4222" {
-		t.Errorf("NATS_URL alias not honoured; got %q", cfg.NATS.URL)
-	}
 	if cfg.Cluster.ID != "alias-cluster" {
 		t.Errorf("CLUSTER_ID alias not honoured; got %q", cfg.Cluster.ID)
 	}
 	// Source should record the alias usage.
 	found := false
 	for _, s := range src.EnvPresent {
-		if strings.Contains(s, "NATS_URL") {
+		if strings.Contains(s, "CLUSTER_ID") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("Sources should record NATS_URL alias; got %v", src.EnvPresent)
+		t.Errorf("Sources should record CLUSTER_ID alias; got %v", src.EnvPresent)
 	}
 }
 
 func TestLoad_FlagsOverrideEnv(t *testing.T) {
+	// Feature 002: --nats flag removed; cluster-id is the closest
+	// remaining override-driven key.
 	cfg, _, err := Load(LoadOptions{
-		Env:   envFn(map[string]string{"PGMAN_PROXY_NATS_URL": "nats://env:4222"}),
-		Flags: map[string]string{"nats": "nats://flag:4222"},
+		Env:   envFn(map[string]string{"PGMAN_PROXY_CLUSTER_ID": "from-env"}),
+		Flags: map[string]string{"cluster-id": "from-flag"},
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.NATS.URL != "nats://flag:4222" {
-		t.Errorf("flag should win over env; got %q", cfg.NATS.URL)
+	if cfg.Cluster.ID != "from-flag" {
+		t.Errorf("flag should win over env; got %q", cfg.Cluster.ID)
 	}
 }
 

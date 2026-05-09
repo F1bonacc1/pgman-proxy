@@ -49,6 +49,14 @@ type Server struct {
 	logger  *obs.Logger
 	metrics *obs.MetricSet
 
+	// Feature 002: optional snapshot of the embedded NATS server
+	// surface. When set, the Status handler augments the response with
+	// a `cluster.embedded_nats` sub-block. Kept as a callback (not an
+	// imported `*embedded.Server`) so the control package doesn't take
+	// a hard dependency on internal/embedded in single-peer test paths
+	// that don't actually boot the embedded server.
+	embeddedSnapshot func() any
+
 	clusterID string
 	nodeID    string
 
@@ -72,6 +80,14 @@ type Config struct {
 	Logger  *obs.Logger
 	Metrics *obs.MetricSet
 
+	// EmbeddedSnapshot is an optional callback that returns the
+	// current embedded NATS server's status snapshot (feature 002 /
+	// contracts/observability.md § Status response). The Status
+	// handler augments the response with `cluster.embedded_nats` when
+	// this is non-nil. Pass `(*embedded.Server).Snapshot` from
+	// runtime/start.go.
+	EmbeddedSnapshot func() any
+
 	ClusterID string
 	NodeID    string
 }
@@ -81,17 +97,18 @@ type Config struct {
 // validator's job (config.Validate).
 func NewServer(cfg Config) (*Server, error) {
 	s := &Server{
-		addr:        cfg.Addr,
-		plainAck:    cfg.PlaintextExplicitAck,
-		auth:        cfg.Auth,
-		audit:       cfg.Audit,
-		router:      cfg.Router,
-		engine:      cfg.Engine,
-		logger:      cfg.Logger,
-		metrics:     cfg.Metrics,
-		clusterID:   cfg.ClusterID,
-		nodeID:      cfg.NodeID,
-		ulidEntropy: newULIDEntropy(),
+		addr:             cfg.Addr,
+		plainAck:         cfg.PlaintextExplicitAck,
+		auth:             cfg.Auth,
+		audit:            cfg.Audit,
+		router:           cfg.Router,
+		engine:           cfg.Engine,
+		logger:           cfg.Logger,
+		metrics:          cfg.Metrics,
+		embeddedSnapshot: cfg.EmbeddedSnapshot,
+		clusterID:        cfg.ClusterID,
+		nodeID:           cfg.NodeID,
+		ulidEntropy:      newULIDEntropy(),
 	}
 	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)

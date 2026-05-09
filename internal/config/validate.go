@@ -86,12 +86,23 @@ func Validate(cfg Config) error {
 		}
 	}
 
-	if cfg.NATS.URL == "" {
-		m.Add(errors.New("nats.url is required"))
+	// Feature 002 (FR-002, SC-009): the external-NATS path established by
+	// 001 is removed. Any of the legacy `nats.*` keys present in config
+	// is rejected at validation with a migration-pointing error so the
+	// breaking change is loud, not silent.
+	if cfg.NATS.URL != "" {
+		m.Add(errors.New("nats.url is no longer supported (feature 002 removed external NATS); see cluster.* for the embedded coordination plane and the migration guide in specs/002-embedded-nats-cluster/quickstart.md"))
+	}
+	if cfg.NATS.CredsFile != "" || cfg.NATS.TokenEnv != "" {
+		m.Add(errors.New("nats.creds_file / nats.token_env are no longer supported (feature 002); cluster credentials live under cluster.username + cluster.password (RD-001a)"))
 	}
 	if cfg.NATS.ConnectTimeout <= 0 {
-		m.Add(errors.New("nats.connect_timeout must be > 0"))
+		m.Add(errors.New("nats.connect_timeout must be > 0 (used for the loopback dial into the embedded NATS server)"))
 	}
+
+	// Feature 002 cluster validation rules
+	// (specs/002-embedded-nats-cluster/contracts/config.md § Validation matrix).
+	validateCluster(&cfg.Cluster, m)
 
 	if cfg.Proxy.ListenAddr == "" {
 		m.Add(errors.New("proxy.listen_addr is required"))
@@ -152,6 +163,79 @@ func Validate(cfg Config) error {
 	}
 
 	return m.OrNil()
+}
+
+// validateCluster runs the embedded-NATS validation rules from
+// specs/002-embedded-nats-cluster/contracts/config.md § Validation
+// matrix. Append-only: each violation is added to m so operators see
+// every problem at once.
+func validateCluster(c *ClusterConfig, m *MultiError) {
+	if c.Name == "" {
+		// Default the cluster name to the cluster ID when unset; this
+		// matches the conventional operator workflow (one cluster per
+		// pgman-proxy deployment) and keeps the cluster-name guard
+		// useful without forcing a duplicate identifier.
+		c.Name = c.ID
+	}
+	if c.DeclaredSize < 1 {
+		m.Add(fmt.Errorf("cluster.declared_size must be >= 1, got %d (FR-011a)", c.DeclaredSize))
+	}
+
+	// Multi-peer + empty route_peers → fail-closed (FR-008).
+	if c.DeclaredSize > 1 && len(c.RoutePeers) == 0 {
+		m.Add(errors.New("cluster.route_peers must contain at least one entry when cluster.declared_size > 1 (FR-008)"))
+	}
+
+	// Single-peer + non-empty route_peers → warn (handled at startup,
+	// not here — validation is fail-closed only).
+
+	// JetStream durable storage required for HA (FR-011).
+	if c.DeclaredSize >= 2 && c.JetStreamDir == "" {
+		m.Add(errors.New("cluster.jetstream_dir is required when cluster.declared_size >= 2 (FR-011)"))
+	}
+
+	// Routes-listener gating (FR-009 + FR-010b).
+	// Single-peer (declared_size==1) implicitly disables the routes
+	// listener — it has no peers to mesh with. This avoids forcing
+	// operators to set cluster.routes_listen.enabled=false explicitly
+	// for the single-peer / dev path.
+	routesEnabled := c.RoutesListen.Enabled && c.DeclaredSize > 1
+	if c.DeclaredSize > 1 && !c.RoutesListen.Enabled {
+		m.Add(errors.New("cluster.routes_listen.enabled MUST be true when cluster.declared_size > 1"))
+	}
+	if routesEnabled {
+		routesAddr := fmt.Sprintf("%s:%d", c.RoutesListen.Host, c.RoutesListen.Port)
+		isLoopback, err := isLoopbackAddr(routesAddr)
+		if err != nil {
+			m.Add(fmt.Errorf("cluster.routes_listen %q is not a valid host:port: %w", routesAddr, err))
+		} else if !isLoopback {
+			// Non-loopback bind: cluster credential required (FR-009).
+			if c.Username == "" {
+				m.Add(errors.New("cluster.username is required when cluster.routes_listen is non-loopback (FR-009 / RD-001a)"))
+			}
+			if c.PasswordEnv == "" && c.PasswordFile == "" {
+				m.Add(errors.New("cluster.password_env or cluster.password_file is required when cluster.routes_listen is non-loopback (FR-010 / RD-001a)"))
+			}
+			// FR-010b: TLS material required unless plaintext_explicit_ack=true.
+			tlsConfigured := c.TLS.CertFile != "" && c.TLS.KeyFile != ""
+			if !tlsConfigured && !c.TLS.PlaintextExplicitAck {
+				m.Add(errors.New("cluster-routes plaintext bind on non-loopback rejected without cluster.tls.plaintext_explicit_ack=true (FR-010b)"))
+			}
+			if (c.TLS.CertFile == "") != (c.TLS.KeyFile == "") {
+				m.Add(errors.New("cluster.tls.cert_file and cluster.tls.key_file must both be set or both be empty (FR-010b)"))
+			}
+		}
+	}
+
+	// Replication-factor override audit (FR-011a). Just record that
+	// it's set; the actual override-vs-derived warning is emitted at
+	// startup so operators see it on every boot.
+	// (No fail-closed here.)
+
+	// Mutually exclusive: env vs file for password.
+	if c.PasswordEnv != "" && c.PasswordFile != "" {
+		m.Add(errors.New("cluster.password_env and cluster.password_file are mutually exclusive (FR-010)"))
+	}
 }
 
 func validSwitchPolicy(s string) bool {

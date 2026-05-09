@@ -17,6 +17,7 @@ import (
 	"github.com/f1bonacc1/pgman-proxy/internal/cluster"
 	"github.com/f1bonacc1/pgman-proxy/internal/config"
 	"github.com/f1bonacc1/pgman-proxy/internal/control"
+	"github.com/f1bonacc1/pgman-proxy/internal/embedded"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
@@ -28,6 +29,7 @@ type StartupResult struct {
 	Metrics  *obs.MetricSet
 	Health   *obs.Health
 	ObsSrv   *obs.Server
+	Embedded *embedded.Server // feature 002: in-process NATS server (replaces external NATS)
 	Cluster  *cluster.Handles
 	Manager  *manager.Manager
 	Conn     *nats.Conn
@@ -82,20 +84,77 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		}
 	}()
 
-	// Gate #4: NATS connect.
-	conn, err := cluster.Connect(ctx, cfg.NATS, cfg.Node.ID, res.Logger)
+	// Gate #4 (feature 002): boot the embedded NATS server. Replaces
+	// the 001 external-NATS dial; the in-process pg-manager adapters
+	// dial the loopback URL the embedded server reports as ready.
+	embSrv, embErr := bootEmbeddedNATS(ctx, cfg, res.Logger)
+	if embErr != nil {
+		return res, embErr
+	}
+	res.Embedded = embSrv
+
+	// Gate #4b (feature 002): in-process pg-manager adapter dials the
+	// embedded server's loopback client URL.
+	conn, err := cluster.Connect(ctx, embSrv.ClientURL(), cfg.NATS, cfg.Node.ID, res.Logger)
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: err}
 	}
 	res.Conn = conn
 	res.Health.SetNATSUp(true)
 
+	// Gate #4c (feature 002 / RD-002 fallback): pre-create the cluster
+	// JetStream KV bucket with the cluster-size-derived Replicas count.
+	// This is the upstream-pg-manager-WithReplicas exception logged in
+	// plan.md Complexity Tracking. When that upstream lands (T007),
+	// this call collapses to a no-op forwarder.
+	replicaDecision := embedded.DecideReplicas(cfg.Cluster.DeclaredSize, cfg.Cluster.ReplicationFactorOverride)
+	if replicaDecision.Warning != "" {
+		res.Logger.Warn("embedded_nats.replica_advisory",
+			pgmanager.Field{Key: "declared_size", Value: replicaDecision.DeclaredSize},
+			pgmanager.Field{Key: "replicas", Value: replicaDecision.Effective()},
+			pgmanager.Field{Key: "overridden", Value: replicaDecision.Overridden()},
+			pgmanager.Field{Key: "warning", Value: replicaDecision.Warning})
+	}
+	if err := embedded.PreCreateClusterKV(ctx, conn, cfg.Cluster.ID, replicaDecision.Effective()); err != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("pre-create cluster KV: %w", err)}
+	}
+
+	// Gate #4d (feature 002 / FR-013 / Constitution III): start the
+	// storage-degraded monitor for the embedded NATS JetStream
+	// directory. On detected degradation it emits a structured
+	// `storage_degraded` event AND releases the pg-manager leadership
+	// lease so this peer self-fences. Only relevant in multi-peer
+	// shapes where durability matters; single-peer in-memory mode
+	// returns nil from NewStorageMonitor.
 	// Gate #5: NATS adapters.
 	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger)
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: err}
 	}
 	res.Cluster = handles
+
+	// Now that the leadership handle exists, wire the storage monitor
+	// (the fence callback references it).
+	storageMon := embedded.NewStorageMonitor(
+		res.Embedded,
+		embedded.StorageMonitorOptions{Path: cfg.Cluster.JetStreamDir},
+		func(_ context.Context, kind embedded.StorageDegradedKind, path string, _ error) {
+			res.Logger.Error("embedded_nats.self_fencing_on_storage_degraded",
+				pgmanager.Field{Key: "kind", Value: string(kind)},
+				pgmanager.Field{Key: "path", Value: path})
+			if res.Cluster != nil && res.Cluster.Leadership != nil {
+				res.Cluster.Leadership.Close()
+			}
+		},
+	)
+	storageMon.Start(ctx)
+
+	// Feature 002 (T025 / contracts/observability.md): poll the
+	// embedded server's Routez snapshot every 2 s and emit
+	// `embedded_nats.route_up` / `route_down` events on transitions.
+	// Per-peer audit identity comes from the sibling's RemoteName,
+	// which is the sibling pgman-proxy node ID (RD-001a).
+	embedded.NewRouteWatcher(res.Embedded, 0).Start(ctx)
 
 	// Subscribe to pg-manager coordination events (FR-006).
 	subs, err := cluster.SubscribeCoordinationEvents(conn, cfg.Cluster.ID, res.Logger, res.Metrics)
@@ -189,8 +248,11 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			Engine:               m,
 			Logger:               res.Logger,
 			Metrics:              res.Metrics,
-			ClusterID:            cfg.Cluster.ID,
-			NodeID:               cfg.Node.ID,
+			// Feature 002: surface the embedded-NATS snapshot under
+			// `cluster.embedded_nats` in the Status response.
+			EmbeddedSnapshot: func() any { return res.Embedded.Snapshot() },
+			ClusterID:        cfg.Cluster.ID,
+			NodeID:           cfg.Node.ID,
 		})
 		if err != nil {
 			return res, &StartupError{Code: ExitControl, Err: err}
@@ -332,6 +394,116 @@ func parseSwitchPolicy(s string) pgmanager.SwitchPolicy {
 // default startup-gate-#4 budget without round-tripping through
 // config.Defaults().
 const ConnectTimeoutDefault = 10 * time.Second
+
+// bootEmbeddedNATS resolves the cluster credential, builds the
+// embedded NATS server's options, and waits for it to reach the ready
+// state — feature 002 startup Gate #4. On any failure the caller is
+// expected to map the StartupError code (ExitConfig for credential /
+// option-build issues, ExitDeps for ready-timeout) per
+// contracts/lifecycle.md.
+func bootEmbeddedNATS(ctx context.Context, cfg config.Config, logger *obs.Logger) (*embedded.Server, *StartupError) {
+	cc := cfg.Cluster
+
+	// Resolve the cluster password via SecretRef (env / file). The
+	// username is non-secret and may live inline in cfg.Cluster.Username.
+	password, err := resolveClusterPassword(cc)
+	if err != nil {
+		return nil, &StartupError{Code: ExitConfig, Err: err}
+	}
+
+	// Single-peer convenience: if no credential is configured AND the
+	// declared cluster size is 1 with routes_listen disabled, run
+	// without cluster auth (loopback-only single-peer dev mode).
+	var cred embedded.ClusterCredential
+	if cc.Username != "" || password != "" {
+		cred, err = embedded.LoadClusterCredential([]byte(cc.Username), []byte(password))
+		if err != nil {
+			return nil, &StartupError{Code: ExitConfig, Err: fmt.Errorf("cluster credential: %w", err)}
+		}
+	}
+
+	// Single-peer (declared_size==1) implicitly disables the routes
+	// listener (matches validate.go's gating). This avoids opening a
+	// routes port on a peer that has no siblings to mesh with.
+	routesEnabled := cc.RoutesListen.Enabled && cc.DeclaredSize > 1
+
+	in := embedded.OptionsInput{
+		NodeID:               cfg.Node.ID,
+		ClusterName:          firstNonEmpty(cc.Name, cc.ID),
+		DeclaredSize:         cc.DeclaredSize,
+		ClientHost:           cc.ClientListen.Host,
+		ClientPort:           cc.ClientListen.Port,
+		RoutesEnabled:        routesEnabled,
+		RoutesHost:           cc.RoutesListen.Host,
+		RoutesPort:           cc.RoutesListen.Port,
+		RoutePeers:           cc.RoutePeers,
+		Credential:           cred,
+		TLSCertFile:          cc.TLS.CertFile,
+		TLSKeyFile:           cc.TLS.KeyFile,
+		TLSCAFile:            cc.TLS.CAFile,
+		PlaintextExplicitAck: cc.TLS.PlaintextExplicitAck,
+		JetStreamDir:         cc.JetStreamDir,
+	}
+
+	opts, err := embedded.BuildOptions(in)
+	if err != nil {
+		return nil, &StartupError{Code: ExitConfig, Err: fmt.Errorf("build embedded NATS options: %w", err)}
+	}
+
+	emit := func(kind embedded.LifecycleEventKind, fields map[string]any) {
+		// Translate the lifecycle event into a structured log entry.
+		f := make([]pgmanager.Field, 0, len(fields)+1)
+		f = append(f, pgmanager.Field{Key: "event", Value: string(kind)})
+		for k, v := range fields {
+			f = append(f, pgmanager.Field{Key: k, Value: v})
+		}
+		logger.Info(string(kind), f...)
+	}
+
+	srv, err := embedded.NewServer(opts, cfg.Node.ID, cfg.Cluster.ID, emit)
+	if err != nil {
+		return nil, &StartupError{Code: ExitConfig, Err: fmt.Errorf("embedded.NewServer: %w", err)}
+	}
+
+	if err := srv.Start(ctx, cfg.NATS.ConnectTimeout); err != nil {
+		return nil, &StartupError{Code: ExitDeps, Err: fmt.Errorf("embedded NATS startup: %w", err)}
+	}
+	return srv, nil
+}
+
+// resolveClusterPassword reads the cluster password from its
+// configured SecretRef (env or file). Returns "" if neither source is
+// configured — the caller decides whether that's permissible (single-
+// peer dev mode is; multi-peer is rejected at validation).
+func resolveClusterPassword(cc config.ClusterConfig) (string, error) {
+	if cc.PasswordEnv != "" {
+		v := os.Getenv(cc.PasswordEnv)
+		if v == "" {
+			return "", fmt.Errorf("cluster.password_env=%q resolves to an empty string (FR-010)", cc.PasswordEnv)
+		}
+		return v, nil
+	}
+	if cc.PasswordFile != "" {
+		data, err := os.ReadFile(cc.PasswordFile)
+		if err != nil {
+			return "", fmt.Errorf("read cluster.password_file %q: %w", cc.PasswordFile, err)
+		}
+		// Trim trailing newline that secret-managers commonly add.
+		v := strings.TrimRight(string(data), "\r\n ")
+		if v == "" {
+			return "", fmt.Errorf("cluster.password_file %q is empty after trimming", cc.PasswordFile)
+		}
+		return v, nil
+	}
+	return "", nil
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
 
 // postInitDBHook returns the pg-manager PostInitDB callback that
 // patches postgresql.conf and pg_hba.conf with operator-supplied lines

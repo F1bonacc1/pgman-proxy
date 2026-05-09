@@ -37,7 +37,10 @@ services:
       PGMAN_PROXY_CLUSTER_ID: demo
       PGMAN_PROXY_NODE_ID: node-a
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats.internal:4222
+      # Feature 002: external NATS removed. Embedded coordination plane
+      # is in-process; cluster credential and route_peers are configured
+      # via cluster.* keys in the sibling pgman-proxy config.yaml.
+      PGMAN_PROXY_CLUSTER_DECLARED_SIZE: "3"
       # Listener addresses deliberately unset — sidecar mode rewrites
       # the documented defaults to 127.0.0.1:* automatically.
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin

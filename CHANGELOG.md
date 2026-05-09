@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — milestone 002 (embedded NATS cluster) — IN PROGRESS
+
+- **Breaking**: external NATS dependency removed. Every `pgman-proxy`
+  peer now embeds a NATS server in-process via the upstream
+  `github.com/nats-io/nats-server/v2` Go module. The peers mesh into a
+  NATS cluster via NATS routes (TCP/6222 by default). 001's `nats.url`
+  / `nats.creds_file` / `nats.token_env` configuration keys are
+  fail-closed at validation with a migration-pointing error
+  (FR-002, SC-009). The `--nats` CLI flag and the `NATS_URL` env-var
+  alias are removed.
+- **Cluster credential model** (RD-001a, discovered during
+  /speckit-implement Phase 2): NATS server v2.14 cluster routes only
+  support a single shared username/password pair, not per-peer NKey
+  credentials as originally clarified at /speckit-clarify time. The
+  spec was amended; the wire-level credential is shared, per-peer
+  identity in audit logs comes from the NATS server-name field
+  (= pgman-proxy node ID).
+- **Constitution v1.1.0 → v1.2.0** (MINOR): the *Architecture
+  Overview* and *Topology & Dependencies* subsection of *Additional
+  Constraints* were broadened to describe NATS as embedded rather
+  than operator-provisioned. No principle removed or redefined.
+- **JetStream replication factor** auto-derived from cluster size
+  (FR-011a / RD-004): R=1 / 2 / 3 for declared sizes 1 / 2 / ≥3,
+  capped at 3. Operator override requires a named, audit-logged
+  opt-in.
+- **SIGHUP hot-reload** of two surfaces only (FR-014a): peer-routes
+  list and cluster password. Every other config key is startup-only.
+  `ExecReload=/bin/kill -HUP $MAINPID` added to the systemd unit.
+- **New CLI subcommand** `pgman-proxy cluster-secret-gen` produces a
+  base32-encoded 32-byte cryptographically random cluster password.
+  Operators do not need any NATS-ecosystem CLI tool to run
+  `pgman-proxy` (FR-014).
+
 ### Added — milestone 001 (active/active proxy + LCM control plane)
 
 #### Data-plane proxy (US1)

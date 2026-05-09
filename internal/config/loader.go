@@ -68,10 +68,17 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 	passthrough := map[string]func(string){
 		"PGMAN_PROXY_DEPLOYMENT_MODE":           func(v string) { cfg.DeploymentMode = v },
 		"PGMAN_PROXY_CLUSTER_ID":                func(v string) { cfg.Cluster.ID = v },
+		"PGMAN_PROXY_CLUSTER_NAME":              func(v string) { cfg.Cluster.Name = v },
+		"PGMAN_PROXY_CLUSTER_USERNAME":          func(v string) { cfg.Cluster.Username = v },
+		"PGMAN_PROXY_CLUSTER_PASSWORD_ENV":      func(v string) { cfg.Cluster.PasswordEnv = v },
+		"PGMAN_PROXY_CLUSTER_PASSWORD_FILE":     func(v string) { cfg.Cluster.PasswordFile = v },
+		"PGMAN_PROXY_CLUSTER_JETSTREAM_DIR":     func(v string) { cfg.Cluster.JetStreamDir = v },
+		"PGMAN_PROXY_CLUSTER_TLS_CERT_FILE":     func(v string) { cfg.Cluster.TLS.CertFile = v },
+		"PGMAN_PROXY_CLUSTER_TLS_KEY_FILE":      func(v string) { cfg.Cluster.TLS.KeyFile = v },
+		"PGMAN_PROXY_CLUSTER_TLS_CA_FILE":       func(v string) { cfg.Cluster.TLS.CAFile = v },
+		"PGMAN_PROXY_CLUSTER_ROUTE_PEERS":       func(v string) { cfg.Cluster.RoutePeers = parseCSV(v) },
 		"PGMAN_PROXY_NODE_ID":                   func(v string) { cfg.Node.ID = v },
 		"PGMAN_PROXY_PEERS":                     func(v string) { cfg.Peers = parseCSV(v) },
-		"PGMAN_PROXY_NATS_URL":                  func(v string) { cfg.NATS.URL = v },
-		"PGMAN_PROXY_NATS_CREDS_FILE":           func(v string) { cfg.NATS.CredsFile = v },
 		"PGMAN_PROXY_PROXY_LISTEN_ADDR":         func(v string) { cfg.Proxy.ListenAddr = v },
 		"PGMAN_PROXY_PROXY_SWITCH_POLICY":       func(v string) { cfg.Proxy.SwitchPolicy = v },
 		"PGMAN_PROXY_POSTGRES_BIN_DIR":          func(v string) { cfg.Postgres.BinDir = v },
@@ -91,9 +98,16 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		"PGMAN_PROXY_CONTROL_TLS_KEY_FILE":      func(v string) { cfg.Control.TLS.KeyFile = v },
 	}
 	parsed := map[string]func(string) error{
+		"PGMAN_PROXY_CLUSTER_DECLARED_SIZE":               intSet(&cfg.Cluster.DeclaredSize),
+		"PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT":          intSet(&cfg.Cluster.ClientListen.Port),
+		"PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT":          intSet(&cfg.Cluster.RoutesListen.Port),
+		"PGMAN_PROXY_CLUSTER_REPLICATION_FACTOR_OVERRIDE": intSet(&cfg.Cluster.ReplicationFactorOverride),
+		"PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK":  boolSet(&cfg.Cluster.TLS.PlaintextExplicitAck),
+		// NATS timing knobs are retained for the loopback dial; the
+		// URL/CredsFile/TokenEnv fields are no longer accepted from
+		// any source (validation rejects them with a migration error).
 		"PGMAN_PROXY_NATS_CONNECT_TIMEOUT":               durSet(&cfg.NATS.ConnectTimeout),
 		"PGMAN_PROXY_NATS_RECONNECT_WAIT":                durSet(&cfg.NATS.ReconnectWait),
-		"PGMAN_PROXY_NATS_MAX_RECONNECTS":                intSet(&cfg.NATS.MaxReconnects),
 		"PGMAN_PROXY_PROXY_DIAL_TIMEOUT":                 durSet(&cfg.Proxy.DialTimeout),
 		"PGMAN_PROXY_POSTGRES_PORT":                      intSet(&cfg.Postgres.Port),
 		"PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK":  boolSet(&cfg.Postgres.TLSDisableExplicitAck),
@@ -119,12 +133,16 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 	}
 
 	// Backward-compatible aliases (per contracts/config.md). Canonical wins.
+	// Feature 002: NATS_URL alias removed — external NATS is no longer
+	// supported. Setting NATS_URL no longer routes anywhere; if a legacy
+	// deployment script exports it, validation will not see it (the
+	// config never resolves it) so the legacy YAML key is the only way
+	// the migration error fires.
 	aliases := []struct {
 		envKey string
 		canon  string
 		set    func(string)
 	}{
-		{"NATS_URL", "PGMAN_PROXY_NATS_URL", func(v string) { cfg.NATS.URL = v }},
 		{"CLUSTER_ID", "PGMAN_PROXY_CLUSTER_ID", func(v string) { cfg.Cluster.ID = v }},
 		{"NODE_ID", "PGMAN_PROXY_NODE_ID", func(v string) { cfg.Node.ID = v }},
 		{"PEERS", "PGMAN_PROXY_PEERS", func(v string) { cfg.Peers = parseCSV(v) }},
@@ -158,10 +176,11 @@ func applyFlags(cfg *Config, src *Sources, flags map[string]string) error {
 		return nil
 	}
 	bind := map[string]func(string){
-		"cluster-id":    func(v string) { cfg.Cluster.ID = v },
-		"node-id":       func(v string) { cfg.Node.ID = v },
-		"peers":         func(v string) { cfg.Peers = parseCSV(v) },
-		"nats":          func(v string) { cfg.NATS.URL = v },
+		"cluster-id":   func(v string) { cfg.Cluster.ID = v },
+		"cluster-name": func(v string) { cfg.Cluster.Name = v },
+		"node-id":      func(v string) { cfg.Node.ID = v },
+		"peers":        func(v string) { cfg.Peers = parseCSV(v) },
+		// Feature 002: --nats flag removed (external NATS retired).
 		"listen":        func(v string) { cfg.Proxy.ListenAddr = v },
 		"switch-policy": func(v string) { cfg.Proxy.SwitchPolicy = v },
 		"log-level":     func(v string) { cfg.Obs.LogLevel = v },

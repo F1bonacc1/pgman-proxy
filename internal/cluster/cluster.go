@@ -47,9 +47,20 @@ func (h *Handles) Close(logger *obs.Logger) {
 	}
 }
 
-// Connect dials NATS within the configured connect-timeout budget. On
-// failure the caller MUST exit fail-closed (FR-010, EX_DEPS).
-func Connect(ctx context.Context, cfg config.NATSConfig, nodeID string, logger *obs.Logger) (*nats.Conn, error) {
+// Connect dials the in-process embedded NATS server at its loopback
+// client listener address (feature 002 / RD-001a). The URL is supplied
+// by the caller — typically `<embedded.Server>.ClientURL()` — rather
+// than read from a `cfg.NATS.URL` field that no longer exists.
+//
+// On failure the caller MUST exit fail-closed (FR-010, EX_DEPS).
+//
+// `cfg` carries only the timing parameters retained from feature 001
+// (ConnectTimeout, ReconnectWait, MaxReconnects); the URL/CredsFile
+// fields are dead in v2 and rejected at validation.
+func Connect(ctx context.Context, url string, cfg config.NATSConfig, nodeID string, logger *obs.Logger) (*nats.Conn, error) {
+	if url == "" {
+		return nil, fmt.Errorf("nats connect: url is empty (the embedded server's ClientURL must be supplied; cfg.NATS.URL is no longer used per RD-001a)")
+	}
 	connectCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
 	defer cancel()
 
@@ -61,7 +72,7 @@ func Connect(ctx context.Context, cfg config.NATSConfig, nodeID string, logger *
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			if err != nil {
 				logger.Warn("nats disconnected",
-					pgmanager.Field{Key: "url", Value: cfg.URL},
+					pgmanager.Field{Key: "url", Value: url},
 					pgmanager.Field{Key: "reason", Value: err.Error()})
 			}
 		}),
@@ -69,14 +80,11 @@ func Connect(ctx context.Context, cfg config.NATSConfig, nodeID string, logger *
 			logger.Warn("nats reconnected", pgmanager.Field{Key: "url", Value: c.ConnectedUrl()})
 		}),
 	}
-	if cfg.CredsFile != "" {
-		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
-	}
 
 	connCh := make(chan *nats.Conn, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		c, err := nats.Connect(cfg.URL, opts...)
+		c, err := nats.Connect(url, opts...)
 		if err != nil {
 			errCh <- err
 			return
@@ -89,7 +97,7 @@ func Connect(ctx context.Context, cfg config.NATSConfig, nodeID string, logger *
 	case err := <-errCh:
 		return nil, fmt.Errorf("nats connect: %w", err)
 	case c := <-connCh:
-		logger.Info("nats connected", pgmanager.Field{Key: "url", Value: cfg.URL})
+		logger.Info("nats connected", pgmanager.Field{Key: "url", Value: url})
 		return c, nil
 	}
 }

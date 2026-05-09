@@ -30,10 +30,13 @@ RUN CGO_ENABLED=0 go build \
         -ldflags="-s -w -X main.version=integration-test" \
         -o /out/pgman-proxy ./cmd/pgman-proxy
 
-FROM postgres:17-bookworm
+ARG POSTGRES_VERSION=17
+FROM postgres:${POSTGRES_VERSION}-bookworm
+ARG POSTGRES_VERSION
 COPY --from=build /out/pgman-proxy /usr/local/bin/pgman-proxy
 
 ENV PGDATA=/var/lib/postgresql/data
+ENV POSTGRES_BIN_DIR=/usr/lib/postgresql/${POSTGRES_VERSION}/bin
 
 # The postgres image declares VOLUME /var/lib/postgresql/data and the
 # default entrypoint expects an empty dir on first boot. We bypass that

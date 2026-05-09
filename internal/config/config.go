@@ -40,9 +40,50 @@ type Config struct {
 	Shutdown       ShutdownConfig `yaml:"shutdown"        json:"shutdown"`
 }
 
-// ClusterConfig identifies the cluster this peer joins.
+// ClusterConfig identifies the cluster this peer joins, AND (per
+// feature 002) carries the embedded-NATS coordination-plane settings
+// that replace 001's external-NATS dependency. The shape mirrors
+// `specs/002-embedded-nats-cluster/contracts/config.md`.
 type ClusterConfig struct {
+	// 001 fields.
 	ID string `yaml:"id" json:"id"`
+
+	// Embedded-NATS fields (feature 002).
+	Name                      string          `yaml:"name"                        json:"name"`
+	DeclaredSize              int             `yaml:"declared_size"               json:"declared_size"`
+	ClientListen              EndpointConfig  `yaml:"client_listen"               json:"client_listen"`
+	RoutesListen              RoutesListenCfg `yaml:"routes_listen"              json:"routes_listen"`
+	RoutePeers                []string        `yaml:"route_peers"                 json:"route_peers"`
+	TLS                       ClusterTLSCfg   `yaml:"tls"                         json:"tls"`
+	Username                  string          `yaml:"username"                    json:"username"`
+	PasswordEnv               string          `yaml:"password_env"                json:"password_env"`
+	PasswordFile              string          `yaml:"password_file"               json:"password_file"`
+	JetStreamDir              string          `yaml:"jetstream_dir"               json:"jetstream_dir"`
+	ReplicationFactorOverride int             `yaml:"replication_factor_override" json:"replication_factor_override"`
+}
+
+// EndpointConfig is a host/port pair used for the embedded-NATS
+// listeners (FR-018, FR-019).
+type EndpointConfig struct {
+	Host string `yaml:"host" json:"host"`
+	Port int    `yaml:"port" json:"port"`
+}
+
+// RoutesListenCfg extends EndpointConfig with the explicit
+// "enabled" flag so single-peer deployments can disable the routes
+// listener entirely without leaving a hanging port.
+type RoutesListenCfg struct {
+	Host    string `yaml:"host"    json:"host"`
+	Port    int    `yaml:"port"    json:"port"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+}
+
+// ClusterTLSCfg carries cluster-route TLS material (FR-010b).
+type ClusterTLSCfg struct {
+	CertFile             string `yaml:"cert_file"              json:"cert_file"`
+	KeyFile              string `yaml:"key_file"               json:"key_file"`
+	CAFile               string `yaml:"ca_file"                json:"ca_file"`
+	PlaintextExplicitAck bool   `yaml:"plaintext_explicit_ack" json:"plaintext_explicit_ack"`
 }
 
 // NodeConfig identifies this peer.
@@ -168,6 +209,19 @@ type ShutdownConfig struct {
 func Defaults() Config {
 	return Config{
 		DeploymentMode: DeploymentModeStandalone,
+		Cluster: ClusterConfig{
+			// Embedded-NATS defaults (feature 002 /
+			// specs/002-embedded-nats-cluster/contracts/config.md):
+			ClientListen: EndpointConfig{
+				Host: "127.0.0.1",
+				Port: 4222,
+			},
+			RoutesListen: RoutesListenCfg{
+				Host:    "0.0.0.0",
+				Port:    6222,
+				Enabled: true,
+			},
+		},
 		NATS: NATSConfig{
 			ConnectTimeout: 10 * time.Second,
 			ReconnectWait:  2 * time.Second,

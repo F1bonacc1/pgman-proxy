@@ -2,11 +2,14 @@
 
 An opinionated active/active PostgreSQL HA proxy and lifecycle manager.
 Wraps the [`pg-manager`](https://github.com/f1bonacc1/pg-manager) library
-and scaffolds it with NATS as the message bus and leader-election
-substrate. Deployable as a standalone process, microservice, or sidecar.
+and scaffolds it with **an embedded NATS server** (one per peer; peers
+form a NATS cluster) as the message bus and leader-election substrate.
+Deployable as a standalone process, microservice, or sidecar.
 
-> Spec: `specs/001-active-active-pg-proxy/`
-> Constitution: `.specify/memory/constitution.md` (v1.1.0)
+> Specs: `specs/001-active-active-pg-proxy/` (baseline) and
+> `specs/002-embedded-nats-cluster/` (embedded coordination plane —
+> reverses 001's external-NATS dependency)
+> Constitution: `.specify/memory/constitution.md` (v1.2.0)
 > Reference assembly: `../pg-manager/examples/three_node_nats/main.go`
 
 ## What this binary is (and is not)
@@ -15,7 +18,8 @@ Two surfaces in one binary:
 
 1. **Data-plane proxy** — direct TCP listener that routes PostgreSQL
    wire-protocol traffic to the current leader as identified by the
-   NATS-backed leadership lease. No virtual IP, no keepalived, no
+   NATS-backed leadership lease (NATS embedded in-process per feature
+   002 — no external broker). No virtual IP, no keepalived, no
    gratuitous ARP. Clients connect directly to a peer's `host:port`.
 2. **Lifecycle-management control plane** — authenticated HTTP API
    that exposes `pg-manager`'s `Manager` operations (`Status`,

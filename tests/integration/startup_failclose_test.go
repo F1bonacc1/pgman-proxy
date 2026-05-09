@@ -58,10 +58,11 @@ func TestStartupFailClose_ExitCodes(t *testing.T) {
 			name: "version_and_print_config_mutually_exclusive_is_EX_CONFIG",
 			args: []string{"--version", "--print-config"},
 			env: map[string]string{
-				"PGMAN_PROXY_CLUSTER_ID":             "demo",
-				"PGMAN_PROXY_NODE_ID":                "node-a",
-				"PGMAN_PROXY_PEERS":                  "node-a",
-				"PGMAN_PROXY_NATS_URL":               "nats://example:4222",
+				"PGMAN_PROXY_CLUSTER_ID": "demo",
+				"PGMAN_PROXY_NODE_ID":    "node-a",
+				"PGMAN_PROXY_PEERS":      "node-a",
+				// Feature 002: external NATS removed; embedded coordination plane.
+				"PGMAN_PROXY_CLUSTER_DECLARED_SIZE":  "1",
 				"PGMAN_PROXY_PROXY_LISTEN_ADDR":      "127.0.0.1:6432",
 				"PGMAN_PROXY_POSTGRES_BIN_DIR":       "/usr/lib/postgresql/17/bin",
 				"PGMAN_PROXY_POSTGRES_DATA_DIR":      "/var/lib/postgresql/data",

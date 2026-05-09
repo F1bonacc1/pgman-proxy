@@ -1,15 +1,13 @@
 # Reference 3-peer pgman-proxy topology in front of a 3-node pg-manager
-# cluster. Mirrors ../pg-manager/examples/three_node_nats/docker-compose.yml.
+# cluster.
+#
+# Feature 002 (specs/002-embedded-nats-cluster/): NATS is embedded in
+# every pgman-proxy peer; there is no external `nats` service. The
+# peers mesh into a NATS cluster on TCP/6222 between containers.
+#
 # Out of scope for this project: Kubernetes/Helm/operator artefacts (FR-015).
 
 services:
-  nats:
-    image: nats:2.10
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "4222:4222"
-      - "8222:8222"
-
   pg-a:
     image: postgres:17
     environment:
@@ -39,12 +37,11 @@ services:
 
   pgman-proxy-a:
     image: ghcr.io/f1bonacc1/pgman-proxy:latest
-    depends_on: [nats, pg-a]
+    depends_on: [pg-a]
     environment:
       PGMAN_PROXY_CLUSTER_ID: demo
       PGMAN_PROXY_NODE_ID: node-a
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats:4222
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
@@ -53,36 +50,37 @@ services:
       - "6432:6432"
       - "9090:9090"
       - "9091:9091"
+      - "6222:6222" # cluster-routes listener (feature 002)
 
   pgman-proxy-b:
     image: ghcr.io/f1bonacc1/pgman-proxy:latest
-    depends_on: [nats, pg-b]
+    depends_on: [pg-b]
     environment:
       PGMAN_PROXY_CLUSTER_ID: demo
       PGMAN_PROXY_NODE_ID: node-b
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats:4222
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
       LOCAL_DSN: host=pg-b port=5432 user=postgres sslmode=disable
     ports:
       - "6433:6432"
+      - "6223:6222" # cluster-routes listener (feature 002)
 
   pgman-proxy-c:
     image: ghcr.io/f1bonacc1/pgman-proxy:latest
-    depends_on: [nats, pg-c]
+    depends_on: [pg-c]
     environment:
       PGMAN_PROXY_CLUSTER_ID: demo
       PGMAN_PROXY_NODE_ID: node-c
       PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      PGMAN_PROXY_NATS_URL: nats://nats:4222
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
       LOCAL_DSN: host=pg-c port=5432 user=postgres sslmode=disable
     ports:
       - "6434:6432"
+      - "6224:6222" # cluster-routes listener (feature 002)
 
 volumes:
   pg-a-data:

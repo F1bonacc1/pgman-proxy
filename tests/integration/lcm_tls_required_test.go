@@ -34,7 +34,8 @@ func TestLCM_NonLoopbackBind_WithoutTLS_ExitsConfigError(t *testing.T) {
 		"PGMAN_PROXY_CLUSTER_ID=demo",
 		"PGMAN_PROXY_NODE_ID=node-a",
 		"PGMAN_PROXY_PEERS=node-a",
-		"PGMAN_PROXY_NATS_URL=nats://example:4222",
+		// Feature 002: external NATS removed; embedded coordination plane.
+		"PGMAN_PROXY_CLUSTER_DECLARED_SIZE=1",
 		"PGMAN_PROXY_PROXY_LISTEN_ADDR=127.0.0.1:6432",
 		"PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/17/bin",
 		"PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data",

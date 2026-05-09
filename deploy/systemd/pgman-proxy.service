@@ -10,9 +10,17 @@ User=pgman-proxy
 Group=pgman-proxy
 EnvironmentFile=/etc/pgman-proxy/env
 ExecStart=/usr/local/bin/pgman-proxy --config /etc/pgman-proxy/config.yaml
+# Feature 002 (FR-014a): SIGHUP hot-reloads the peer-routes list and the
+# cluster password without restarting the embedded NATS server. Wire
+# `systemctl reload pgman-proxy` to the SIGHUP signal.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+# Embedded NATS JetStream storage path (FR-011) — operator overrides via
+# config.yaml. The default mirrors the path used by `pgman-proxy
+# cluster-secret-gen` examples in the quickstart.
+ReadWritePaths=/var/lib/pgman-proxy/jetstream
 
 # Hardening (Constitution II — non-root, minimum filesystem footprint).
 NoNewPrivileges=yes
