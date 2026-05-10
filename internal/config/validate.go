@@ -120,10 +120,14 @@ func Validate(cfg Config) error {
 	if cfg.Postgres.LocalDSNEnv == "" {
 		m.Add(errors.New("postgres.local_dsn_env is required (env-var name holding the DSN)"))
 	}
-	if len(cfg.Peers) > 1 {
-		if cfg.Postgres.ReplicationAddr == "" {
-			m.Add(errors.New("postgres.replication_addr is required when peers > 1 (host:port reachable from other peers for pg_basebackup)"))
-		} else if _, _, err := net.SplitHostPort(cfg.Postgres.ReplicationAddr); err != nil {
+	// postgres.replication_addr is optional. If set, it must parse as
+	// host:port. When unset, the proxy does not publish to the cluster
+	// KV and pg-manager falls back to its static PeerDSNs map (which
+	// uses peer IDs as hostnames — fine for topologies where peer IDs
+	// resolve via the substrate's DNS, like docker-compose service
+	// networks or K8s StatefulSets).
+	if cfg.Postgres.ReplicationAddr != "" {
+		if _, _, err := net.SplitHostPort(cfg.Postgres.ReplicationAddr); err != nil {
 			m.Add(fmt.Errorf("postgres.replication_addr %q must be host:port: %w", cfg.Postgres.ReplicationAddr, err))
 		}
 	}

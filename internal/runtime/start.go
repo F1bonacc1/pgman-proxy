@@ -158,22 +158,26 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	}
 	res.Cluster = handles
 
-	// Open the cluster KV bucket so we can publish our local Postgres
-	// replication address and serve as the back-end for the
-	// PeerDSNResolver pg-manager calls when seeding a follower.
-	clusterKV, err := embedded.OpenClusterKV(ctx, conn, cfg.Cluster.ID)
-	if err != nil {
-		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: open cluster KV: %w", err)}
-	}
+	// Optional: when ReplicationAddr is set, publish it to the cluster
+	// KV and install a PeerDSNResolver so pg-manager pulls peer pg
+	// addresses from the substrate at basebackup time. When unset
+	// (e.g., the integration-test docker-compose topology where peer
+	// IDs already resolve as DNS names), pg-manager falls back to its
+	// static PeerDSNs map and the KV is not touched.
+	var peerDSNResolver func(context.Context, pgmanager.NodeID) (string, error)
 	if cfg.Postgres.ReplicationAddr != "" {
+		clusterKV, err := embedded.OpenClusterKV(ctx, conn, cfg.Cluster.ID)
+		if err != nil {
+			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: open cluster KV: %w", err)}
+		}
 		if err := cluster.PublishPeerAddress(ctx, clusterKV, cfg.Node.ID, cfg.Postgres.ReplicationAddr); err != nil {
 			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: publish peer address: %w", err)}
 		}
 		res.Logger.Info("published peer replication address",
 			pgmanager.Field{Key: "node_id", Value: cfg.Node.ID},
 			pgmanager.Field{Key: "addr", Value: cfg.Postgres.ReplicationAddr})
+		peerDSNResolver = cluster.PeerAddressResolver(clusterKV)
 	}
-	peerDSNResolver := cluster.PeerAddressResolver(clusterKV)
 
 	// Now that the leadership handle exists, wire the storage monitor
 	// (the fence callback references it).
@@ -230,6 +234,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			Port:             cfg.Topology.Port,
 			PeerDSNs:         peerDSNsForConfig(cfg),
 			PeerDSNResolver:  peerDSNResolver,
+			LocalPGAddr:      cfg.Postgres.LocalPGAddr,
 		},
 		Policy: pgmanager.Policy{
 			FailoverDelay:    cfg.Policy.FailoverDelay,

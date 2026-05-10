@@ -85,6 +85,7 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		"PGMAN_PROXY_POSTGRES_DATA_DIR":         func(v string) { cfg.Postgres.DataDir = v },
 		"PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV":    func(v string) { cfg.Postgres.LocalDSNEnv = v },
 		"PGMAN_PROXY_POSTGRES_REPLICATION_ADDR": func(v string) { cfg.Postgres.ReplicationAddr = v },
+		"PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR":    func(v string) { cfg.Postgres.LocalPGAddr = v },
 		"PGMAN_PROXY_POSTGRES_TLS_MODE":         func(v string) { cfg.Postgres.TLSMode = v },
 		"PGMAN_PROXY_POSTGRES_HBA_EXTRAS":       func(v string) { cfg.Postgres.HBAExtras = parseLines(v) },
 		"PGMAN_PROXY_POSTGRES_CONF_EXTRAS":      func(v string) { cfg.Postgres.ConfExtras = parseLines(v) },

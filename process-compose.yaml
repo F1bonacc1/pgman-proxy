@@ -1,123 +1,75 @@
 # process-compose orchestration for a 3-peer pgman-proxy + PostgreSQL 18
 # development cluster.
 #
-# Topology (revised — pgman-proxy runs as a host process, NOT in a
-# container; the wrapped engine runs in `sidecar` deployment mode against
-# a separately-managed Postgres):
+# Topology (one container per peer; pgman-proxy + pg18 share each
+# container, mirroring tests/integration/docker-compose.test.yml):
 #
-#   compile  ─►  ./bin/pgman-proxy            (host go build)
-#   pg-image ─►  pgman-pc-pgsql:dev           (postgres:18 retag + bin extract)
-#   network  ─►  pgman-pc-net                 (docker network)
-#                          │
-#                          ▼
-#       ┌─pgsql-a (docker)─┐  ┌─pgsql-b─┐  ┌─pgsql-c─┐
-#       │ postgres 18      │  │  pg 18  │  │  pg 18  │
-#       │ TCP :15432 (host)│  │  :15433 │  │  :15434 │
-#       └──────────────────┘  └─────────┘  └─────────┘
-#                ▲                  ▲             ▲
-#                │ libpq TCP        │             │
-#       ┌─pgman-proxy-a─┐  ┌─pgman-proxy-b─┐  ┌─pgman-proxy-c─┐
-#       │ HOST process  │  │ HOST process  │  │ HOST process  │
-#       │ proxy :16432  │  │ proxy :16433  │  │ proxy :16434  │
-#       │ obs   :19090  │  │ obs   :19091  │  │ obs   :19092  │
-#       │ NATS  :4222   │  │ NATS  :4223   │  │ NATS  :4224   │
-#       │ route :6222   │  │ route :6223   │  │ route :6224   │
-#       └───────────────┘  └───────────────┘  └───────────────┘
-#                  └───────────┬───────────────────┘
-#                  embedded NATS mesh on 127.0.0.1:622{2,3,4}
+#   builder ─►  pgman-proxy:dev image (multi-stage build off the
+#               integration Dockerfile; bundles the pgman-proxy binary
+#               into a postgres:18-bookworm base so libpq, pg_basebackup
+#               and friends are colocated with their shared-lib closure)
+#   network ─►  pgman-pc-net  (docker network — peer DNS happens here)
+#                                  │
+#       ┌──node-a (container)──┐  ┌──node-b──┐  ┌──node-c──┐
+#       │ pgman-proxy (PID 1)  │  │  same    │  │  same    │
+#       │ pg18 (managed by     │  │          │  │          │
+#       │   pg-manager)        │  │          │  │          │
+#       │ proxy :6432 →:16432  │  │  →:16433 │  │  →:16434 │
+#       │ obs   :9090 →:19090  │  │  →:19091 │  │  →:19092 │
+#       │ NATS  :4222 (intra)  │  │          │  │          │
+#       │ route :6222 (intra)  │  │          │  │          │
+#       └──────────────────────┘  └──────────┘  └──────────┘
+#                  └────────────┬─────────────────┘
+#                  embedded NATS mesh on pgman-pc-net (node-X:6222)
+#                                  │
+#                   chaos-workload (HOST process)
+#                   targets 127.0.0.1:1643{2,3,4}
 #
-# How the modes line up:
-#   * Each pgman-proxy host process runs with PGMAN_PROXY_DEPLOYMENT_MODE=sidecar
-#     (deploy/systemd/README.md). In sidecar mode pg-manager does NOT own
-#     the postgres lifecycle — the docker container is the supervisor.
-#   * LOCAL_DSN points at the corresponding container's exposed TCP port
-#     on 127.0.0.1.
-#   * POSTGRES_BIN_DIR points at .cache/pgman-pc/pg18/bin, which the
-#     pg-image step extracts from the postgres:18-bookworm image so the
-#     host process has matching pg_basebackup / pg_ctl binaries available
-#     when pg-manager needs them (replica seeding, replication slot mgmt).
+# Architectural note: pgman-proxy embeds pg-manager, which OWNS the
+# lifecycle of its colocated PostgreSQL (initdb, pg_basebackup, pg_ctl).
+# Putting pgman-proxy and its pg in separate containers — as the
+# previous host-process layout did — broke this assumption: pg-manager
+# has no truly observe-only mode for postgres, and the host couldn't
+# resolve the pg's shared-lib closure (libldap-2.5.so.0 etc.) on a
+# non-Debian-12 host. Co-locating them removes the mismatch.
 #
 # Notes:
-#   * This setup needs Docker for pgsql + extracted pg18 binaries from a
-#     debian-bookworm image. Glibc compatibility with the host is assumed
-#     (Ubuntu 22.04+/Debian 12 is fine; older or musl-based hosts will
-#     need to install postgres-18 from PGDG instead and adjust BIN_DIR).
-#   * All container/volume names are prefixed `pgman-pc-*`; the network is
+#   * Container names are prefixed `pgman-pc-*`; the network is
 #     `pgman-pc-net`. Both are deleted on shutdown.
-#   * Host artefacts (compiled binary, extracted pg18, per-node JetStream
-#     dirs) live under `./bin` and `./.cache/pgman-pc/`.
+#   * Each container's PGDATA is bound to a named docker volume
+#     (`pgman-pc-node-{a,b,c}-data`), so a single peer restart resumes
+#     via WAL catch-up against its existing data instead of repeating
+#     pg_basebackup. Volumes survive `process-compose down`; wipe them
+#     manually for a true cold start:
+#       docker volume rm pgman-pc-node-a-data pgman-pc-node-b-data pgman-pc-node-c-data
+#   * The chaos-workload runs OUTSIDE docker as a host process; it
+#     reaches the proxies through the per-peer host port mappings.
 #
 # Usage (requires the f1bonacc1/process-compose binary on PATH):
 #
 #   process-compose up               # interactive TUI
 #   process-compose up --tui=false   # daemon mode
 #   process-compose down             # stop processes (containers auto-rm)
-#
-# Cleanup notes:
-#   * Each `docker run --rm` removes its container on stop, so containers
-#     vanish on shutdown automatically.
-#   * The shared network (`pgman-pc-net`) and named PG data volumes
-#     (`pgman-pc-pgsql-{a,b,c}-data`) persist intentionally for fast
-#     re-up. Wipe them manually when you want a clean slate:
-#       docker network rm pgman-pc-net
-#       docker volume rm pgman-pc-pgsql-a-data pgman-pc-pgsql-b-data pgman-pc-pgsql-c-data
-#       rm -rf ./.cache/pgman-pc
 
 version: "0.5"
 
+# Cleanup hooks: even if a process exits cleanly, the docker network
+# may stick around. The shutdown lifecycle removes it.
+shutdown:
+  command: |
+    docker rm -f pgman-pc-node-a pgman-pc-node-b pgman-pc-node-c 2>/dev/null
+    docker network rm pgman-pc-net 2>/dev/null
+    true
+  timeout_seconds: 30
+
 environment:
-  - "PGMAN_CLUSTER_PASSWORD=process-compose-dev-cluster-secret"
   - "PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token"
 
 processes:
 
   # ───────────────────────────────────────────────────────────────────
-  # compile: build pgman-proxy as a HOST binary at ./bin/pgman-proxy.
-  # CGO is off so the binary is self-contained; trimpath keeps the path
-  # prefix tidy. The 3 pgman-proxy-* host processes downstream all exec
-  # this binary directly.
-  # ───────────────────────────────────────────────────────────────────
-  compile:
-    description: "go build -> ./bin/{pgman-proxy,chaos-workload} (host binaries)"
-    command: |
-      mkdir -p ./bin
-      CGO_ENABLED=0 go build \
-        -trimpath \
-        -ldflags="-s -w -X main.version=process-compose-dev" \
-        -o ./bin/pgman-proxy \
-        ./cmd/pgman-proxy
-      CGO_ENABLED=0 go build \
-        -trimpath \
-        -o ./bin/chaos-workload \
-        ./cmd/chaos-workload
-    working_dir: "."
-    is_daemon: false
-    availability:
-      restart: "no"
-
-  # ───────────────────────────────────────────────────────────────────
-  # clean-state: wipe per-peer JetStream dirs so the embedded NATS
-  # cluster cold-starts with no stale meta state on every `process-compose
-  # up`. The KV bucket pg-manager uses (pgmgr_pgman-pc) is dev-ephemeral
-  # — leadership leases and topology are reconstructed on first peer
-  # ready, so dropping the dir is safe and avoids quorum deadlock when a
-  # previous run crashed mid-handshake.
-  # ───────────────────────────────────────────────────────────────────
-  clean-state:
-    description: "wipe stale embedded-NATS JetStream state"
-    command: |
-      rm -rf ./.cache/pgman-pc/node-a/jetstream \
-             ./.cache/pgman-pc/node-b/jetstream \
-             ./.cache/pgman-pc/node-c/jetstream
-      true
-    working_dir: "."
-    is_daemon: false
-    availability:
-      restart: "no"
-
-  # ───────────────────────────────────────────────────────────────────
-  # network: shared docker network for the 3 pgsql containers. Idempotent
-  # — `docker network create` exits 0 if the network already exists.
+  # network: shared docker network so the three peer containers reach
+  # each other by name (node-a, node-b, node-c). Idempotent.
   # ───────────────────────────────────────────────────────────────────
   network:
     description: "create shared docker network"
@@ -129,28 +81,21 @@ processes:
       restart: "no"
 
   # ───────────────────────────────────────────────────────────────────
-  # pg-image: ensure a `pgman-pc-pgsql:dev` image exists (alias for
-  # postgres:18-bookworm) AND extract /usr/lib/postgresql/18 onto the
-  # host at ./.cache/pgman-pc/pg18 so the host pgman-proxy processes
-  # have pg_ctl / pg_basebackup / etc. available with version-matched
-  # binaries.
-  #
-  # Idempotent: skips re-extract if the cache already has pg_ctl.
+  # builder: build the pgman-proxy:dev image off the integration
+  # Dockerfile (multi-stage: golang:1.25-bookworm builder → postgres:18
+  # base with /usr/local/bin/pgman-proxy as the entrypoint). Build
+  # context is the parent directory so COPY can pull in the sibling
+  # ../pg-manager checkout that the `replace` directive in go.mod
+  # points at.
   # ───────────────────────────────────────────────────────────────────
-  pg-image:
-    description: "tag postgres:18 image + extract /usr/lib/postgresql/18 to host"
+  builder:
+    description: "docker build pgman-proxy:dev (pgman-proxy + pg18 in one image)"
     command: |
-      set -euo pipefail
-      docker pull postgres:18-bookworm
-      docker tag postgres:18-bookworm pgman-pc-pgsql:dev
-
-      mkdir -p ./.cache/pgman-pc/pg18
-      if [ ! -x ./.cache/pgman-pc/pg18/bin/pg_ctl ]; then
-        cid=$(docker create pgman-pc-pgsql:dev)
-        docker cp "$cid":/usr/lib/postgresql/18/. ./.cache/pgman-pc/pg18/
-        docker rm "$cid" >/dev/null
-      fi
-      test -x ./.cache/pgman-pc/pg18/bin/pg_ctl
+      docker build \
+        --build-arg POSTGRES_VERSION=18 \
+        -f tests/integration/Dockerfile \
+        -t pgman-proxy:dev \
+        ..
     working_dir: "."
     is_daemon: false
     availability:
@@ -160,253 +105,213 @@ processes:
         condition: process_completed_successfully
 
   # ───────────────────────────────────────────────────────────────────
-  # pgsql-a / pgsql-b / pgsql-c — three vanilla postgres:18 containers.
-  # Trust auth so the host pgman-proxy processes can connect without
-  # credential plumbing. Each container has its own named volume and
-  # listens on a distinct host port.
+  # compile-chaos: build the chaos-workload binary on the host so it
+  # can run as a host process (not in a container) and exercise the
+  # proxy fleet through its per-peer host port mappings.
   # ───────────────────────────────────────────────────────────────────
-  pgsql-a:
-    description: "PostgreSQL 18 — pgsql-a (host port 15432)"
+  compile-chaos:
+    description: "go build -> ./bin/chaos-workload (host binary)"
     command: |
-      docker rm -f pgman-pc-pgsql-a 2>/dev/null
-      exec docker run --rm \
-        --name pgman-pc-pgsql-a \
-        --network pgman-pc-net \
-        -p 127.0.0.1:15432:5432 \
-        -e POSTGRES_HOST_AUTH_METHOD=trust \
-        -e POSTGRES_USER=postgres \
-        -e POSTGRES_DB=postgres \
-        -v pgman-pc-pgsql-a-data:/var/lib/postgresql \
-        -v "$(pwd)/dev/pg-init/01-replication-trust.sh:/docker-entrypoint-initdb.d/01-replication-trust.sh:ro" \
-        pgman-pc-pgsql:dev
-    is_daemon: false
-    availability:
-      restart: "always"
-    depends_on:
-      pg-image:
-        condition: process_completed_successfully
-    readiness_probe:
-      exec:
-        command: "docker exec pgman-pc-pgsql-a pg_isready -U postgres"
-      initial_delay_seconds: 3
-      period_seconds: 2
-      failure_threshold: 30
-
-  pgsql-b:
-    description: "PostgreSQL 18 — pgsql-b (host port 15433)"
-    command: |
-      docker rm -f pgman-pc-pgsql-b 2>/dev/null
-      exec docker run --rm \
-        --name pgman-pc-pgsql-b \
-        --network pgman-pc-net \
-        -p 127.0.0.1:15433:5432 \
-        -e POSTGRES_HOST_AUTH_METHOD=trust \
-        -e POSTGRES_USER=postgres \
-        -e POSTGRES_DB=postgres \
-        -v pgman-pc-pgsql-b-data:/var/lib/postgresql \
-        -v "$(pwd)/dev/pg-init/01-replication-trust.sh:/docker-entrypoint-initdb.d/01-replication-trust.sh:ro" \
-        pgman-pc-pgsql:dev
-    is_daemon: false
-    availability:
-      restart: "always"
-    depends_on:
-      pg-image:
-        condition: process_completed_successfully
-    readiness_probe:
-      exec:
-        command: "docker exec pgman-pc-pgsql-b pg_isready -U postgres"
-      initial_delay_seconds: 3
-      period_seconds: 2
-      failure_threshold: 30
-
-  pgsql-c:
-    description: "PostgreSQL 18 — pgsql-c (host port 15434)"
-    command: |
-      docker rm -f pgman-pc-pgsql-c 2>/dev/null
-      exec docker run --rm \
-        --name pgman-pc-pgsql-c \
-        --network pgman-pc-net \
-        -p 127.0.0.1:15434:5432 \
-        -e POSTGRES_HOST_AUTH_METHOD=trust \
-        -e POSTGRES_USER=postgres \
-        -e POSTGRES_DB=postgres \
-        -v pgman-pc-pgsql-c-data:/var/lib/postgresql \
-        -v "$(pwd)/dev/pg-init/01-replication-trust.sh:/docker-entrypoint-initdb.d/01-replication-trust.sh:ro" \
-        pgman-pc-pgsql:dev
-    is_daemon: false
-    availability:
-      restart: "always"
-    depends_on:
-      pg-image:
-        condition: process_completed_successfully
-    readiness_probe:
-      exec:
-        command: "docker exec pgman-pc-pgsql-c pg_isready -U postgres"
-      initial_delay_seconds: 3
-      period_seconds: 2
-      failure_threshold: 30
-
-  # ───────────────────────────────────────────────────────────────────
-  # pgman-proxy-a / -b / -c — three pgman-proxy peers running as HOST
-  # processes (not in containers). Each peer:
-  #   * runs in DEPLOYMENT_MODE=sidecar (postgres is externally managed)
-  #   * connects to its assigned pgsql-* container over loopback TCP
-  #   * meshes with the other two peers via embedded NATS on 127.0.0.1
-  #   * exposes its data plane and observability surface on per-peer
-  #     loopback ports
-  #
-  # The cluster credential and control-plane token are sourced from the
-  # top-level `environment:` block above so they're identical across
-  # peers.
-  # ───────────────────────────────────────────────────────────────────
-  pgman-proxy-a:
-    description: "pgman-proxy peer node-a (host process, sidecar mode)"
-    command: |
-      mkdir -p ./.cache/pgman-pc/node-a/jetstream
-      exec ./bin/pgman-proxy
+      mkdir -p ./bin
+      CGO_ENABLED=0 go build \
+        -trimpath \
+        -o ./bin/chaos-workload \
+        ./cmd/chaos-workload
     working_dir: "."
     is_daemon: false
     availability:
+      restart: "no"
+
+  # ───────────────────────────────────────────────────────────────────
+  # node-a / node-b / node-c — one container per peer. Each container
+  # runs pgman-proxy as PID 1; pgman-proxy embeds pg-manager which
+  # drives initdb / pg_basebackup / pg_ctl against the local PGDATA
+  # at /var/lib/postgresql/data.
+  #
+  # Cluster substrate:
+  #   * Embedded NATS (feature 002) runs in-process; peers mesh on
+  #     TCP/6222 over the docker network using node-{b,c}:6222 etc.
+  #   * Cluster ID `pgman-pc`, declared size 3.
+  #   * TLS plaintext explicit-ack is enabled for dev simplicity.
+  #
+  # Data plane:
+  #   * Proxy listener on 0.0.0.0:6432 inside the container, mapped
+  #     to 127.0.0.1:1643{2,3,4} on the host.
+  #   * Observability surface on 0.0.0.0:9090, mapped to
+  #     127.0.0.1:1909{0,1,2}.
+  #
+  # PG-manager lifecycle:
+  #   * BIN_DIR points at the in-image /usr/lib/postgresql/18/bin so
+  #     pg_basebackup et al have their full shared-lib closure.
+  #   * LOCAL_DSN connects via the in-image Unix socket
+  #     /var/run/postgresql, sidestepping host-port-mapping noise.
+  #   * HBA_EXTRAS adds the replication trust line that the integration
+  #     test compose also relies on (DEMO ONLY — never use in prod).
+  #
+  # peerDSNResolver path: NOT used here. Peer IDs (node-a/b/c) resolve
+  # as DNS names on pgman-pc-net, so the static PeerDSNs map (peer-id
+  # as hostname) works without setting PGMAN_PROXY_POSTGRES_REPLICATION_ADDR.
+  # ───────────────────────────────────────────────────────────────────
+  node-a:
+    description: "pgman-proxy + pg18 — node-a"
+    command: |
+      docker rm -f pgman-pc-node-a 2>/dev/null
+      exec docker run --rm \
+        --name pgman-pc-node-a \
+        --network pgman-pc-net \
+        --network-alias node-a \
+        -p 127.0.0.1:16432:6432 \
+        -p 127.0.0.1:19090:9090 \
+        -v pgman-pc-node-a-data:/var/lib/postgresql/data \
+        -e PGMAN_PROXY_CLUSTER_ID=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_NAME=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3 \
+        -e PGMAN_PROXY_NODE_ID=node-a \
+        -e PGMAN_PROXY_PEERS=node-a,node-b,node-c \
+        -e PGMAN_PROXY_CLUSTER_USERNAME=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD \
+        -e PGMAN_CLUSTER_PASSWORD=process-compose-dev-cluster-secret \
+        -e PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK=true \
+        -e PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT=4222 \
+        -e PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT=6222 \
+        -e PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=/var/lib/postgresql/jetstream \
+        -e PGMAN_PROXY_CLUSTER_ROUTE_PEERS=node-b:6222,node-c:6222 \
+        -e PGMAN_PROXY_PROXY_LISTEN_ADDR=0.0.0.0:6432 \
+        -e PGMAN_PROXY_OBS_HEALTH_ADDR=0.0.0.0:9090 \
+        -e PGMAN_PROXY_OBS_LOG_LEVEL=info \
+        -e PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin \
+        -e PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
+        -e PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN \
+        -e "LOCAL_DSN=host=/var/run/postgresql user=postgres sslmode=disable" \
+        -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-a:5432 \
+        -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
+        -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
+        -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
+        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
+        pgman-proxy:dev
+    is_daemon: false
+    availability:
       restart: "always"
     depends_on:
-      compile:
+      builder:
         condition: process_completed_successfully
-      clean-state:
-        condition: process_completed_successfully
-      pgsql-a:
-        condition: process_healthy
-    environment:
-      - "PGMAN_PROXY_DEPLOYMENT_MODE=sidecar"
-      - "PGMAN_PROXY_CLUSTER_ID=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_NAME=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3"
-      - "PGMAN_PROXY_NODE_ID=node-a"
-      - "PGMAN_PROXY_PEERS=node-a,node-b,node-c"
-      - "PGMAN_PROXY_CLUSTER_USERNAME=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD"
-      - "PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK=true"
-      - "PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT=4222"
-      - "PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT=6222"
-      - "PGMAN_PROXY_CLUSTER_ROUTE_PEERS=127.0.0.1:6223,127.0.0.1:6224"
-      - "PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=./.cache/pgman-pc/node-a/jetstream"
-      - "PGMAN_PROXY_PROXY_LISTEN_ADDR=127.0.0.1:16432"
-      - "PGMAN_PROXY_OBS_HEALTH_ADDR=127.0.0.1:19090"
-      - "PGMAN_PROXY_OBS_LOG_LEVEL=info"
-      - "PGMAN_PROXY_POSTGRES_BIN_DIR=./.cache/pgman-pc/pg18/bin"
-      - "PGMAN_PROXY_POSTGRES_DATA_DIR=./.cache/pgman-pc/node-a/pgdata"
-      - "PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN"
-      - "LOCAL_DSN=host=127.0.0.1 port=15432 user=postgres dbname=postgres sslmode=disable"
-      - "PGMAN_PROXY_POSTGRES_REPLICATION_ADDR=127.0.0.1:15432"
-      - "PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN"
     readiness_probe:
       http_get:
         host: 127.0.0.1
         port: 19090
         path: /readyz
         scheme: http
-      initial_delay_seconds: 3
+      initial_delay_seconds: 5
       period_seconds: 3
       failure_threshold: 60
 
-  pgman-proxy-b:
-    description: "pgman-proxy peer node-b (host process, sidecar mode)"
+  node-b:
+    description: "pgman-proxy + pg18 — node-b"
     command: |
-      mkdir -p ./.cache/pgman-pc/node-b/jetstream
-      exec ./bin/pgman-proxy
-    working_dir: "."
+      docker rm -f pgman-pc-node-b 2>/dev/null
+      exec docker run --rm \
+        --name pgman-pc-node-b \
+        --network pgman-pc-net \
+        --network-alias node-b \
+        -p 127.0.0.1:16433:6432 \
+        -p 127.0.0.1:19091:9090 \
+        -v pgman-pc-node-b-data:/var/lib/postgresql/data \
+        -e PGMAN_PROXY_CLUSTER_ID=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_NAME=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3 \
+        -e PGMAN_PROXY_NODE_ID=node-b \
+        -e PGMAN_PROXY_PEERS=node-a,node-b,node-c \
+        -e PGMAN_PROXY_CLUSTER_USERNAME=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD \
+        -e PGMAN_CLUSTER_PASSWORD=process-compose-dev-cluster-secret \
+        -e PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK=true \
+        -e PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT=4222 \
+        -e PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT=6222 \
+        -e PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=/var/lib/postgresql/jetstream \
+        -e PGMAN_PROXY_CLUSTER_ROUTE_PEERS=node-a:6222,node-c:6222 \
+        -e PGMAN_PROXY_PROXY_LISTEN_ADDR=0.0.0.0:6432 \
+        -e PGMAN_PROXY_OBS_HEALTH_ADDR=0.0.0.0:9090 \
+        -e PGMAN_PROXY_OBS_LOG_LEVEL=info \
+        -e PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin \
+        -e PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
+        -e PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN \
+        -e "LOCAL_DSN=host=/var/run/postgresql user=postgres sslmode=disable" \
+        -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-b:5432 \
+        -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
+        -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
+        -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
+        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
+        pgman-proxy:dev
     is_daemon: false
     availability:
       restart: "always"
     depends_on:
-      compile:
+      builder:
         condition: process_completed_successfully
-      clean-state:
-        condition: process_completed_successfully
-      pgsql-b:
-        condition: process_healthy
-      pgman-proxy-a:
+      node-a:
         condition: process_started
-    environment:
-      - "PGMAN_PROXY_DEPLOYMENT_MODE=sidecar"
-      - "PGMAN_PROXY_CLUSTER_ID=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_NAME=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3"
-      - "PGMAN_PROXY_NODE_ID=node-b"
-      - "PGMAN_PROXY_PEERS=node-a,node-b,node-c"
-      - "PGMAN_PROXY_CLUSTER_USERNAME=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD"
-      - "PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK=true"
-      - "PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT=4223"
-      - "PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT=6223"
-      - "PGMAN_PROXY_CLUSTER_ROUTE_PEERS=127.0.0.1:6222,127.0.0.1:6224"
-      - "PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=./.cache/pgman-pc/node-b/jetstream"
-      - "PGMAN_PROXY_PROXY_LISTEN_ADDR=127.0.0.1:16433"
-      - "PGMAN_PROXY_OBS_HEALTH_ADDR=127.0.0.1:19091"
-      - "PGMAN_PROXY_OBS_LOG_LEVEL=info"
-      - "PGMAN_PROXY_POSTGRES_BIN_DIR=./.cache/pgman-pc/pg18/bin"
-      - "PGMAN_PROXY_POSTGRES_DATA_DIR=./.cache/pgman-pc/node-b/pgdata"
-      - "PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN"
-      - "LOCAL_DSN=host=127.0.0.1 port=15433 user=postgres dbname=postgres sslmode=disable"
-      - "PGMAN_PROXY_POSTGRES_REPLICATION_ADDR=127.0.0.1:15433"
-      - "PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN"
     readiness_probe:
       http_get:
         host: 127.0.0.1
         port: 19091
         path: /readyz
         scheme: http
-      initial_delay_seconds: 3
+      initial_delay_seconds: 5
       period_seconds: 3
       failure_threshold: 60
 
-  pgman-proxy-c:
-    description: "pgman-proxy peer node-c (host process, sidecar mode)"
+  node-c:
+    description: "pgman-proxy + pg18 — node-c"
     command: |
-      mkdir -p ./.cache/pgman-pc/node-c/jetstream
-      exec ./bin/pgman-proxy
-    working_dir: "."
+      docker rm -f pgman-pc-node-c 2>/dev/null
+      exec docker run --rm \
+        --name pgman-pc-node-c \
+        --network pgman-pc-net \
+        --network-alias node-c \
+        -p 127.0.0.1:16434:6432 \
+        -p 127.0.0.1:19092:9090 \
+        -v pgman-pc-node-c-data:/var/lib/postgresql/data \
+        -e PGMAN_PROXY_CLUSTER_ID=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_NAME=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3 \
+        -e PGMAN_PROXY_NODE_ID=node-c \
+        -e PGMAN_PROXY_PEERS=node-a,node-b,node-c \
+        -e PGMAN_PROXY_CLUSTER_USERNAME=pgman-pc \
+        -e PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD \
+        -e PGMAN_CLUSTER_PASSWORD=process-compose-dev-cluster-secret \
+        -e PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK=true \
+        -e PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT=4222 \
+        -e PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT=6222 \
+        -e PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=/var/lib/postgresql/jetstream \
+        -e PGMAN_PROXY_CLUSTER_ROUTE_PEERS=node-a:6222,node-b:6222 \
+        -e PGMAN_PROXY_PROXY_LISTEN_ADDR=0.0.0.0:6432 \
+        -e PGMAN_PROXY_OBS_HEALTH_ADDR=0.0.0.0:9090 \
+        -e PGMAN_PROXY_OBS_LOG_LEVEL=info \
+        -e PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin \
+        -e PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
+        -e PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN \
+        -e "LOCAL_DSN=host=/var/run/postgresql user=postgres sslmode=disable" \
+        -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-c:5432 \
+        -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
+        -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
+        -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
+        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
+        pgman-proxy:dev
     is_daemon: false
     availability:
       restart: "always"
     depends_on:
-      compile:
+      builder:
         condition: process_completed_successfully
-      clean-state:
-        condition: process_completed_successfully
-      pgsql-c:
-        condition: process_healthy
-      pgman-proxy-a:
+      node-a:
         condition: process_started
-    environment:
-      - "PGMAN_PROXY_DEPLOYMENT_MODE=sidecar"
-      - "PGMAN_PROXY_CLUSTER_ID=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_NAME=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_DECLARED_SIZE=3"
-      - "PGMAN_PROXY_NODE_ID=node-c"
-      - "PGMAN_PROXY_PEERS=node-a,node-b,node-c"
-      - "PGMAN_PROXY_CLUSTER_USERNAME=pgman-pc"
-      - "PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD"
-      - "PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK=true"
-      - "PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT=4224"
-      - "PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT=6224"
-      - "PGMAN_PROXY_CLUSTER_ROUTE_PEERS=127.0.0.1:6222,127.0.0.1:6223"
-      - "PGMAN_PROXY_CLUSTER_JETSTREAM_DIR=./.cache/pgman-pc/node-c/jetstream"
-      - "PGMAN_PROXY_PROXY_LISTEN_ADDR=127.0.0.1:16434"
-      - "PGMAN_PROXY_OBS_HEALTH_ADDR=127.0.0.1:19092"
-      - "PGMAN_PROXY_OBS_LOG_LEVEL=info"
-      - "PGMAN_PROXY_POSTGRES_BIN_DIR=./.cache/pgman-pc/pg18/bin"
-      - "PGMAN_PROXY_POSTGRES_DATA_DIR=./.cache/pgman-pc/node-c/pgdata"
-      - "PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN"
-      - "LOCAL_DSN=host=127.0.0.1 port=15434 user=postgres dbname=postgres sslmode=disable"
-      - "PGMAN_PROXY_POSTGRES_REPLICATION_ADDR=127.0.0.1:15434"
-      - "PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN"
     readiness_probe:
       http_get:
         host: 127.0.0.1
         port: 19092
         path: /readyz
         scheme: http
-      initial_delay_seconds: 3
+      initial_delay_seconds: 5
       period_seconds: 3
       failure_threshold: 60
 
@@ -418,9 +323,11 @@ processes:
   # the server told us a commit succeeded but the row is no longer
   # there — that's a real bug in the proxy or pg-manager.
   #
-  # The operator drives the chaos manually: kill -9 a pgsql container,
-  # `process-compose stop pgman-proxy-X`, etc. Workload should keep
-  # running and `data_loss_total` should stay 0.
+  # Runs as a HOST process (not in a container) so the operator can
+  # easily inspect its log stream and tweak knobs without rebuilding.
+  # The operator drives the chaos manually: kill -9 a peer container,
+  # `process-compose stop node-X`, etc. Workload should keep running
+  # and `data_loss_total` should stay 0.
   # ───────────────────────────────────────────────────────────────────
   chaos-workload:
     description: "synthetic writer/reader through proxy fleet (chaos verifier)"
@@ -430,13 +337,13 @@ processes:
     availability:
       restart: "always"
     depends_on:
-      compile:
+      compile-chaos:
         condition: process_completed_successfully
-      pgman-proxy-a:
+      node-a:
         condition: process_healthy
-      pgman-proxy-b:
+      node-b:
         condition: process_healthy
-      pgman-proxy-c:
+      node-c:
         condition: process_healthy
     environment:
       - "CHAOS_DSN=host=127.0.0.1,127.0.0.1,127.0.0.1 port=16432,16433,16434 user=postgres dbname=postgres sslmode=disable connect_timeout=2"

@@ -122,6 +122,17 @@ type PostgresConfig struct {
 	// pg-manager's PeerDSNResolver can hand it to followers seeding from
 	// this node.
 	ReplicationAddr       string            `yaml:"replication_addr"         json:"replication_addr"`
+	// LocalPGAddr is the host:port the topology-aware proxy uses to
+	// reach this node's own Postgres when SELF is the elected leader.
+	// When empty, pg-manager defaults to "127.0.0.1:<Port>" — but in
+	// any deployment where the proxy and pg sit in the same network
+	// namespace AND the operator's pg_hba.conf treats loopback
+	// differently from non-loopback (e.g. the stock postgres image's
+	// scram-sha-256 default for 127.0.0.1/32), the loopback default
+	// will trip auth. Set this to the docker-network alias / pod IP /
+	// service DNS so the proxy's forwarded connection appears to PG
+	// from a routable address that matches the operator's HBA rules.
+	LocalPGAddr           string            `yaml:"local_pg_addr"            json:"local_pg_addr"`
 	TLSMode               string            `yaml:"tls_mode"                 json:"tls_mode"`
 	TLSDisableExplicitAck bool              `yaml:"tls_disable_explicit_ack" json:"tls_disable_explicit_ack"`
 	PeerDSNs              map[string]string `yaml:"peer_dsns"                json:"peer_dsns"`
