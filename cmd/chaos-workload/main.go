@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS chaos_events (
 );
 `
 
+// defaultWriteTimeout is the per-INSERT context budget for the writer
+// goroutine. It MUST exceed (peer_count * dsn_connect_timeout) so the
+// pool's libpq multi-host fall-through has time to skip dead peers and
+// reach a live one before the deadline fires. With three peers and the
+// recommended connect_timeout=1s, worst-case fall-through is 3s; the
+// remaining 2s buys query-execution slack. See chaos_budget_test.go.
+const defaultWriteTimeout = 5 * time.Second
+
 type counters struct {
 	writesOK     atomic.Int64
 	writesFailed atomic.Int64
@@ -49,8 +57,9 @@ type counters struct {
 
 func main() {
 	var (
-		dsn            = flag.String("dsn", envOr("CHAOS_DSN", "host=127.0.0.1 port=16432 user=postgres dbname=postgres sslmode=disable connect_timeout=2"), "libpq DSN; supports comma-separated host/port for multi-host failover")
+		dsn            = flag.String("dsn", envOr("CHAOS_DSN", "host=127.0.0.1 port=16432 user=postgres dbname=postgres sslmode=disable connect_timeout=1"), "libpq DSN; supports comma-separated host/port for multi-host failover. Keep connect_timeout small (libpq min: 1s) so a dead host doesn't eat the per-Exec budget — see --write-timeout")
 		writeRPS       = flag.Int("write-rps", 20, "writes per second target rate")
+		writeTimeout   = flag.Duration("write-timeout", defaultWriteTimeout, "per-INSERT context deadline; must exceed (peer_count * dsn connect_timeout) so libpq multi-host fall-through can reach a live peer during chaos")
 		verifyInterval = flag.Duration("verify-interval", 5*time.Second, "verifier sweep interval")
 		writerID       = flag.String("writer-id", "", "writer_id override (default: random ULID per process start)")
 	)
@@ -95,6 +104,7 @@ func main() {
 	slog.Info("chaos-workload started",
 		"writer_id", *writerID,
 		"write_rps", *writeRPS,
+		"write_timeout", writeTimeout.String(),
 		"verify_interval", verifyInterval.String(),
 		"dsn", *dsn,
 	)
@@ -109,7 +119,7 @@ func main() {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		runWriter(rootCtx, pool, *writerID, *writeRPS, &nextSeq, &confirmedSeqs, &ctrs)
+		runWriter(rootCtx, pool, *writerID, *writeRPS, *writeTimeout, &nextSeq, &confirmedSeqs, &ctrs)
 	}()
 	go func() {
 		defer wg.Done()
@@ -157,6 +167,7 @@ func runWriter(
 	pool *pgxpool.Pool,
 	writerID string,
 	rps int,
+	writeTimeout time.Duration,
 	nextSeq *atomic.Int64,
 	confirmedSeqs *sync.Map,
 	ctrs *counters,
@@ -181,7 +192,7 @@ func runWriter(
 		payload := make([]byte, 64)
 		_, _ = rand.Read(payload)
 
-		opCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		opCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 		_, err := pool.Exec(opCtx, insertSQL, writerID, seq, payload)
 		cancel()
 

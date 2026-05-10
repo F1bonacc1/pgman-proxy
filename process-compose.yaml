@@ -346,4 +346,8 @@ processes:
       node-c:
         condition: process_healthy
     environment:
-      - "CHAOS_DSN=host=127.0.0.1,127.0.0.1,127.0.0.1 port=16432,16433,16434 user=postgres dbname=postgres sslmode=disable connect_timeout=2"
+      # connect_timeout=1 is libpq's minimum (integer seconds). The
+      # writer's per-Exec budget is 5s by default — comfortably above
+      # peers (3) * 1s, so a single black-holed peer port leaves >=2s
+      # for the actual INSERT. See cmd/chaos-workload/budget_test.go.
+      - "CHAOS_DSN=host=127.0.0.1,127.0.0.1,127.0.0.1 port=16432,16433,16434 user=postgres dbname=postgres sslmode=disable connect_timeout=1"
