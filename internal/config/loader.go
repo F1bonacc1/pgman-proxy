@@ -117,6 +117,13 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		"PGMAN_PROXY_CONTROL_AUTH_ALLOW_UNAUTH_READS":    boolSet(&cfg.Control.Auth.AllowUnauthReads),
 		"PGMAN_PROXY_CONTROL_TLS_PLAINTEXT_EXPLICIT_ACK": boolSet(&cfg.Control.TLS.PlaintextExplicitAck),
 		"PGMAN_PROXY_SHUTDOWN_DRAIN_BUDGET":              durSet(&cfg.Shutdown.DrainBudget),
+		// Gap O: opt-in destructive recovery toggles. Default false
+		// (pg-manager's safe-by-default posture). Enable to let an
+		// ex-primary that warm-restarts after the cluster elected
+		// someone else auto-rewind back to a standby instead of
+		// sitting indefinitely as a parked-divergence split-brain.
+		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED":      boolSet(&cfg.Policy.AutoDemote.Enabled),
+		"PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED": boolSet(&cfg.Policy.AutoRebootstrap.Enabled),
 	}
 
 	for k, set := range passthrough {

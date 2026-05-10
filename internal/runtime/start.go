@@ -236,17 +236,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			PeerDSNResolver:  peerDSNResolver,
 			LocalPGAddr:      cfg.Postgres.LocalPGAddr,
 		},
-		Policy: pgmanager.Policy{
-			FailoverDelay:    cfg.Policy.FailoverDelay,
-			SwitchoverDelay:  cfg.Policy.SwitchoverDelay,
-			PromoteTimeout:   cfg.Policy.PromoteTimeout,
-			LivenessInterval: cfg.Policy.LivenessInterval,
-			LivenessFailures: cfg.Policy.LivenessFailures,
-			Replication: pgmanager.QuorumSync{
-				MinSync: cfg.Policy.QuorumSync.MinSync,
-				Pool:    nodeIDs(cfg.Peers),
-			},
-		},
+		Policy: policyFromConfig(cfg),
 		ClusterID:            cfg.Cluster.ID,
 		AutoApplyConfChanges: true,
 		PostInitDB:           postInitDBHook(cfg, res.Logger),
@@ -425,6 +415,35 @@ func peerDSNsForConfig(cfg config.Config) map[pgmanager.NodeID]string {
 		out[pgmanager.NodeID(k)] = v
 	}
 	return out
+}
+
+// policyFromConfig translates pgman-proxy's config.PolicyConfig into the
+// pgmanager.Policy literal handed to manager.New. AutoDemote and
+// AutoRebootstrap default to disabled (the pg-manager safe-by-default
+// posture: divergence is detected and parked, but no destructive
+// recovery runs without explicit operator opt-in). Operators set the
+// per-feature `enabled` flag in YAML or via
+// PGMAN_PROXY_POLICY_AUTO_(DEMOTE|REBOOTSTRAP)_ENABLED to turn them on.
+//
+// Closes Gap O: the YAML fields existed (config.go:170-171) but the
+// previous Policy literal omitted them entirely, so an ex-primary that
+// warm-restarted under process-compose `restart: always` came back as
+// primary and produced a two-postmaster split-brain visible only via
+// `divergence.parked` events that the reconciler couldn't act on.
+func policyFromConfig(cfg config.Config) pgmanager.Policy {
+	return pgmanager.Policy{
+		FailoverDelay:    cfg.Policy.FailoverDelay,
+		SwitchoverDelay:  cfg.Policy.SwitchoverDelay,
+		PromoteTimeout:   cfg.Policy.PromoteTimeout,
+		LivenessInterval: cfg.Policy.LivenessInterval,
+		LivenessFailures: cfg.Policy.LivenessFailures,
+		Replication: pgmanager.QuorumSync{
+			MinSync: cfg.Policy.QuorumSync.MinSync,
+			Pool:    nodeIDs(cfg.Peers),
+		},
+		AutoDemote:      pgmanager.AutoDemotePolicy{Enabled: cfg.Policy.AutoDemote.Enabled},
+		AutoRebootstrap: pgmanager.AutoRebootstrapPolicy{Enabled: cfg.Policy.AutoRebootstrap.Enabled},
+	}
 }
 
 func parseSwitchPolicy(s string) pgmanager.SwitchPolicy {
