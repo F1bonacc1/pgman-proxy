@@ -441,8 +441,32 @@ func policyFromConfig(cfg config.Config) pgmanager.Policy {
 			MinSync: cfg.Policy.QuorumSync.MinSync,
 			Pool:    nodeIDs(cfg.Peers),
 		},
-		AutoDemote:      pgmanager.AutoDemotePolicy{Enabled: cfg.Policy.AutoDemote.Enabled},
+		AutoDemote:      autoDemotePolicy(cfg.Policy.AutoDemote.Enabled),
 		AutoRebootstrap: pgmanager.AutoRebootstrapPolicy{Enabled: cfg.Policy.AutoRebootstrap.Enabled},
+	}
+}
+
+// defaultAutoDemoteProbeFailureThreshold matches the example assembly
+// at pg-manager/examples/three_node_nats/main.go:526 — "use-site
+// default of 3 applies only when Enabled=false" per
+// manager.go:937-941, so callers turning AutoDemote on MUST supply a
+// positive value or manager.New rejects with config_invalid. Three
+// is the documented production-shape default.
+const defaultAutoDemoteProbeFailureThreshold = 3
+
+// autoDemotePolicy builds the upstream AutoDemotePolicy from the
+// pgman-proxy boolean. When disabled the zero value is correct.
+// When enabled, populate ProbeFailureThreshold (mandatory) and leave
+// Cooldown / LeadershipStabilityWindow / ProbeTimeout zero so
+// pg-manager's use-site defaults apply (1h / 15s / 5s respectively;
+// see types.go AutoDemotePolicy doc-comments).
+func autoDemotePolicy(enabled bool) pgmanager.AutoDemotePolicy {
+	if !enabled {
+		return pgmanager.AutoDemotePolicy{}
+	}
+	return pgmanager.AutoDemotePolicy{
+		Enabled:               true,
+		ProbeFailureThreshold: defaultAutoDemoteProbeFailureThreshold,
 	}
 }
 

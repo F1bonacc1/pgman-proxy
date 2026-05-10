@@ -52,6 +52,16 @@ func TestPolicyFromConfig_AutoRecoveryWiredThrough(t *testing.T) {
 			if got.AutoRebootstrap.Enabled != tc.wantRebootstrapOn {
 				t.Errorf("AutoRebootstrap.Enabled = %v, want %v", got.AutoRebootstrap.Enabled, tc.wantRebootstrapOn)
 			}
+			// manager.New rejects with ErrConfigInvalid when AutoDemote
+			// is enabled but ProbeFailureThreshold is zero — verify the
+			// helper applies the documented default so the cluster
+			// actually boots.
+			if tc.wantDemoteOn && got.AutoDemote.ProbeFailureThreshold <= 0 {
+				t.Errorf("AutoDemote.ProbeFailureThreshold = %d, want > 0 when Enabled (manager.New rejects zero)", got.AutoDemote.ProbeFailureThreshold)
+			}
+			if !tc.wantDemoteOn && got.AutoDemote.ProbeFailureThreshold != 0 {
+				t.Errorf("AutoDemote.ProbeFailureThreshold = %d, want 0 when disabled (no implicit defaults)", got.AutoDemote.ProbeFailureThreshold)
+			}
 		})
 	}
 }
