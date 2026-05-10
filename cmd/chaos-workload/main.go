@@ -229,22 +229,24 @@ func verifyOnce(
 	ctrs *counters,
 	phase string,
 ) {
-	maxSeq := nextSeq.Load()
-	if maxSeq == 0 {
-		return
-	}
-
-	// Snapshot confirmedSeqs BEFORE issuing the SELECT. The verifier's
-	// invariant is "every commit acknowledged before our query started
-	// must be visible in the query result". Walking the live sync.Map
-	// after the query returned races writes that ack between the
-	// SELECT and the Range, producing false-positive DATA LOSS readings.
-	// New commits that race the query land as benign extra_rows instead.
+	// Order matters. Writer flow is: nextSeq.Add(1) -> INSERT -> Store(seq).
+	// Snapshot confirmedSeqs FIRST, then load maxSeq. That guarantees every
+	// seq in expected is <= maxSeq: Store happens after Add, so any seq
+	// already in the snapshot had Add() return earlier, and the later
+	// nextSeq.Load() observes that increment. The reverse order races the
+	// writer adding seq K+1 between Load() (maxSeq=K) and Range() (sees K+1
+	// in confirmedSeqs); the SELECT WHERE seq <= K then excludes K+1 and
+	// flags a false DATA LOSS for seq K+1. Symmetric race in the other
+	// direction lands as benign extra_rows.
 	expected := make(map[int64]struct{}, 1024)
 	confirmedSeqs.Range(func(k, _ any) bool {
 		expected[k.(int64)] = struct{}{}
 		return true
 	})
+	maxSeq := nextSeq.Load()
+	if maxSeq == 0 {
+		return
+	}
 
 	opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
