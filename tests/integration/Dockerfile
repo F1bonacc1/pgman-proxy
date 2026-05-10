@@ -15,6 +15,13 @@
 # pg_basebackup (on followers). Pre-running initdb short-circuits that
 # state machine.
 
+# Global ARG so ${POSTGRES_VERSION} substitutes at the second FROM.
+# Stage-scoped ARGs aren't visible to subsequent FROM lines; only
+# ARGs declared before the first FROM are. The integration suite
+# inherits the default (17); the process-compose dev cluster overrides
+# to 18 via `--build-arg POSTGRES_VERSION=18`.
+ARG POSTGRES_VERSION=17
+
 FROM golang:1.25-bookworm AS build
 WORKDIR /src
 
@@ -30,7 +37,6 @@ RUN CGO_ENABLED=0 go build \
         -ldflags="-s -w -X main.version=integration-test" \
         -o /out/pgman-proxy ./cmd/pgman-proxy
 
-ARG POSTGRES_VERSION=17
 FROM postgres:${POSTGRES_VERSION}-bookworm
 ARG POSTGRES_VERSION
 COPY --from=build /out/pgman-proxy /usr/local/bin/pgman-proxy
