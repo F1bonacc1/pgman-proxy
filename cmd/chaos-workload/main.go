@@ -234,6 +234,18 @@ func verifyOnce(
 		return
 	}
 
+	// Snapshot confirmedSeqs BEFORE issuing the SELECT. The verifier's
+	// invariant is "every commit acknowledged before our query started
+	// must be visible in the query result". Walking the live sync.Map
+	// after the query returned races writes that ack between the
+	// SELECT and the Range, producing false-positive DATA LOSS readings.
+	// New commits that race the query land as benign extra_rows instead.
+	expected := make(map[int64]struct{}, 1024)
+	confirmedSeqs.Range(func(k, _ any) bool {
+		expected[k.(int64)] = struct{}{}
+		return true
+	})
+
 	opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -259,10 +271,9 @@ func verifyOnce(
 	}
 	rows.Close()
 
-	var confirmedCount, missing int64
-	confirmedSeqs.Range(func(k, _ any) bool {
-		confirmedCount++
-		seq := k.(int64)
+	confirmedCount := int64(len(expected))
+	var missing int64
+	for seq := range expected {
 		if _, ok := present[seq]; !ok {
 			missing++
 			slog.Error("DATA LOSS — acknowledged commit not readable",
@@ -271,8 +282,7 @@ func verifyOnce(
 				"phase", phase,
 			)
 		}
-		return true
-	})
+	}
 
 	dbCount := int64(len(present))
 	extras := dbCount - (confirmedCount - missing)
