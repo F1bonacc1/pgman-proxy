@@ -247,8 +247,10 @@ func verifyOnce(
 	// nextSeq.Load() observes that increment. The reverse order races the
 	// writer adding seq K+1 between Load() (maxSeq=K) and Range() (sees K+1
 	// in confirmedSeqs); the SELECT WHERE seq <= K then excludes K+1 and
-	// flags a false DATA LOSS for seq K+1. Symmetric race in the other
-	// direction lands as benign extra_rows.
+	// flags a false DATA LOSS for seq K+1. The mirror race (DB sees a row
+	// the snapshot doesn't) is absorbed by finalizeVerifyDiff re-Ranging
+	// confirmedSeqs after the SELECT, so writes that committed mid-sweep
+	// no longer surface as false extras.
 	expected := make(map[int64]struct{}, 1024)
 	confirmedSeqs.Range(func(k, _ any) bool {
 		expected[k.(int64)] = struct{}{}
@@ -284,24 +286,17 @@ func verifyOnce(
 	}
 	rows.Close()
 
+	missingSeqs, extras := finalizeVerifyDiff(confirmedSeqs, expected, present)
+	for _, seq := range missingSeqs {
+		slog.Error("DATA LOSS — acknowledged commit not readable",
+			"writer_id", writerID,
+			"seq", seq,
+			"phase", phase,
+		)
+	}
+	missing := int64(len(missingSeqs))
 	confirmedCount := int64(len(expected))
-	var missing int64
-	for seq := range expected {
-		if _, ok := present[seq]; !ok {
-			missing++
-			slog.Error("DATA LOSS — acknowledged commit not readable",
-				"writer_id", writerID,
-				"seq", seq,
-				"phase", phase,
-			)
-		}
-	}
-
 	dbCount := int64(len(present))
-	extras := dbCount - (confirmedCount - missing)
-	if extras < 0 {
-		extras = 0
-	}
 
 	if missing > 0 {
 		ctrs.dataLoss.Add(missing)
@@ -319,6 +314,28 @@ func verifyOnce(
 		"rows_in_db", dbCount,
 		"max_seq", maxSeq,
 	)
+}
+
+// finalizeVerifyDiff reconciles the in-memory snapshot with the DB result.
+// It re-Ranges confirmedSeqs first so that any seq the writer Stored
+// between the initial snapshot and the SELECT is folded into expected.
+// Without this, a row visible to the SELECT but not yet in the initial
+// snapshot is flagged as a false extras=1, even though no row was actually
+// duplicated — the writer is simply mid-write at sweep time. The mirror
+// race (snapshot ahead of DB) cannot happen: the writer Stores AFTER the
+// INSERT commits, so anything in confirmedSeqs is already durable.
+func finalizeVerifyDiff(confirmedSeqs *sync.Map, expected, present map[int64]struct{}) (missing []int64, extras int64) {
+	confirmedSeqs.Range(func(k, _ any) bool {
+		expected[k.(int64)] = struct{}{}
+		return true
+	})
+	for seq := range expected {
+		if _, ok := present[seq]; !ok {
+			missing = append(missing, seq)
+		}
+	}
+	extras = max(int64(len(present))-int64(len(expected))+int64(len(missing)), 0)
+	return
 }
 
 func envOr(key, fallback string) string {
