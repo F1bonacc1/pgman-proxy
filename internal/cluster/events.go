@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -59,6 +60,7 @@ func handleCoordinationEvent(m *nats.Msg, logger *obs.Logger, metrics *obs.Metri
 	metrics.CoordinationEventsTotal.WithLabelValues(subject, outcome).Inc()
 	fields := []pgmanager.Field{
 		{Key: "subject", Value: subject},
+		{Key: "outcome", Value: outcome},
 		{Key: "payload_size_bytes", Value: len(m.Data)},
 	}
 	// Trace-context propagation per contracts/observability.md: read
@@ -71,7 +73,47 @@ func handleCoordinationEvent(m *nats.Msg, logger *obs.Logger, metrics *obs.Metri
 				pgmanager.Field{Key: "span_id", Value: tp.SpanID})
 		}
 	}
+	// Surface the JSON payload as structured fields so a single log
+	// line carries the per-event context (term, role, reason, from/to,
+	// new_leader, condition, …) that pg-manager already publishes. The
+	// payload schema varies per subject (see pg-manager observability/
+	// events.go), so decode into a generic map and flatten under a
+	// `payload` key. Header fields common to most pg-manager events —
+	// node_id, state, role, term — are promoted to `emitter_*` so they
+	// don't collide with the proxy's own node_id field on the record.
+	if len(m.Data) > 0 {
+		var payload map[string]any
+		if err := json.Unmarshal(m.Data, &payload); err == nil && len(payload) > 0 {
+			fields = appendEmitterFields(fields, payload)
+			fields = append(fields, pgmanager.Field{Key: "payload", Value: payload})
+		}
+	}
 	logger.Info("coordination event", fields...)
+}
+
+// appendEmitterFields promotes the pg-manager EventHeader fields that
+// are useful for at-a-glance log skimming (term, state, role, the
+// emitting node) to top-level so an operator does not have to dig
+// into the `payload` map to answer "who emitted this in what term".
+// Fields not present in the payload are silently skipped — most
+// pg-manager events embed EventHeader but a few (PeerSlotsEnsured,
+// StateTransition) carry their own schema.
+func appendEmitterFields(fields []pgmanager.Field, payload map[string]any) []pgmanager.Field {
+	emitterKeys := []struct {
+		payloadKey string
+		logKey     string
+	}{
+		{"node_id", "emitter_node_id"},
+		{"state", "emitter_state"},
+		{"role", "emitter_role"},
+		{"term", "emitter_term"},
+	}
+	for _, k := range emitterKeys {
+		if v, ok := payload[k.payloadKey]; ok && v != nil && v != "" {
+			fields = append(fields, pgmanager.Field{Key: k.logKey, Value: v})
+		}
+	}
+	return fields
 }
 
 // classifyOutcome derives the `outcome` label for the
