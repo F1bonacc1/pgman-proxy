@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"sync"
@@ -316,25 +317,47 @@ func verifyOnce(
 	)
 }
 
-// finalizeVerifyDiff reconciles the in-memory snapshot with the DB result.
-// It re-Ranges confirmedSeqs first so that any seq the writer Stored
-// between the initial snapshot and the SELECT is folded into expected.
-// Without this, a row visible to the SELECT but not yet in the initial
-// snapshot is flagged as a false extras=1, even though no row was actually
-// duplicated — the writer is simply mid-write at sweep time. The mirror
-// race (snapshot ahead of DB) cannot happen: the writer Stores AFTER the
-// INSERT commits, so anything in confirmedSeqs is already durable.
+// finalizeVerifyDiff reconciles the in-memory snapshot with the DB
+// result. Two separate computations:
+//
+// Missing detection MUST use the pre-SELECT snapshot only. For any seq
+// in `expected`: Store(seq) happened-before the snapshot, Store happens
+// after INSERT returns OK, so the postgres commit also happened-before
+// the snapshot — therefore happens-before the SELECT — therefore the
+// SELECT's MVCC snapshot sees the row. If `present` doesn't contain
+// the seq, it's genuine data loss. Re-Ranging confirmedSeqs here would
+// pick up seqs the writer Stored AFTER our SELECT was sent — those
+// commits MAY have happened after the SELECT's MVCC snapshot, so the
+// row legitimately isn't visible to that SELECT, and reporting them
+// as missing would be a false positive (the bug this function had in
+// its first revision).
+//
+// Extras detection uses an augmented snapshot. A seq the writer Stored
+// between the initial snapshot and the SELECT — whose commit happened
+// before the SELECT's MVCC snapshot — appears in `present` but not in
+// the pre-SELECT `expected`. Folding the post-SELECT confirmedSeqs
+// state into a separate `augmented` set absorbs that benign race so
+// in-flight commits don't flag as false extras=1. A row in `present`
+// but NOT in `augmented` is a real extra (e.g., duplicate insert from
+// a retry, or a row that escaped the writer's confirmedSeqs Store).
 func finalizeVerifyDiff(confirmedSeqs *sync.Map, expected, present map[int64]struct{}) (missing []int64, extras int64) {
-	confirmedSeqs.Range(func(k, _ any) bool {
-		expected[k.(int64)] = struct{}{}
-		return true
-	})
 	for seq := range expected {
 		if _, ok := present[seq]; !ok {
 			missing = append(missing, seq)
 		}
 	}
-	extras = max(int64(len(present))-int64(len(expected))+int64(len(missing)), 0)
+
+	augmented := make(map[int64]struct{}, len(expected))
+	maps.Copy(augmented, expected)
+	confirmedSeqs.Range(func(k, _ any) bool {
+		augmented[k.(int64)] = struct{}{}
+		return true
+	})
+	for seq := range present {
+		if _, ok := augmented[seq]; !ok {
+			extras++
+		}
+	}
 	return
 }
 

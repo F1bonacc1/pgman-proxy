@@ -106,3 +106,43 @@ func TestFinalizeVerifyDiff_CleanState(t *testing.T) {
 		t.Errorf("extras=%d, want 0", extras)
 	}
 }
+
+// TestFinalizeVerifyDiff_StoreAfterSelectIsNotFalseMissing pins the
+// regression that the first version of this helper hit: a seq the
+// writer Stored AFTER the SELECT was sent (whose postgres commit may
+// have happened after the SELECT's MVCC snapshot, so the row is
+// legitimately not visible to that SELECT) MUST NOT be flagged as
+// missing. The original implementation re-Ranged confirmedSeqs and
+// mutated `expected`, then iterated to find missing — which incorrectly
+// reported the in-flight seq as data loss every verify tick, exactly
+// matching the chaos-run pattern where each reported missing equaled
+// max_seq (the very latest write).
+//
+// Now: missing detection ignores the post-SELECT Store; extras
+// detection still absorbs it.
+func TestFinalizeVerifyDiff_StoreAfterSelectIsNotFalseMissing(t *testing.T) {
+	var confirmed sync.Map
+	confirmed.Store(int64(1), struct{}{})
+	confirmed.Store(int64(2), struct{}{})
+
+	// Initial snapshot — taken BEFORE the SELECT — captures only the
+	// seqs whose Store happened-before this moment.
+	expected := map[int64]struct{}{1: {}, 2: {}}
+
+	// SELECT returns {1, 2} because seq 3's commit happened after the
+	// SELECT's MVCC snapshot.
+	present := map[int64]struct{}{1: {}, 2: {}}
+
+	// After the SELECT returns, the writer's INSERT for seq 3 commits
+	// and Store(3) fires. confirmedSeqs now has 3.
+	confirmed.Store(int64(3), struct{}{})
+
+	missing, extras := finalizeVerifyDiff(&confirmed, expected, present)
+
+	if len(missing) != 0 {
+		t.Errorf("missing=%v, want [] — post-SELECT Store must NOT trigger false data-loss", missing)
+	}
+	if extras != 0 {
+		t.Errorf("extras=%d, want 0", extras)
+	}
+}
