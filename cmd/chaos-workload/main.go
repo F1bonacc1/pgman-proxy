@@ -111,9 +111,14 @@ func main() {
 	)
 
 	var (
-		nextSeq        atomic.Int64
-		confirmedSeqs  sync.Map
-		ctrs           counters
+		nextSeq       atomic.Int64
+		confirmedSeqs sync.Map
+		// missingSet rolls forward across verify ticks the set of seqs
+		// the workload acknowledged but cannot currently read. Owned by
+		// the verifier goroutine + the final tick after Wait — never
+		// touched concurrently, so a plain map is safe.
+		missingSet = make(map[int64]struct{})
+		ctrs       counters
 	)
 
 	var wg sync.WaitGroup
@@ -124,14 +129,14 @@ func main() {
 	}()
 	go func() {
 		defer wg.Done()
-		runVerifier(rootCtx, pool, *writerID, *verifyInterval, &nextSeq, &confirmedSeqs, &ctrs)
+		runVerifier(rootCtx, pool, *writerID, *verifyInterval, &nextSeq, &confirmedSeqs, missingSet, &ctrs)
 	}()
 
 	wg.Wait()
 
 	finalCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	verifyOnce(finalCtx, pool, *writerID, &nextSeq, &confirmedSeqs, &ctrs, "final")
+	verifyOnce(finalCtx, pool, *writerID, &nextSeq, &confirmedSeqs, missingSet, &ctrs, "final")
 
 	slog.Info("chaos-workload exiting",
 		"writer_id", *writerID,
@@ -217,6 +222,7 @@ func runVerifier(
 	interval time.Duration,
 	nextSeq *atomic.Int64,
 	confirmedSeqs *sync.Map,
+	missingSet map[int64]struct{},
 	ctrs *counters,
 ) {
 	ticker := time.NewTicker(interval)
@@ -228,7 +234,7 @@ func runVerifier(
 			return
 		case <-ticker.C:
 		}
-		verifyOnce(ctx, pool, writerID, nextSeq, confirmedSeqs, ctrs, "verify")
+		verifyOnce(ctx, pool, writerID, nextSeq, confirmedSeqs, missingSet, ctrs, "verify")
 	}
 }
 
@@ -238,6 +244,7 @@ func verifyOnce(
 	writerID string,
 	nextSeq *atomic.Int64,
 	confirmedSeqs *sync.Map,
+	missingSet map[int64]struct{},
 	ctrs *counters,
 	phase string,
 ) {
@@ -288,20 +295,33 @@ func verifyOnce(
 	rows.Close()
 
 	missingSeqs, extras := finalizeVerifyDiff(confirmedSeqs, expected, present)
-	for _, seq := range missingSeqs {
+	newlyMissing, resolved := updateMissingSet(missingSet, missingSeqs, present)
+	for _, seq := range newlyMissing {
 		slog.Error("DATA LOSS — acknowledged commit not readable",
 			"writer_id", writerID,
 			"seq", seq,
 			"phase", phase,
 		)
 	}
-	missing := int64(len(missingSeqs))
+	for _, seq := range resolved {
+		slog.Info("data loss resolved — row reappeared on current primary",
+			"writer_id", writerID,
+			"seq", seq,
+			"phase", phase,
+		)
+	}
 	confirmedCount := int64(len(expected))
 	dbCount := int64(len(present))
 
-	if missing > 0 {
-		ctrs.dataLoss.Add(missing)
-	}
+	// data_loss_total reports the count of DISTINCT seqs that the
+	// workload acknowledged but currently cannot read on the primary.
+	// Counter mode (Add per missing-sighting per tick) produces runaway
+	// numbers during stale-read windows: the proxy briefly forwards
+	// SELECTs to a node with older timeline data and the same 800 seqs
+	// get re-counted every 5s as "lost". Tracking distinct unresolved
+	// seqs gives the signal operators actually want — how many ack'd
+	// commits are right now unreadable.
+	ctrs.dataLoss.Store(int64(len(missingSet)))
 	ctrs.extraRows.Store(extras)
 
 	slog.Info("verify",
@@ -356,6 +376,36 @@ func finalizeVerifyDiff(confirmedSeqs *sync.Map, expected, present map[int64]str
 	for seq := range present {
 		if _, ok := augmented[seq]; !ok {
 			extras++
+		}
+	}
+	return
+}
+
+// updateMissingSet evolves the rolling "still-missing" set across verify
+// ticks. The verifier's data_loss_total reports |missingSet| (DISTINCT
+// unresolved seqs) instead of a cumulative count of missing-sightings.
+// Cumulative mode turned every stale-read window — the proxy briefly
+// forwards SELECTs to a node with an older timeline, so the same N seqs
+// are re-counted every 5s — into a runaway counter that looked like
+// real data loss but wasn't.
+//
+// Two passes per call. First, resolve seqs that have reappeared in
+// `present`: their commits are durable on the current upstream, so they
+// were transient stale-reads, not loss. Second, fold this tick's
+// freshly-detected missing seqs in. Returns the seqs newly added and
+// newly resolved so the caller can log one ERROR per first-detection
+// and one INFO per recovery edge.
+func updateMissingSet(missingSet map[int64]struct{}, thisTickMissing []int64, present map[int64]struct{}) (newlyDetected, resolved []int64) {
+	for seq := range missingSet {
+		if _, ok := present[seq]; ok {
+			resolved = append(resolved, seq)
+			delete(missingSet, seq)
+		}
+	}
+	for _, seq := range thisTickMissing {
+		if _, already := missingSet[seq]; !already {
+			newlyDetected = append(newlyDetected, seq)
+			missingSet[seq] = struct{}{}
 		}
 	}
 	return

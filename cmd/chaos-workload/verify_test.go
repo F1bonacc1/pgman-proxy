@@ -146,3 +146,109 @@ func TestFinalizeVerifyDiff_StoreAfterSelectIsNotFalseMissing(t *testing.T) {
 		t.Errorf("extras=%d, want 0", extras)
 	}
 }
+
+// TestUpdateMissingSet_NewSeqDetectedOnce pins that a seq missing in
+// this tick is reported as newly detected once and added to the set.
+func TestUpdateMissingSet_NewSeqDetectedOnce(t *testing.T) {
+	set := map[int64]struct{}{}
+	thisTick := []int64{42}
+	present := map[int64]struct{}{}
+
+	newly, resolved := updateMissingSet(set, thisTick, present)
+
+	if !slices.Equal(newly, []int64{42}) {
+		t.Errorf("newly=%v, want [42]", newly)
+	}
+	if len(resolved) != 0 {
+		t.Errorf("resolved=%v, want []", resolved)
+	}
+	if _, ok := set[42]; !ok {
+		t.Errorf("set missing seq 42 after add: %v", set)
+	}
+}
+
+// TestUpdateMissingSet_PersistentMissingNotReReported pins the key
+// behavior that fixes the runaway cumulative counter: a seq that was
+// missing in a previous tick and is STILL missing must NOT show up
+// again as newly detected — otherwise the operator gets one error
+// per tick per missing seq instead of one error per distinct loss.
+func TestUpdateMissingSet_PersistentMissingNotReReported(t *testing.T) {
+	set := map[int64]struct{}{42: {}}
+	thisTick := []int64{42}
+	present := map[int64]struct{}{}
+
+	newly, resolved := updateMissingSet(set, thisTick, present)
+
+	if len(newly) != 0 {
+		t.Errorf("newly=%v, want [] (already tracked)", newly)
+	}
+	if len(resolved) != 0 {
+		t.Errorf("resolved=%v, want []", resolved)
+	}
+	if got := len(set); got != 1 {
+		t.Errorf("set size=%d, want 1 (still just seq 42)", got)
+	}
+}
+
+// TestUpdateMissingSet_ReappearanceResolvesAndRemoves pins the recovery
+// path: a previously-reported missing seq that now appears in `present`
+// is reported as resolved and removed from the rolling set. This is
+// what eliminates the 28k false-data-loss accumulation observed in the
+// chaos run — when the proxy stabilizes back on the current primary
+// after a failover window, transient stale-reads heal.
+func TestUpdateMissingSet_ReappearanceResolvesAndRemoves(t *testing.T) {
+	set := map[int64]struct{}{42: {}, 99: {}}
+	thisTick := []int64{99} // seq 42 reappeared; seq 99 still missing
+	present := map[int64]struct{}{42: {}, 100: {}}
+
+	newly, resolved := updateMissingSet(set, thisTick, present)
+
+	if len(newly) != 0 {
+		t.Errorf("newly=%v, want [] (99 was already tracked)", newly)
+	}
+	if !slices.Equal(resolved, []int64{42}) {
+		t.Errorf("resolved=%v, want [42]", resolved)
+	}
+	if _, ok := set[42]; ok {
+		t.Errorf("set still contains resolved seq 42: %v", set)
+	}
+	if _, ok := set[99]; !ok {
+		t.Errorf("set lost still-missing seq 99: %v", set)
+	}
+}
+
+// TestUpdateMissingSet_CountReflectsDistinctUnresolved pins the
+// reported "data_loss_total" semantics: it's len(set), not a running
+// sum. Across 3 ticks where seqs come and go, the set size tracks the
+// instantaneous number of distinct unresolved losses, with no
+// accumulation of resolved sightings.
+func TestUpdateMissingSet_CountReflectsDistinctUnresolved(t *testing.T) {
+	set := map[int64]struct{}{}
+
+	// Tick 1: seqs 1, 2, 3 missing.
+	updateMissingSet(set, []int64{1, 2, 3}, map[int64]struct{}{})
+	if got := len(set); got != 3 {
+		t.Errorf("after tick 1: size=%d, want 3", got)
+	}
+
+	// Tick 2: same 3 seqs still missing — set should not grow.
+	updateMissingSet(set, []int64{1, 2, 3}, map[int64]struct{}{})
+	if got := len(set); got != 3 {
+		t.Errorf("after tick 2 (no change): size=%d, want 3 (NOT 6 — would be the regression)", got)
+	}
+
+	// Tick 3: seqs 1, 3 reappear; seq 2 still missing; seq 5 newly missing.
+	updateMissingSet(set, []int64{2, 5}, map[int64]struct{}{1: {}, 3: {}, 99: {}})
+	if got := len(set); got != 2 {
+		t.Errorf("after tick 3: size=%d, want 2 (seqs 2 and 5)", got)
+	}
+	if _, ok := set[1]; ok {
+		t.Errorf("seq 1 should be resolved")
+	}
+	if _, ok := set[3]; ok {
+		t.Errorf("seq 3 should be resolved")
+	}
+	if _, ok := set[5]; !ok {
+		t.Errorf("seq 5 should be tracked")
+	}
+}
