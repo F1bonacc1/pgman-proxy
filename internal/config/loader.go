@@ -124,6 +124,11 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		// sitting indefinitely as a parked-divergence split-brain.
 		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED":      boolSet(&cfg.Policy.AutoDemote.Enabled),
 		"PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED": boolSet(&cfg.Policy.AutoRebootstrap.Enabled),
+		// Reconciler tick / liveness probe cadence. Drives the quorum
+		// snapshot staleness threshold (3 × LivenessInterval). Drop in
+		// the chaos rig to shorten cold-restart recovery; production
+		// keeps the 5s default.
+		"PGMAN_PROXY_POLICY_LIVENESS_INTERVAL": durSet(&cfg.Policy.LivenessInterval),
 	}
 
 	for k, set := range passthrough {

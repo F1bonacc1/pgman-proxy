@@ -190,6 +190,7 @@ processes:
         -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
+        -e PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=2s \
         pgman-proxy:dev
     is_daemon: false
     availability:
@@ -245,6 +246,7 @@ processes:
         -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
+        -e PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=2s \
         pgman-proxy:dev
     is_daemon: false
     availability:
@@ -302,6 +304,7 @@ processes:
         -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
+        -e PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=2s \
         pgman-proxy:dev
     is_daemon: false
     availability:
