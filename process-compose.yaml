@@ -191,6 +191,8 @@ processes:
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
         -e PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=2s \
+        -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN=30s \
+        -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW=5s \
         pgman-proxy:dev
     is_daemon: false
     availability:
@@ -247,6 +249,8 @@ processes:
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
         -e PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=2s \
+        -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN=30s \
+        -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW=5s \
         pgman-proxy:dev
     is_daemon: false
     availability:
@@ -305,6 +309,8 @@ processes:
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
         -e PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=2s \
+        -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN=30s \
+        -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW=5s \
         pgman-proxy:dev
     is_daemon: false
     availability:

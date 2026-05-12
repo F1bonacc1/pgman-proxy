@@ -168,7 +168,7 @@ type PolicyConfig struct {
 	LivenessFailures int             `yaml:"liveness_failures" json:"liveness_failures"`
 	QuorumSync       QuorumSyncCfg   `yaml:"quorum_sync"       json:"quorum_sync"`
 	AutoRebootstrap  AutoRecoveryCfg `yaml:"auto_rebootstrap"  json:"auto_rebootstrap"`
-	AutoDemote       AutoRecoveryCfg `yaml:"auto_demote"       json:"auto_demote"`
+	AutoDemote       AutoDemoteCfg   `yaml:"auto_demote"       json:"auto_demote"`
 }
 
 // QuorumSyncCfg mirrors pgmanager.QuorumSync.
@@ -179,6 +179,18 @@ type QuorumSyncCfg struct {
 // AutoRecoveryCfg toggles a single auto-recovery loop.
 type AutoRecoveryCfg struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
+// AutoDemoteCfg tunes the auto-demote recovery loop. Zero values for the
+// duration fields mean "use pg-manager's documented defaults" (1h cooldown,
+// 15s leader-stability window, 5s probe timeout — see pg-manager/types.go
+// AutoDemotePolicy). Operators tighten these in chaos rigs where a 1h
+// cooldown defeats rapid failure-mode testing; production keeps defaults.
+type AutoDemoteCfg struct {
+	Enabled                   bool          `yaml:"enabled"                     json:"enabled"`
+	Cooldown                  time.Duration `yaml:"cooldown"                    json:"cooldown"`
+	LeadershipStabilityWindow time.Duration `yaml:"leadership_stability_window" json:"leadership_stability_window"`
+	ProbeTimeout              time.Duration `yaml:"probe_timeout"               json:"probe_timeout"`
 }
 
 // ObsConfig drives logger/metrics/health/tracer wiring.

@@ -129,6 +129,13 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		// the chaos rig to shorten cold-restart recovery; production
 		// keeps the 5s default.
 		"PGMAN_PROXY_POLICY_LIVENESS_INTERVAL": durSet(&cfg.Policy.LivenessInterval),
+		// AutoDemote timing knobs. Production defaults (1h / 15s / 5s) are
+		// applied by pg-manager when these stay zero. Chaos rigs tighten
+		// the cooldown so a refused demote doesn't park the cluster for
+		// an hour after rapid-flap scenarios.
+		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN":                    durSet(&cfg.Policy.AutoDemote.Cooldown),
+		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW": durSet(&cfg.Policy.AutoDemote.LeadershipStabilityWindow),
+		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_PROBE_TIMEOUT":               durSet(&cfg.Policy.AutoDemote.ProbeTimeout),
 	}
 
 	for k, set := range passthrough {

@@ -41,7 +41,7 @@ func TestPolicyFromConfig_AutoRecoveryWiredThrough(t *testing.T) {
 			t.Parallel()
 			cfg := config.Config{
 				Policy: config.PolicyConfig{
-					AutoDemote:      config.AutoRecoveryCfg{Enabled: tc.demoteEnabled},
+					AutoDemote:      config.AutoDemoteCfg{Enabled: tc.demoteEnabled},
 					AutoRebootstrap: config.AutoRecoveryCfg{Enabled: tc.rebootstrapEnabled},
 				},
 			}
