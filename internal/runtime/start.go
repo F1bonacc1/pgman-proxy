@@ -218,6 +218,21 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("postgres executor: %w", err)}
 	}
 
+	// Gate #6.5: Honor pg-manager's "assume standby until proven primary"
+	// startup_with_pgdata contract at the postgres level. Without this,
+	// a node whose PGDATA was last operating as primary (e.g. it was
+	// docker-restarted mid-failover) comes back as a postgres-level
+	// primary while pg-manager declares role=standby — a latent
+	// split-brain that depends on auto_demote's stability+cooldown gates
+	// to ever heal. Writing standby.signal before manager.Start forces
+	// postgres to come up as a standby; if quorum proves us the
+	// rightful primary, pg-manager's became_leader → pg_promote path
+	// removes the signal during promotion (pg_ctl promote is idempotent
+	// against an already-primary backend per pgproto/pgexec.go).
+	if err := ensureStandbySignalIfInitialized(cfg.Postgres.DataDir, res.Logger); err != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("ensure standby.signal: %w", err)}
+	}
+
 	// Gate #7: Manager constructed.
 	mgrCfg := manager.Config{
 		Leadership: handles.Leadership,
@@ -336,6 +351,62 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	return res, nil
 }
 
+// ensureStandbySignalIfInitialized writes <DataDir>/standby.signal when
+// PGDATA is initialized (PG_VERSION present) and no signal file exists
+// yet. Idempotent — the function is a no-op when PGDATA is empty (first
+// boot will run initdb) or when standby.signal is already present.
+//
+// Rationale: pg-manager's startup_with_pgdata transition declares the
+// node as role=standby on the strength of "an initialized PGDATA"
+// (state/transitions.go:75 "assume standby until proven primary"), but
+// it does NOT enforce that postgres on disk agrees. If the previous
+// session ended while this node was operating as primary (postmaster
+// shutdown, host restart, container restart) PGDATA has no
+// standby.signal and pg_ctl start brings postgres up as a primary —
+// creating a window where pg-manager's role state and postgres's
+// in-recovery state disagree. That window depends on auto_demote's
+// stability + cooldown gates to close; under chaos load (rapid
+// failover sequences) it never closes and the cluster ends up with
+// two postgres primaries serving writes against diverged WALs.
+//
+// Writing standby.signal pre-emptively closes the window at the
+// process-startup boundary. If quorum subsequently proves us the
+// rightful primary, pg-manager's became_leader → StatePromoting path
+// calls pg_ctl promote, which removes standby.signal and exits
+// recovery. The cost is one extra promote on the rightful primary's
+// startup path; the benefit is the elimination of a structural
+// split-brain class.
+func ensureStandbySignalIfInitialized(dataDir string, logger pgmanager.Logger) error {
+	if dataDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "PG_VERSION")); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat PG_VERSION: %w", err)
+	}
+	signalPath := filepath.Join(dataDir, "standby.signal")
+	if _, err := os.Stat(signalPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat standby.signal: %w", err)
+	}
+	f, err := os.OpenFile(signalPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return fmt.Errorf("create standby.signal: %w", err)
+	}
+	_ = f.Close()
+	logger.Info(
+		"startup_with_pgdata: wrote standby.signal preemptively",
+		pgmanager.Field{Key: "data_dir", Value: dataDir},
+	)
+	return nil
+}
+
 // managerLeaderState adapts *manager.Manager to the control.LeaderState
 // interface. The walking-skeleton implementation is conservative: until
 // pg-manager exposes a richer leadership view, we return what we know
@@ -441,7 +512,7 @@ func policyFromConfig(cfg config.Config) pgmanager.Policy {
 			MinSync: cfg.Policy.QuorumSync.MinSync,
 			Pool:    nodeIDs(cfg.Peers),
 		},
-		AutoDemote:      autoDemotePolicy(cfg.Policy.AutoDemote.Enabled),
+		AutoDemote:      autoDemotePolicy(cfg.Policy.AutoDemote),
 		AutoRebootstrap: pgmanager.AutoRebootstrapPolicy{Enabled: cfg.Policy.AutoRebootstrap.Enabled},
 	}
 }
@@ -454,19 +525,22 @@ func policyFromConfig(cfg config.Config) pgmanager.Policy {
 // is the documented production-shape default.
 const defaultAutoDemoteProbeFailureThreshold = 3
 
-// autoDemotePolicy builds the upstream AutoDemotePolicy from the
-// pgman-proxy boolean. When disabled the zero value is correct.
-// When enabled, populate ProbeFailureThreshold (mandatory) and leave
-// Cooldown / LeadershipStabilityWindow / ProbeTimeout zero so
-// pg-manager's use-site defaults apply (1h / 15s / 5s respectively;
-// see types.go AutoDemotePolicy doc-comments).
-func autoDemotePolicy(enabled bool) pgmanager.AutoDemotePolicy {
-	if !enabled {
+// autoDemotePolicy builds the upstream AutoDemotePolicy from the proxy's
+// AutoDemoteCfg. When disabled the zero value is correct. When enabled,
+// populate ProbeFailureThreshold (mandatory) and forward any explicit
+// duration overrides from the proxy config; zero values fall through to
+// pg-manager's use-site defaults (1h cooldown, 15s leadership-stability
+// window, 5s probe timeout — see pg-manager/types.go AutoDemotePolicy).
+func autoDemotePolicy(c config.AutoDemoteCfg) pgmanager.AutoDemotePolicy {
+	if !c.Enabled {
 		return pgmanager.AutoDemotePolicy{}
 	}
 	return pgmanager.AutoDemotePolicy{
-		Enabled:               true,
-		ProbeFailureThreshold: defaultAutoDemoteProbeFailureThreshold,
+		Enabled:                   true,
+		ProbeFailureThreshold:     defaultAutoDemoteProbeFailureThreshold,
+		Cooldown:                  c.Cooldown,
+		LeadershipStabilityWindow: c.LeadershipStabilityWindow,
+		ProbeTimeout:              c.ProbeTimeout,
 	}
 }
 
