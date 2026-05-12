@@ -40,6 +40,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Operators do not need any NATS-ecosystem CLI tool to run
   `pgman-proxy` (FR-014).
 
+### Changed — runtime / config defaults
+
+- **Default `Policy.LivenessInterval`** lowered from `5s` to `2s` in
+  `internal/config/config.go` `Defaults()`. Drives reconciler tick
+  cadence + per-peer postgres liveness probes + (3× interval) →
+  `QuorumSnapshotStaleAfter`. Net effect on production: a confirmed
+  primary failure starts the failover-delay clock ~2.5× faster, the
+  quorum snapshot ages to "stale" at 6s instead of 15s, and CPU /
+  NATS-heartbeat overhead grows by a single `SELECT 1` per node every
+  2s (negligible). Operators wanting the legacy 5s cadence override
+  via `PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=5s`. pg-manager's library
+  default is unchanged at 5s.
+
+### Added — startup_with_pgdata split-brain guard
+
+- **Pre-emptive `standby.signal` write** on every startup with an
+  initialized PGDATA (`internal/runtime/start.go::ensureStandbySignalIfInitialized`).
+  Honors pg-manager's documented "assume standby until proven primary"
+  contract at the postgres level — previously pg-manager declared
+  `role=standby` while postgres-on-disk could still come up as a
+  primary, producing a structural split-brain window that depended on
+  auto-demote's stability + cooldown gates to close. The rightful
+  primary now pays one extra `pg_ctl promote` cycle on startup
+  (idempotent, ~tens of ms). Chaos-rig verification: six scenarios
+  including `docker restart primary` and `cascading kill` now recover
+  in ~10s with two clean streaming standbys; before this change those
+  two scenarios reliably birthed two- or three-primary split-brain.
+
+### Added — config knobs
+
+- New env vars wire previously-hidden pg-manager `AutoDemote` fields
+  through the proxy config (zero values pass through to pg-manager's
+  documented defaults: `Cooldown=1h`, `LeadershipStabilityWindow=15s`,
+  `ProbeTimeout=5s`):
+  - `PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN`
+  - `PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW`
+  - `PGMAN_PROXY_POLICY_AUTO_DEMOTE_PROBE_TIMEOUT`
+
+  Defaults are unchanged; the chaos rig uses overrides in
+  `process-compose.yaml`. Split the proxy's `AutoRecoveryCfg` (now used
+  only for `AutoRebootstrap`) from a new `AutoDemoteCfg` carrying the
+  three duration fields.
+
 ### Added — milestone 001 (active/active proxy + LCM control plane)
 
 #### Data-plane proxy (US1)

@@ -271,7 +271,14 @@ func Defaults() Config {
 			FailoverDelay:    30 * time.Second,
 			SwitchoverDelay:  30 * time.Second,
 			PromoteTimeout:   60 * time.Second,
-			LivenessInterval: 5 * time.Second,
+			// LivenessInterval drives reconciler tick cadence + the
+			// liveness probe + (3 × interval) QuorumSnapshotStaleAfter.
+			// 2s gives ~6s quorum-snapshot staleness and matches the
+			// chaos rig's prior env-var override; production overhead
+			// is one SELECT per node per 2s plus NATS heartbeat budget.
+			// Operators wanting the legacy 5s cadence override via
+			// PGMAN_PROXY_POLICY_LIVENESS_INTERVAL=5s.
+			LivenessInterval: 2 * time.Second,
 			LivenessFailures: 3,
 			QuorumSync:       QuorumSyncCfg{MinSync: 1},
 		},
