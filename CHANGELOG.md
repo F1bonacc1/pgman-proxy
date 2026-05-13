@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — v1 stability pass (SOAK-01 28k-row data loss)
+
+- **STAB-01 — stale-standby promotion (REQ-DL-01 violation)**: leader
+  election now consults a WAL-currency gate before `pg_promote()`.
+  Wire-up of pg-manager's existing `PromotionEligible` /
+  `PromoteLSNTolerance` machinery into the reconciler dispatch path,
+  plus periodic `publishCurrentLSN` from every tick. A candidate more
+  than 16 MiB (one WAL segment) behind the most-aligned peer self-
+  refuses. SL-4 self-veto blocks candidates with accumulating
+  stale-WAL ticks. New gauge `pgman_proxy_no_eligible_primary` fires
+  when election is blocked by asymmetric staleness; the operator
+  break-glass remains `Manager.Promote` (unchecked). Closes the
+  SOAK-01 28,185-row data-loss event (pg-manager fix lands upstream
+  via the local `replace` directive).
+- **STAB-02 — divergent ex-primary wedged when PG won't start**:
+  pg-manager now reads on-disk `pg_controldata` directly via a new
+  `ControlDataReader` extension to `PostgresExecutor` and derives
+  divergence from `(local_tli, local_lsn)` vs the cluster's published
+  `pgmgr/<cluster>/timeline_fork/<tli>` record (written by every
+  successful promote). The auto-rebootstrap pipeline now fires
+  without requiring `PostgresUp=true`; the `!PostgresUp →
+  EventPostgresCrashed` transition is suppressed while controldata
+  divergence is observed, so the rebootstrap accumulator runs to
+  completion instead of stranding the peer in operator-sticky
+  `StateFailed`.
+- **STAB-03 Part 1 — AutoRebootstrap timing knobs (wrapper)**: new env
+  aliases `PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN` and
+  `PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW` plumbed
+  through `internal/config/loader.go` and the policy literal in
+  `internal/runtime/start.go`. The chaos rig
+  `process-compose.yaml` sets `cooldown=30s, persistence_window=10s`
+  so a single rebootstrap doesn't park the cluster for an hour. Zero
+  values fall through to pg-manager's documented production defaults
+  (1h cooldown, 5min window).
+- **STAB-03 Part 2 — condition-keyed cooldown bypass (upstream)**:
+  pg-manager's `RebootstrapHistory` now carries
+  `LastTriggerCondition`. `CooldownElapsed` permits a fresh-condition
+  bypass — a `stale_wal` recovery does not gate a later
+  `divergent_ex_primary` recovery in the same cooldown window. Loop
+  protection on same-condition repeats is preserved.
+
 ### Changed — milestone 002 (embedded NATS cluster) — IN PROGRESS
 
 - **Breaking**: external NATS dependency removed. Every `pgman-proxy`
