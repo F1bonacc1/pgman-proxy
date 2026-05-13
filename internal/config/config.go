@@ -176,9 +176,16 @@ type QuorumSyncCfg struct {
 	MinSync int `yaml:"min_sync" json:"min_sync"`
 }
 
-// AutoRecoveryCfg toggles a single auto-recovery loop.
+// AutoRecoveryCfg toggles a single auto-recovery loop. Cooldown and
+// PersistenceWindow mirror the pg-manager AutoRebootstrapPolicy duration
+// fields; zero values fall through to the upstream documented defaults
+// (1h cooldown, 5min persistence window). Chaos rigs tighten these so a
+// successful rebootstrap doesn't park the cluster against a fresh stale-
+// WAL condition for an hour. Production keeps defaults.
 type AutoRecoveryCfg struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
+	Enabled           bool          `yaml:"enabled"            json:"enabled"`
+	Cooldown          time.Duration `yaml:"cooldown"           json:"cooldown"`
+	PersistenceWindow time.Duration `yaml:"persistence_window" json:"persistence_window"`
 }
 
 // AutoDemoteCfg tunes the auto-demote recovery loop. Zero values for the

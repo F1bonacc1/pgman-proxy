@@ -513,7 +513,7 @@ func policyFromConfig(cfg config.Config) pgmanager.Policy {
 			Pool:    nodeIDs(cfg.Peers),
 		},
 		AutoDemote:      autoDemotePolicy(cfg.Policy.AutoDemote),
-		AutoRebootstrap: pgmanager.AutoRebootstrapPolicy{Enabled: cfg.Policy.AutoRebootstrap.Enabled},
+		AutoRebootstrap: autoRebootstrapPolicy(cfg.Policy.AutoRebootstrap),
 	}
 }
 
@@ -541,6 +541,23 @@ func autoDemotePolicy(c config.AutoDemoteCfg) pgmanager.AutoDemotePolicy {
 		Cooldown:                  c.Cooldown,
 		LeadershipStabilityWindow: c.LeadershipStabilityWindow,
 		ProbeTimeout:              c.ProbeTimeout,
+	}
+}
+
+// autoRebootstrapPolicy builds the upstream AutoRebootstrapPolicy from
+// the proxy's AutoRecoveryCfg. When disabled the zero value is correct.
+// When enabled, forward any explicit duration overrides; zero values
+// fall through to pg-manager's documented defaults (1h cooldown, 5min
+// persistence window — see pg-manager/types.go AutoRebootstrapPolicy).
+// Chaos rigs override via PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN
+// and PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW so a
+// successful rebootstrap doesn't park the cluster against a fresh
+// stale-WAL condition for an hour (STAB-03 Part 1).
+func autoRebootstrapPolicy(c config.AutoRecoveryCfg) pgmanager.AutoRebootstrapPolicy {
+	return pgmanager.AutoRebootstrapPolicy{
+		Enabled:           c.Enabled,
+		Cooldown:          c.Cooldown,
+		PersistenceWindow: c.PersistenceWindow,
 	}
 }
 

@@ -136,6 +136,13 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN":                    durSet(&cfg.Policy.AutoDemote.Cooldown),
 		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW": durSet(&cfg.Policy.AutoDemote.LeadershipStabilityWindow),
 		"PGMAN_PROXY_POLICY_AUTO_DEMOTE_PROBE_TIMEOUT":               durSet(&cfg.Policy.AutoDemote.ProbeTimeout),
+		// AutoRebootstrap timing knobs. Production defaults (1h / 5m) are
+		// applied by pg-manager when these stay zero. Chaos rigs tighten
+		// the cooldown + persistence window so a successful rebootstrap
+		// doesn't park the cluster against a fresh stale-WAL condition for
+		// an hour (STAB-03 Part 1).
+		"PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN":           durSet(&cfg.Policy.AutoRebootstrap.Cooldown),
+		"PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW": durSet(&cfg.Policy.AutoRebootstrap.PersistenceWindow),
 	}
 
 	for k, set := range passthrough {

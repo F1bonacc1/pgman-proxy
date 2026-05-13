@@ -157,6 +157,7 @@ processes:
     command: |
       docker rm -f pgman-pc-node-a 2>/dev/null
       exec docker run --rm \
+        --cap-add=NET_ADMIN \
         --name pgman-pc-node-a \
         --network pgman-pc-net \
         --network-alias node-a \
@@ -187,11 +188,13 @@ processes:
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
         -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
         -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
-        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
+        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB\nmax_slot_wal_keep_size = 16MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN=30s \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW=5s \
+        -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN=30s \
+        -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW=10s \
         pgman-proxy:dev
     is_daemon: false
     availability:
@@ -214,6 +217,7 @@ processes:
     command: |
       docker rm -f pgman-pc-node-b 2>/dev/null
       exec docker run --rm \
+        --cap-add=NET_ADMIN \
         --name pgman-pc-node-b \
         --network pgman-pc-net \
         --network-alias node-b \
@@ -244,11 +248,13 @@ processes:
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
         -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
         -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
-        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
+        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB\nmax_slot_wal_keep_size = 16MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN=30s \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW=5s \
+        -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN=30s \
+        -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW=10s \
         pgman-proxy:dev
     is_daemon: false
     availability:
@@ -273,6 +279,7 @@ processes:
     command: |
       docker rm -f pgman-pc-node-c 2>/dev/null
       exec docker run --rm \
+        --cap-add=NET_ADMIN \
         --name pgman-pc-node-c \
         --network pgman-pc-net \
         --network-alias node-c \
@@ -303,11 +310,13 @@ processes:
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
         -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
         -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
-        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB" \
+        -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB\nmax_slot_wal_keep_size = 16MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_COOLDOWN=30s \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_LEADERSHIP_STABILITY_WINDOW=5s \
+        -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN=30s \
+        -e PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW=10s \
         pgman-proxy:dev
     is_daemon: false
     availability:
