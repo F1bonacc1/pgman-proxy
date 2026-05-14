@@ -27,15 +27,15 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 **Purpose**: Repo scaffolding, dependency intake, build tooling.
 
-- [ ] T001 Add `github.com/spf13/cobra` and `github.com/fatih/color` to go.mod via `go get`; run `go mod tidy`; commit go.mod + go.sum
-- [ ] T002 [P] Create `cmd/pgmctl/main.go` with a placeholder `main()` that prints "pgmctl <version>" and exits 0; wires nothing yet
-- [ ] T003 [P] Create the directory skeleton for `internal/pgmctl/{client,config,output,cmd,confirm,doctor,dump,watch}` with a `doc.go` stub in each subpackage so `go build ./...` is green
-- [ ] T004 [P] Create the directory skeleton for `internal/history/` and `internal/fanout/` with `doc.go` stubs
-- [ ] T005 Add a `pgmctl` build target to `Makefile`: `go build -trimpath -ldflags="-s -w -X main.version=$(git describe) -X main.commit=$(git rev-parse HEAD)" -o ./bin/pgmctl ./cmd/pgmctl`; verify `make pgmctl` produces a runnable binary
-- [ ] T006 [P] Add a release-matrix target to `Makefile`: `make pgmctl-release` cross-compiles linux/amd64, linux/arm64, darwin/amd64, darwin/arm64; outputs `dist/pgmctl-<version>-<os>-<arch>.tar.gz` + `.sha256`
+- [x] T001 Add `github.com/spf13/cobra` and `github.com/fatih/color` to go.mod via `go get`; run `go mod tidy`; commit go.mod + go.sum
+- [x] T002 [P] Create `cmd/pgmctl/main.go` with a placeholder `main()` that prints "pgmctl <version>" and exits 0; wires nothing yet
+- [x] T003 [P] Create the directory skeleton for `internal/pgmctl/{client,config,output,cmd,confirm,doctor,dump,watch}` with a `doc.go` stub in each subpackage so `go build ./...` is green
+- [x] T004 [P] Create the directory skeleton for `internal/history/` and `internal/fanout/` with `doc.go` stubs
+- [x] T005 Add a `pgmctl` build target to `Makefile`: `go build -trimpath -ldflags="-s -w -X main.version=$(git describe) -X main.commit=$(git rev-parse HEAD)" -o ./bin/pgmctl ./cmd/pgmctl`; verify `make pgmctl` produces a runnable binary
+- [x] T006 [P] Add a release-matrix target to `Makefile`: `make pgmctl-release` cross-compiles linux/amd64, linux/arm64, darwin/amd64, darwin/arm64; outputs `dist/pgmctl-<version>-<os>-<arch>.tar.gz` + `.sha256`
 - [ ] T007 [P] Extend `.github/workflows/ci.yml` (or equivalent) to build `pgmctl` on every PR and run `make pgmctl-release` on tag pushes
-- [ ] T008 [P] Create `tests/golden/pgmctl/` directory with a `README.md` describing the golden-file convention (one fixture per `<command>_<scenario>.<table|json|yaml|ansi>`)
-- [ ] T009 [P] Create `tests/contract/pgmctl/` and `tests/integration/pgmctl/` test directories with `doc.go` stubs
+- [x] T008 [P] Create `tests/golden/pgmctl/` directory with a `README.md` describing the golden-file convention (one fixture per `<command>_<scenario>.<table|json|yaml|ansi>`)
+- [x] T009 [P] Create `tests/contract/pgmctl/` and `tests/integration/pgmctl/` test directories with `doc.go` stubs
 
 **Checkpoint**: `make pgmctl` builds a runnable placeholder binary; CI is green; all subdirectories exist.
 
@@ -63,25 +63,25 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### pgmctl client foundations
 
-- [ ] T021 [P] Implement `internal/pgmctl/config/kubeconfig.go`: load + save `$XDG_CONFIG_HOME/pgmctl/config.yaml` (falls back to `~/.config/pgmctl/config.yaml`); refuse to load if mode is group/world-readable; matches `data-model.md § Context`
-- [ ] T022 [P] Implement `internal/pgmctl/config/context.go`: `Context` struct + `Validate()`; enforces "exactly one of token_env/token_file/token_command" and HTTPS-or-loopback endpoint rule
-- [ ] T023 [P] Implement `internal/pgmctl/config/resolve.go`: endpoint precedence `--endpoint > --context > current-context > PGMCTL_ENDPOINT > error` per FR-006 (depends on T021, T022)
-- [ ] T024 [P] Implement `internal/pgmctl/client/auth.go`: bearer-token source resolution (`token_env` / `token_file` / `token_command`); read on every request (no caching beyond one request); REFUSE `--token` flag at parse time
-- [ ] T025 [P] Implement `internal/pgmctl/client/http.go`: HTTPS client with bearer-auth, TLS verify-full default, optional CA file, `--insecure-skip-tls-verify` escape hatch with stderr warning; injects `X-Request-Id` (ULID) and `User-Agent: pgmctl/<version>` headers; read-only ops retry on transport failure (per FR-039 clarification); mutating ops NEVER retry
+- [x] T021 [P] Implement `internal/pgmctl/config/kubeconfig.go`: load + save `$XDG_CONFIG_HOME/pgmctl/config.yaml` (falls back to `~/.config/pgmctl/config.yaml`); refuse to load if mode is group/world-readable; matches `data-model.md § Context`
+- [x] T022 [P] Implement `internal/pgmctl/config/context.go`: `Context` struct + `Validate()`; enforces "exactly one of token_env/token_file/token_command" and HTTPS-or-loopback endpoint rule
+- [x] T023 [P] Implement `internal/pgmctl/config/resolve.go`: endpoint precedence `--endpoint > --context > current-context > PGMCTL_ENDPOINT > error` per FR-006 (depends on T021, T022)
+- [x] T024 [P] Implement `internal/pgmctl/client/auth.go`: bearer-token source resolution (`token_env` / `token_file` / `token_command`); read on every request (no caching beyond one request); REFUSE `--token` flag at parse time
+- [x] T025 [P] Implement `internal/pgmctl/client/http.go`: HTTPS client with bearer-auth, TLS verify-full default, optional CA file, `--insecure-skip-tls-verify` escape hatch with stderr warning; injects `X-Request-Id` (ULID) and `User-Agent: pgmctl/<version>` headers; read-only ops retry on transport failure (per FR-039 clarification); mutating ops NEVER retry
 - [ ] T026 [P] Implement `internal/pgmctl/client/sse.go`: SSE consumer over `net/http` body with `bufio.Scanner`; honours `Last-Event-ID` resumption; reconnect with exponential backoff (250ms base, factor 2, cap 10s, max 30 attempts); surfaces `keepalive` / `gap_marker` / `error` frames distinctly per `contracts/control-plane-extensions.md`
-- [ ] T027 [P] Implement `internal/pgmctl/output/color.go`: wraps `fatih/color`; auto-disables on `!isatty(stdout)`, `--no-color`, or `NO_COLOR`; `Green/Yellow/Red` + bracket markers `[OK]/[INFO]/[WARN]/[FAIL]/[UNKNOWN]` for no-color mode
-- [ ] T028 [P] Implement `internal/pgmctl/output/severity.go`: `Severity` enum (PASS/INFO/WARN/FAIL/UNKNOWN) with stable string serialization + color mapping (depends on T027)
-- [ ] T029 [P] Implement `internal/pgmctl/output/table.go`: `text/tabwriter`-based renderer with default + wide column-set support; FR-011's 80×24 ceiling for the 3-peer case
-- [ ] T030 [P] Implement `internal/pgmctl/output/json.go` and `internal/pgmctl/output/yaml.go`: schema-versioned (`apiVersion: pgmctl/v1`) emitters; suppresses ANSI escapes; matches `cli-commands.md` JSON shapes
-- [ ] T031 [P] Implement `internal/pgmctl/confirm/tty.go`: TTY detection + non-TTY-without-override refusal helper
-- [ ] T032 [P] Implement `internal/pgmctl/confirm/prompt.go`: `Prompt(op, target, cluster string) (bool, error)` for `[y/N]`; `ConfirmClusterName(op, target, cluster string) error` for typed cluster-name (depends on T031)
-- [ ] T033 Implement `internal/pgmctl/cmd/root.go`: cobra root command + global flags per `contracts/cli-commands.md § Global flags`; mutually-exclusive `--quiet`/`--verbose`; `--no-color` precedence; persistent flags wired to a `*Context` carried via cobra command annotations (depends on T023, T025, T027)
+- [x] T027 [P] Implement `internal/pgmctl/output/color.go`: wraps `fatih/color`; auto-disables on `!isatty(stdout)`, `--no-color`, or `NO_COLOR`; `Green/Yellow/Red` + bracket markers `[OK]/[INFO]/[WARN]/[FAIL]/[UNKNOWN]` for no-color mode
+- [x] T028 [P] Implement `internal/pgmctl/output/severity.go`: `Severity` enum (PASS/INFO/WARN/FAIL/UNKNOWN) with stable string serialization + color mapping (depends on T027)
+- [x] T029 [P] Implement `internal/pgmctl/output/table.go`: `text/tabwriter`-based renderer with default + wide column-set support; FR-011's 80×24 ceiling for the 3-peer case
+- [x] T030 [P] Implement `internal/pgmctl/output/json.go` and `internal/pgmctl/output/yaml.go`: schema-versioned (`apiVersion: pgmctl/v1`) emitters; suppresses ANSI escapes; matches `cli-commands.md` JSON shapes
+- [x] T031 [P] Implement `internal/pgmctl/confirm/tty.go`: TTY detection + non-TTY-without-override refusal helper
+- [x] T032 [P] Implement `internal/pgmctl/confirm/prompt.go`: `Prompt(op, target, cluster string) (bool, error)` for `[y/N]`; `ConfirmClusterName(op, target, cluster string) error` for typed cluster-name (depends on T031)
+- [x] T033 Implement `internal/pgmctl/cmd/root.go`: cobra root command + global flags per `contracts/cli-commands.md § Global flags`; mutually-exclusive `--quiet`/`--verbose`; `--no-color` precedence; persistent flags wired to a `*Context` carried via cobra command annotations (depends on T023, T025, T027)
 - [ ] T034 [P] Implement `internal/pgmctl/cmd/completion.go`: `pgmctl completion bash|zsh|fish` via cobra's built-in generator (FR-003)
-- [ ] T035 [P] Implement `internal/pgmctl/client/version_skew.go`: read `/v1/version` from the server, compare to compiled-in pgmctl version, classify as match / patch-skew / minor-skew / major-skew; emit yellow warning on minor-skew unless `--insecure-skip-version-check`; refuse with `EX_VERSION_SKEW` (67) on major-skew
+- [x] T035 [P] Implement `internal/pgmctl/client/version_skew.go`: read `/v1/version` from the server, compare to compiled-in pgmctl version, classify as match / patch-skew / minor-skew / major-skew; emit yellow warning on minor-skew unless `--insecure-skip-version-check`; refuse with `EX_VERSION_SKEW` (67) on major-skew
 
 ### Foundational tests
 
-- [ ] T036 [P] Add contract test `tests/contract/pgmctl/cobra_root_test.go`: every global flag in `contracts/cli-commands.md` is registered; unknown flags exit `EX_USAGE` (64); mutual-exclusion of `--quiet`/`--verbose` enforced
+- [x] T036 [P] Add contract test `tests/contract/pgmctl/cobra_root_test.go`: every global flag in `contracts/cli-commands.md` is registered; unknown flags exit `EX_USAGE` (64); mutual-exclusion of `--quiet`/`--verbose` enforced
 - [ ] T037 [P] Add contract test `tests/contract/pgmctl/config_loader_test.go`: refuses to load a config file with mode 0644; honours endpoint precedence; rejects context with two token sources set
 - [ ] T038 [P] Add contract test `tests/contract/history_publish_test.go`: every event the proxy emits on the structured-log sink is also retrievable from the history stream within 250ms
 - [ ] T039 [P] Add contract test `tests/contract/fanout_basic_test.go`: 3-peer fixture; broadcast `status` slice; assert all three replies arrive within 100ms p99; assert aggregated payload contains all three node ids
@@ -99,15 +99,15 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 ### Tests for User Story 1
 
 - [ ] T040 [P] [US1] Contract test `tests/contract/pgmctl/status_table_test.go`: golden-file diff against `tests/golden/pgmctl/status_healthy.txt`, `status_warn.txt`, `status_fail.txt`
-- [ ] T041 [P] [US1] Contract test `tests/contract/pgmctl/status_json_test.go`: `apiVersion: pgmctl/v1`, `kind: ClusterStatus`, no ANSI bytes; jq-parseable
-- [ ] T042 [P] [US1] Contract test `tests/contract/pgmctl/status_no_color_test.go`: ANSI absent when `--no-color`, `NO_COLOR=1`, or stdout not a TTY (SC-008)
+- [x] T041 [P] [US1] Contract test `tests/contract/pgmctl/status_json_test.go`: `apiVersion: pgmctl/v1`, `kind: ClusterStatus`, no ANSI bytes; jq-parseable
+- [x] T042 [P] [US1] Contract test `tests/contract/pgmctl/status_no_color_test.go`: ANSI absent when `--no-color`, `NO_COLOR=1`, or stdout not a TTY (SC-008)
 - [ ] T043 [P] [US1] Integration test `tests/integration/pgmctl/status_3peer_test.go`: against the existing 3-peer test harness; assert status exits 0 on healthy, 2 on unhealthy, 65 on unreachable
 - [ ] T044 [P] [US1] Integration test `tests/integration/pgmctl/version_skew_test.go`: skewed-version stub server returns 1.x while pgmctl is 1.y; assert yellow warning on minor-skew; assert `EX_VERSION_SKEW` (67) on major-skew without override
 
 ### Implementation for User Story 1
 
-- [ ] T045 [P] [US1] Implement `internal/pgmctl/cmd/status.go`: calls `GET /v1/status` via the client foundations; renders via the four output renderers; honours `--cluster <name>` cluster-id pinning (FR-010)
-- [ ] T046 [P] [US1] Implement `internal/pgmctl/cmd/version.go`: prints client + server version; uses T035's skew detection
+- [x] T045 [P] [US1] Implement `internal/pgmctl/cmd/status.go`: calls `GET /v1/status` via the client foundations; renders via the four output renderers; honours `--cluster <name>` cluster-id pinning (FR-010)
+- [x] T046 [P] [US1] Implement `internal/pgmctl/cmd/version.go`: prints client + server version; uses T035's skew detection
 - [ ] T047 [P] [US1] Implement `internal/pgmctl/cmd/topology.go`: ASCII tree renderer for `GET /v1/topology`; JSON/YAML pass-through (FR-013)
 - [ ] T048 [P] [US1] Implement `internal/pgmctl/cmd/health.go`: composes status + (foundational) doctor-style rollup endpoint OR a server-side `/v1/health` if needed; emits one-line-per-component rollup (FR-014). For the MVP, derive the rollup client-side from `/v1/status` to avoid a new endpoint.
 - [ ] T049 [P] [US1] Implement `internal/pgmctl/cmd/lag.go`: derives per-standby lag from `/v1/diagnose`; `--warn` / `--fail` flags; lag in bytes + time (FR-015)
