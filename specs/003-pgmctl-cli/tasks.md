@@ -228,14 +228,14 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Tests for User Story 5
 
-- [ ] T097 [P] [US5] Contract test `tests/contract/pgmctl/explain_template_test.go`: golden output for `failover-stuck`, `node-not-promoting`, `replication-broken`, `leader-election`, `current-state`, `last-event` subjects on fixture data
-- [ ] T098 [P] [US5] Contract test `tests/contract/pgmctl/explain_not_applicable_test.go`: `pgmctl explain failover-stuck` on a healthy cluster → exit `EX_SUBJECT_NA` (4) with documented message
+- [x] T097 [P] [US5] Contract test `tests/contract/pgmctl/explain_template_test.go`: golden output for `failover-stuck`, `node-not-promoting`, `replication-broken`, `leader-election`, `current-state`, `last-event` subjects on fixture data (landed as `explain_test.go`; assertion-style coverage for current-state happy path, failover-stuck no-primary path, JSON wire shape, and unknown-subject reject)
+- [x] T098 [P] [US5] Contract test `tests/contract/pgmctl/explain_not_applicable_test.go`: `pgmctl explain failover-stuck` on a healthy cluster → exit `EX_SUBJECT_NA` (4) with documented message
 - [ ] T099 [P] [US5] Integration test `tests/integration/pgmctl/explain_replication_broken_test.go`: stall WAL replay; output cites the failing check + a history-stream record with RFC3339 timestamp + the failing node id
 
 ### Implementation for User Story 5
 
-- [ ] T100 [P] [US5] Implement `internal/pgmctl/cmd/explain.go`: dispatcher over the v1 subject set per FR-018; composes from `GET /v1/status`, `GET /v1/diagnose`, `POST /v1/doctor/run`, and `GET /v1/history` queries; no new server endpoint required
-- [ ] T101 [P] [US5] Implement `internal/pgmctl/cmd/explain_narrative.go`: per-subject narrative templates that interpolate `Diagnosis`, `Evidence` (verbatim history records, with timestamps), `Suggested next steps` (concrete pgmctl invocations)
+- [x] T100 [P] [US5] Implement `internal/pgmctl/cmd/explain.go`: dispatcher over the v1 subject set per FR-018; composes from `GET /v1/status`, `GET /v1/diagnose`, `POST /v1/doctor/run`, and `GET /v1/history` queries; no new server endpoint required
+- [x] T101 [P] [US5] Implement `internal/pgmctl/cmd/explain_narrative.go`: per-subject narrative templates that interpolate `Diagnosis`, `Evidence` (verbatim history records, with timestamps), `Suggested next steps` (concrete pgmctl invocations)
 - [ ] T102 [US5] Generate golden files for explain under each of the six v1 subjects
 
 **Checkpoint**: US5 ships independently — operators can ask the cluster "why?" with no new server-side endpoint required (all composition happens in pgmctl on top of US2/US3 server support).
