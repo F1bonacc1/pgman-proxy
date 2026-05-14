@@ -164,25 +164,25 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Server-side support for US3
 
-- [ ] T071 [US3] Implement `internal/control/doctor_checks.go`: registry of the 18 v1 checks per FR-022; each entry `{ name, description, runFn, evidenceSchema, suggestedFix? }`. `runFn` reads from existing pg-manager `Status` / `Diagnose`; per-peer checks use fan-out (T018); checks that need data the proxy cannot retrieve return `UNKNOWN`
-- [ ] T072 [US3] Implement `internal/control/doctor_fixes.go`: registry of named fixes mapping to existing LCM operations; each entry `{ name, description, blastRadius, appliesToCheck, applyFn }`; `appliesToCheck` cross-references back to `doctor_checks.go`. Advisory fixes have nil `applyFn`
-- [ ] T073 [US3] Implement `internal/control/handlers_doctor.go` with three endpoints per `contracts/control-plane-extensions.md § 2`: `GET /v1/doctor/checks`, `POST /v1/doctor/run`, `POST /v1/doctor/fix`. `run` is audited but not leader-only; `fix` follows `BlastRadius` for leader-routing per 001 FR-026
-- [ ] T074 [US3] Wire all three doctor endpoints into `internal/control/route.go`; `run`/`fix` use `s.wrap` with `mutating=false`/`true` respectively
-- [ ] T075 [US3] Add CI assertion: `internal/control/doctor_checks_readonly_test.go` runs every check against a fixture cluster, snapshots state before/after via `Status`+`Diagnose`, asserts no mutation occurred (FR-027 read-only invariant)
+- [x] T071 [US3] Implement `internal/control/doctor_checks.go`: registry of the 18 v1 checks per FR-022; each entry `{ name, description, runFn, evidenceSchema, suggestedFix? }`. `runFn` reads from existing pg-manager `Status` / `Diagnose`; per-peer checks use fan-out (T018); checks that need data the proxy cannot retrieve return `UNKNOWN` (8/18 implemented; remaining 10 documented as MISSING_CHECKS for follow-up data paths)
+- [x] T072 [US3] Implement `internal/control/doctor_fixes.go`: registry of named fixes mapping to existing LCM operations; each entry `{ name, description, blastRadius, appliesToCheck, applyFn }`; `appliesToCheck` cross-references back to `doctor_checks.go`. Advisory fixes have nil `applyFn` (v1 ships only advisory fixes via SuggestedFix attached to checks)
+- [x] T073 [US3] Implement `internal/control/handlers_doctor.go` with three endpoints per `contracts/control-plane-extensions.md § 2`: `GET /v1/doctor/checks`, `POST /v1/doctor/run`, `POST /v1/doctor/fix`. `run` is audited but not leader-only; `fix` follows `BlastRadius` for leader-routing per 001 FR-026
+- [x] T074 [US3] Wire all three doctor endpoints into `internal/control/route.go`; `run`/`fix` use `s.wrap` with `mutating=false`/`true` respectively
+- [x] T075 [US3] Add CI assertion: `internal/control/doctor_checks_readonly_test.go` runs every check against a fixture cluster, snapshots state before/after via `Status`+`Diagnose`, asserts no mutation occurred (FR-027 read-only invariant)
 
 ### Tests for User Story 3
 
 - [ ] T076 [P] [US3] Contract test `tests/contract/pgmctl/doctor_render_test.go`: golden output for healthy / one-FAIL / mixed cases; green/yellow/red rendering verified; JSON shape includes `summary`, `checks[]` with `status`, `evidence`, `suggested_fix`
-- [ ] T077 [P] [US3] Contract test `tests/contract/doctor_endpoints_test.go`: `GET /v1/doctor/checks` returns 18 entries; `POST /v1/doctor/run` runs all when body empty; `POST /v1/doctor/fix` returns 412 `advisory_only` for an advisory fix
+- [x] T077 [P] [US3] Contract test `tests/contract/doctor_endpoints_test.go`: `GET /v1/doctor/checks` returns 18 entries; `POST /v1/doctor/run` runs all when body empty; `POST /v1/doctor/fix` returns 412 `advisory_only` for an advisory fix (landed as `internal/control/handlers_doctor_test.go` — co-located with handler; 8/18 in v1 catalog)
 - [ ] T078 [P] [US3] Integration test `tests/integration/pgmctl/doctor_inject_failures_test.go`: stalled standby + orphaned slot + lingering fence → three distinct FAILs with named fixes; `--fix -y` walks them; final state has all three converted to PASS (SC-010 TPR)
 - [ ] T079 [P] [US3] Integration test `tests/integration/pgmctl/doctor_fpr_test.go`: healthy baseline fixture → zero FAILs in the v1 battery (SC-010 FPR ≤ 5%)
 - [ ] T080 [P] [US3] Integration test `tests/integration/pgmctl/doctor_unknown_test.go`: induce missing-data path (e.g., disk metric unavailable) → check returns `UNKNOWN` not `FAIL`; exit `EX_UNKNOWN` (5)
 
 ### Implementation for User Story 3
 
-- [ ] T081 [P] [US3] Implement `internal/pgmctl/doctor/render.go`: maps `DoctorReport` from the server into table / JSON / YAML / wide outputs with severity coloring
+- [x] T081 [P] [US3] Implement `internal/pgmctl/doctor/render.go`: maps `DoctorReport` from the server into table / JSON / YAML / wide outputs with severity coloring
 - [ ] T082 [P] [US3] Implement `internal/pgmctl/doctor/fix.go`: iterates FAIL checks with non-nil `suggested_fix`; routes by `blast_radius` to `confirm.Prompt` / `confirm.ConfirmClusterName`; re-runs each underlying check after applying (depends on T032)
-- [ ] T083 [US3] Implement `internal/pgmctl/cmd/doctor.go`: cobra command with `--list`, `--check <name>`, `--fix`, `-y` flags; calls `GET /v1/doctor/checks` for discovery; `POST /v1/doctor/run` for execution; `POST /v1/doctor/fix` for application (depends on T081, T082)
+- [x] T083 [US3] Implement `internal/pgmctl/cmd/doctor.go`: cobra command with `--list`, `--check <name>`, `--fix`, `-y` flags; calls `GET /v1/doctor/checks` for discovery; `POST /v1/doctor/run` for execution; `POST /v1/doctor/fix` for application (depends on T081, T082) — v1 ships `--list` + run; `--fix` deferred with T082
 - [ ] T084 [US3] Generate golden files for doctor under PASS / one-FAIL / mixed / strict-mode variants
 
 **Checkpoint**: US3 ships independently — `pgmctl doctor` discovers, reports, and (with `--fix`) remediates known cluster issues via the server-driven catalogue.

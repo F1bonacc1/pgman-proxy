@@ -187,6 +187,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/upgrade/prepare", s.wrap("PrepareUpgrade", true, true, s.handlePrepareUpgrade))
 	mux.Handle("POST /v1/upgrade/execute", s.wrap("ExecuteUpgrade", true, true, s.handleExecuteUpgrade))
 
+	// Doctor (003 / FR-022). `checks` is a pure read of the registry;
+	// `run` is audited but read-only per FR-027; `fix` is mutating but
+	// receiver-local until a non-advisory fix lands (US6 follow-up), so
+	// leaderOnly stays false for v1.
+	mux.Handle("GET /v1/doctor/checks", s.wrap("DoctorChecks", false, false, s.handleDoctorChecks))
+	mux.Handle("POST /v1/doctor/run", s.wrap("DoctorRun", false, false, s.handleDoctorRun))
+	mux.Handle("POST /v1/doctor/fix", s.wrap("DoctorFix", true, false, s.handleDoctorFix))
+
 	return mux
 }
 

@@ -160,8 +160,9 @@ func openDumpOutput(_ io.Writer, path string) (io.Writer, bool, func(), error) {
 	return f, gz, func() { _ = f.Close() }, nil
 }
 
-// clientFetcher adapts *client.Client to the dump.Fetcher interface so
-// the dump package stays free of any HTTP-specific dep.
+// clientFetcher adapts *client.Client to the dump.Fetcher /
+// dump.PostFetcher interfaces so the dump package stays free of any
+// HTTP-specific dep.
 type clientFetcher struct {
 	c *client.Client
 }
@@ -170,6 +171,19 @@ func newClientFetcher(c *client.Client) *clientFetcher { return &clientFetcher{c
 
 func (f *clientFetcher) GetJSON(ctx context.Context, path string) (json.RawMessage, error) {
 	env, err := f.c.GetJSON(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if len(env.EngineResult) == 0 {
+		return nil, errors.New("empty engine_result")
+	}
+	return env.EngineResult, nil
+}
+
+// PostJSON satisfies dump.PostFetcher so the dump collector can
+// capture the /v1/doctor/run slice through the same HTTP client.
+func (f *clientFetcher) PostJSON(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	env, err := f.c.PostJSON(ctx, path, body)
 	if err != nil {
 		return nil, err
 	}

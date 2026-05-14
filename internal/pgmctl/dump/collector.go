@@ -129,12 +129,48 @@ func DefaultSpecs(f Fetcher, since time.Duration) []SliceSpec {
 		{Name: "topology", Fetch: HTTPSliceFetcher(f, "/v1/status")}, // derived client-side
 		{Name: "history-events", Fetch: HTTPSliceFetcher(f, "/v1/history?category=event"+sinceQuery)},
 		{Name: "history-audit", Fetch: HTTPSliceFetcher(f, "/v1/history?category=audit"+sinceQuery)},
+		{Name: "doctor", Fetch: doctorRunFetcher(f)},
 		// Not yet implemented server-side; the failure outcome
 		// surfaces in the manifest so the operator sees the gap.
-		{Name: "doctor", Fetch: notImplementedFetch("/v1/doctor/run (US3)")},
-		{Name: "clock-skew", Fetch: notImplementedFetch("/v1/clock-skew (US3)")},
+		{Name: "clock-skew", Fetch: notImplementedFetch("/v1/clock-skew (US3 follow-up)")},
 		{Name: "config", Fetch: notImplementedFetch("/v1/config (US6)")},
 	}
+}
+
+// doctorRunFetcher captures the full v1 doctor battery into the dump
+// via POST /v1/doctor/run (empty body == run all). The dump never
+// requests a single check; it captures the whole report so a
+// post-mortem reader can grep for FAIL findings without re-running.
+func doctorRunFetcher(f Fetcher) func(ctx context.Context) (any, error) {
+	return func(ctx context.Context) (any, error) {
+		raw, err := postEmpty(ctx, f, "/v1/doctor/run")
+		if err != nil {
+			return nil, err
+		}
+		var v any
+		if jerr := json.Unmarshal(raw, &v); jerr != nil {
+			return nil, fmt.Errorf("decode doctor report: %w", jerr)
+		}
+		return v, nil
+	}
+}
+
+// PostFetcher is an optional capability the dump collector probes for
+// when a slice requires a POST. The HTTP client implements it; tests
+// can satisfy it explicitly.
+type PostFetcher interface {
+	PostJSON(ctx context.Context, path string, body any) (json.RawMessage, error)
+}
+
+// postEmpty issues an empty-bodied POST to path. If the supplied
+// Fetcher also implements PostFetcher, we use it; otherwise we wrap
+// the error so the slice surfaces as failed with a clear reason.
+func postEmpty(ctx context.Context, f Fetcher, path string) (json.RawMessage, error) {
+	p, ok := f.(PostFetcher)
+	if !ok {
+		return nil, errors.New("fetcher does not support POST; slice unavailable in this build")
+	}
+	return p.PostJSON(ctx, path, struct{}{})
 }
 
 func notImplementedFetch(label string) func(ctx context.Context) (any, error) {

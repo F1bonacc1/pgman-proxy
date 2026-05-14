@@ -124,7 +124,10 @@ const (
 	CodeEngineError            = "engine_error"
 	CodeInvalidArgument        = "invalid_argument"
 	CodeLeaderRouteTimeout     = "leader_route_timeout"
-	CodeInternal               = "internal"
+	// CodeAdvisoryOnly surfaces 003 § 2 — POST /v1/doctor/fix called
+	// with a fix whose blast_radius is advisory has nothing to apply.
+	CodeAdvisoryOnly = "advisory_only"
+	CodeInternal     = "internal"
 )
 
 // httpStatusForCode maps the documented error codes to their HTTP
@@ -141,7 +144,7 @@ func httpStatusForCode(code string) int {
 		return http.StatusConflict
 	case CodeLeadershipInTransition, CodeAuditUnavailable:
 		return http.StatusServiceUnavailable
-	case CodeBackupExecutorMissing:
+	case CodeBackupExecutorMissing, CodeAdvisoryOnly:
 		return http.StatusPreconditionFailed
 	case CodeInvalidArgument:
 		return http.StatusBadRequest
