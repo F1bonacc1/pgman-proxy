@@ -49,15 +49,15 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Server-side shared packages
 
-- [ ] T010 [P] Implement `internal/history/stream.go`: `EnsureHistoryStream(ctx, js jetstream.JetStream, clusterID, jetStreamDir string, replicas int) error` per `contracts/history-stream.md`; stream name `PGMAN_PROXY_HISTORY_<CLUSTER_ID>`, subjects `pgman_proxy.<cluster_id>.history.{event,audit}.>`, FileStorage, LimitsPolicy with both `MaxAge=24h` and `MaxBytes=256MiB` defaults, DiscardOld, AckExplicit
-- [ ] T011 [P] Implement `internal/history/retention.go`: load `history.retention_age` / `history.retention_bytes` from existing config-loading code path; refuse both-zero at validation
-- [ ] T012 Implement `internal/history/publisher.go`: `Publisher.PublishEvent(category, type, nodeID string, details any) error`; ULID-tag each record; non-blocking on publish failure (best-effort) but increment `pgman_proxy_history_publish_failures_total` (depends on T010)
+- [x] T010 [P] Implement `internal/history/stream.go`: `EnsureHistoryStream(ctx, js jetstream.JetStream, clusterID, jetStreamDir string, replicas int) error` per `contracts/history-stream.md`; stream name `PGMAN_PROXY_HISTORY_<CLUSTER_ID>`, subjects `pgman_proxy.<cluster_id>.history.{event,audit}.>`, FileStorage, LimitsPolicy with both `MaxAge=24h` and `MaxBytes=256MiB` defaults, DiscardOld, AckExplicit
+- [x] T011 [P] Implement `internal/history/retention.go`: load `history.retention_age` / `history.retention_bytes` from existing config-loading code path; refuse both-zero at validation
+- [x] T012 Implement `internal/history/publisher.go`: `Publisher.PublishEvent(category, type, nodeID string, details any) error`; ULID-tag each record; non-blocking on publish failure (best-effort) but increment `pgman_proxy_history_publish_failures_total` (depends on T010)
 - [ ] T013 Wire `history.Publisher` into existing event/transition emission sites in `internal/obs/` so every existing structured-log `event.*` line ALSO publishes to the history stream; do NOT change existing log formats (depends on T012)
 - [ ] T014 Wire `history.Publisher` into `internal/control/audit.go` as a second audit sink alongside the existing NATS audit-subject publish; both sinks must succeed for `audit_unavailable` (001 FR-028) NOT to trigger; integration with the existing `auditEmitFailures` counter (depends on T012)
-- [ ] T015 [P] Implement `internal/history/query.go`: `Query(ctx, params) (HistoryQueryResult, error)` using a fresh `jetstream.OrderedConsumer`; supports `since`, `until`, `type`, `category`, `node`, `limit`, `cursor`; returns `next_cursor` + `truncated`
-- [ ] T016 Implement `internal/fanout/subjects.go`: per-cluster subject derivation helpers `RequestSubject(clusterID, slice, target)`, `ResponderWildcard(clusterID, slice, selfNodeID)`; matches `contracts/fanout-protocol.md`
-- [ ] T017 [P] Implement `internal/fanout/server.go`: per-peer NATS subscriber on `pgman_proxy.<cluster_id>.fanout.<slice>.<self_node_id>` + wildcard `.*`; dispatches to per-slice handler registry; auto-audits `slice=doctor` requests with `operator_actor` from request envelope (depends on T016)
-- [ ] T018 [P] Implement `internal/fanout/client.go`: `FanOut.RequestMany(ctx, slice, args, perSliceTimeout) ([]Reply, error)` using `nats.RequestMany`; aggregates `ok`/`partial`/`failed`/synthesized `sibling_unreachable` entries; never returns a whole-request error for sibling-level failures (depends on T016)
+- [x] T015 [P] Implement `internal/history/query.go`: `Query(ctx, params) (HistoryQueryResult, error)` using a fresh `jetstream.OrderedConsumer`; supports `since`, `until`, `type`, `category`, `node`, `limit`, `cursor`; returns `next_cursor` + `truncated`
+- [x] T016 Implement `internal/fanout/subjects.go`: per-cluster subject derivation helpers `RequestSubject(clusterID, slice, target)`, `ResponderWildcard(clusterID, slice, selfNodeID)`; matches `contracts/fanout-protocol.md`
+- [x] T017 [P] Implement `internal/fanout/server.go`: per-peer NATS subscriber on `pgman_proxy.<cluster_id>.fanout.<slice>.<self_node_id>` + wildcard `.*`; dispatches to per-slice handler registry; auto-audits `slice=doctor` requests with `operator_actor` from request envelope (depends on T016)
+- [x] T018 [P] Implement `internal/fanout/client.go`: `FanOut.RequestMany(ctx, slice, args, perSliceTimeout) ([]Reply, error)` using `nats.RequestMany`; aggregates `ok`/`partial`/`failed`/synthesized `sibling_unreachable` entries; never returns a whole-request error for sibling-level failures (depends on T016)
 - [ ] T019 Register per-slice fan-out handlers (`status`, `config`, `nats_mesh`, `doctor`) on every peer at startup; each handler reads the local data and replies with the documented `FanOutSlice` envelope (depends on T017)
 - [ ] T020 Bootstrap call: from the existing proxy `runtime.Start` path, invoke `history.EnsureHistoryStream(...)` after 002's leadership-KV bootstrap; emit `proxy.history_stream_ready` log event on success and fail-closed at startup on persistent failure (mirrors 002 patterns) (depends on T010)
 
@@ -83,8 +83,8 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 - [x] T036 [P] Add contract test `tests/contract/pgmctl/cobra_root_test.go`: every global flag in `contracts/cli-commands.md` is registered; unknown flags exit `EX_USAGE` (64); mutual-exclusion of `--quiet`/`--verbose` enforced
 - [ ] T037 [P] Add contract test `tests/contract/pgmctl/config_loader_test.go`: refuses to load a config file with mode 0644; honours endpoint precedence; rejects context with two token sources set
-- [ ] T038 [P] Add contract test `tests/contract/history_publish_test.go`: every event the proxy emits on the structured-log sink is also retrievable from the history stream within 250ms
-- [ ] T039 [P] Add contract test `tests/contract/fanout_basic_test.go`: 3-peer fixture; broadcast `status` slice; assert all three replies arrive within 100ms p99; assert aggregated payload contains all three node ids
+- [x] T038 [P] Add contract test `tests/contract/history_publish_test.go`: every event the proxy emits on the structured-log sink is also retrievable from the history stream within 250ms
+- [x] T039 [P] Add contract test `tests/contract/fanout_basic_test.go`: 3-peer fixture; broadcast `status` slice; assert all three replies arrive within 100ms p99; assert aggregated payload contains all three node ids
 
 **Checkpoint**: Foundation ready — user story implementation can now begin in parallel.
 
