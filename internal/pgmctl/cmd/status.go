@@ -27,8 +27,8 @@ type pgmanagerStatus struct {
 	LeaderNodeID       string           `json:"LeaderNodeID"`
 	PrimaryNodeID      string           `json:"PrimaryNodeID"`
 	LocalNodeID        string           `json:"LocalNodeID"`
-	LocalRole          string           `json:"LocalRole"`
-	LocalState         string           `json:"LocalState"`
+	LocalRole          roleField        `json:"LocalRole"`
+	LocalState         stateField       `json:"LocalState"`
 	Instances          []instanceStatus `json:"Instances"`
 	SyncStandbys       []string         `json:"SyncStandbys,omitempty"`
 	LastFailoverAt     time.Time        `json:"LastFailoverAt"`
@@ -36,15 +36,93 @@ type pgmanagerStatus struct {
 }
 
 type instanceStatus struct {
-	NodeID     string    `json:"NodeID"`
-	Role       string    `json:"Role"`
-	State      string    `json:"State"`
-	PostgresUp bool      `json:"PostgresUp"`
-	ReplayLSN  uint64    `json:"ReplayLSN"`
-	WriteLSN   uint64    `json:"WriteLSN"`
-	FlushLSN   uint64    `json:"FlushLSN"`
-	LagBytes   int64     `json:"LagBytes"`
-	LastSeenAt time.Time `json:"LastSeenAt"`
+	NodeID     string     `json:"NodeID"`
+	Role       roleField  `json:"Role"`
+	State      stateField `json:"State"`
+	PostgresUp bool       `json:"PostgresUp"`
+	ReplayLSN  uint64     `json:"ReplayLSN"`
+	WriteLSN   uint64     `json:"WriteLSN"`
+	FlushLSN   uint64     `json:"FlushLSN"`
+	LagBytes   int64      `json:"LagBytes"`
+	LastSeenAt time.Time  `json:"LastSeenAt"`
+}
+
+// roleField / stateField are wire-shape adapters for pg-manager's
+// Role / State, which the engine serializes as integer enum ordinals
+// today (no MarshalJSON method on the upstream types) but pgmctl tests
+// and contracts speak in the canonical string names ("primary",
+// "running", …). UnmarshalJSON accepts both forms and stores the
+// String() form so downstream comparisons stay readable. MarshalJSON
+// emits the plain string so `pgmctl status -o json` always shows
+// "primary" not 2 (FR-038 schema stability).
+//
+// Enum ordinals are mirrored from `../pg-manager/types.go`. They are
+// part of pg-manager's public surface and a change there would be a
+// breaking API bump per its constitution, so this map is stable.
+type roleField string
+type stateField string
+
+var pgmRoleNames = map[int]string{
+	0: "unknown",
+	1: "primary",
+	2: "standby",
+	3: "standby_designated",
+}
+
+var pgmStateNames = map[int]string{
+	0: "unknown",
+	1: "init",
+	2: "bootstrapping",
+	3: "running",
+	4: "promoting",
+	5: "demoting",
+	6: "rewinding",
+	7: "fenced",
+	8: "failed",
+	9: "stopped",
+}
+
+func (r *roleField) UnmarshalJSON(b []byte) error {
+	s, err := decodeEnumWire(b, pgmRoleNames)
+	if err != nil {
+		return err
+	}
+	*r = roleField(s)
+	return nil
+}
+
+func (r roleField) MarshalJSON() ([]byte, error) { return json.Marshal(string(r)) }
+
+func (s *stateField) UnmarshalJSON(b []byte) error {
+	v, err := decodeEnumWire(b, pgmStateNames)
+	if err != nil {
+		return err
+	}
+	*s = stateField(v)
+	return nil
+}
+
+func (s stateField) MarshalJSON() ([]byte, error) { return json.Marshal(string(s)) }
+
+func decodeEnumWire(b []byte, names map[int]string) (string, error) {
+	if len(b) == 0 || string(b) == "null" {
+		return "", nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return "", err
+		}
+		return s, nil
+	}
+	var i int
+	if err := json.Unmarshal(b, &i); err != nil {
+		return "", err
+	}
+	if name, ok := names[i]; ok {
+		return name, nil
+	}
+	return fmt.Sprintf("invalid(%d)", i), nil
 }
 
 // embeddedNATSSnapshot mirrors the 002 contracts/observability.md
@@ -170,16 +248,20 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 	leaderSev, leaderStr := leaderHealth(engine)
 	worst = worse(worst, primarySev, leaderSev)
 
-	reachable, total := reachableCount(engine)
+	responding, healthy, total := peerCounts(engine)
 	peersSev := output.SevPass
-	if reachable < total {
+	switch {
+	case healthy == 0:
+		peersSev = output.SevFail
+	case healthy < total, responding < total:
 		peersSev = output.SevWarn
 	}
-	if reachable == 0 {
-		peersSev = output.SevFail
-	}
 	worst = worse(worst, peersSev)
-	peersStr := peersSev.Color(col, fmt.Sprintf("%d/%d reachable", reachable, total))
+	peersMsg := fmt.Sprintf("%d/%d healthy", healthy, total)
+	if responding < total {
+		peersMsg += fmt.Sprintf(" · %d/%d responding", responding, total)
+	}
+	peersStr := peersSev.Color(col, peersMsg)
 
 	meshStr := meshLine(col, embedded, total)
 
@@ -192,7 +274,7 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 	fmt.Fprintln(w, meshStr)
 	fmt.Fprintln(w)
 
-	t := output.NewTable("NODE", "ROLE", "FENCE", "LAG", "LAST TRANSITION")
+	t := output.NewTable("NODE", "ROLE", "STATE", "FENCE", "LAG", "LAST TRANSITION")
 	instances := append([]instanceStatus(nil), engine.Instances...)
 	sort.SliceStable(instances, func(i, j int) bool { return instances[i].NodeID < instances[j].NodeID })
 	for _, inst := range instances {
@@ -203,8 +285,12 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 			worst = output.SevWarn
 		}
 		fence := "-"
-		if isFenced(inst.State) {
+		if isFenced(string(inst.State)) {
 			fence = "yes"
+		}
+		state := strings.ToLower(string(inst.State))
+		if state == "" {
+			state = "-"
 		}
 		lag := lagText(inst, engine)
 		last := "-"
@@ -213,7 +299,8 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 		}
 		t.AddRow(
 			sev.Color(col, inst.NodeID),
-			sev.Color(col, strings.ToLower(inst.Role)),
+			sev.Color(col, strings.ToLower(string(inst.Role))),
+			sev.Color(col, state),
 			sev.Color(col, fence),
 			sev.Color(col, lag),
 			last,
@@ -252,14 +339,31 @@ func leaderHealth(e *pgmanagerStatus) (output.Severity, string) {
 	return output.SevPass, e.LeaderNodeID
 }
 
-func reachableCount(e *pgmanagerStatus) (reachable, total int) {
+// peerCounts splits the Instances slice into three counts:
+//
+//   - responding — peer returned a real fan-out reply (State != "" and
+//     != "unknown"). Synthesised sibling_unreachable rows arrive with
+//     State=Unknown and are NOT counted as responding.
+//   - healthy    — peer is responding AND reports State="running" with
+//     PostgresUp=true. A peer in StateFailed responded but is not
+//     healthy — distinct from "did not respond".
+//   - total      — every row in Instances, including unreachable ones.
+//
+// The summary line in renderStatus distinguishes these two failure
+// modes so an operator can tell "lost contact with peer X" from
+// "peer X is up but Postgres won't start".
+func peerCounts(e *pgmanagerStatus) (responding, healthy, total int) {
 	total = len(e.Instances)
 	for _, i := range e.Instances {
-		if !isFailed(i.State) {
-			reachable++
+		state := strings.ToLower(string(i.State))
+		if state != "" && state != "unknown" {
+			responding++
+		}
+		if i.PostgresUp && state == "running" {
+			healthy++
 		}
 	}
-	return reachable, total
+	return
 }
 
 func meshLine(c *output.Color, e *embeddedNATSSnapshot, total int) string {
@@ -285,13 +389,13 @@ func meshLine(c *output.Color, e *embeddedNATSSnapshot, total int) string {
 
 func nodeSeverity(inst instanceStatus, _ *pgmanagerStatus) output.Severity {
 	switch {
-	case isFailed(inst.State):
+	case isFailed(string(inst.State)):
 		return output.SevFail
-	case isFenced(inst.State):
+	case isFenced(string(inst.State)):
 		return output.SevWarn
 	case !inst.PostgresUp:
 		return output.SevFail
-	case isStandby(inst.Role) && inst.LagBytes > warnLagBytes:
+	case isStandby(string(inst.Role)) && inst.LagBytes > warnLagBytes:
 		if inst.LagBytes > failLagBytes {
 			return output.SevFail
 		}
@@ -310,7 +414,7 @@ func isFailed(state string) bool { return strings.EqualFold(state, "failed") || 
 func isStandby(role string) bool { return strings.EqualFold(role, "standby") || strings.EqualFold(role, "replica") }
 
 func lagText(i instanceStatus, _ *pgmanagerStatus) string {
-	if !isStandby(i.Role) {
+	if !isStandby(string(i.Role)) {
 		return "-"
 	}
 	switch {

@@ -18,6 +18,7 @@ import (
 	"github.com/f1bonacc1/pgman-proxy/internal/config"
 	"github.com/f1bonacc1/pgman-proxy/internal/control"
 	"github.com/f1bonacc1/pgman-proxy/internal/embedded"
+	"github.com/f1bonacc1/pgman-proxy/internal/fanout"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
@@ -35,6 +36,7 @@ type StartupResult struct {
 	Conn     *nats.Conn
 	EventSub []*nats.Subscription
 	Control  *control.Server
+	Fanout   *fanout.Server // feature 003: per-peer SliceStatus responder
 }
 
 // StartupError carries the documented exit code so the caller can map
@@ -269,6 +271,22 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	}
 	res.Manager = m
 
+	// Feature 003 — per-peer status aggregation substrate. pg-manager's
+	// Manager.Status() returns per-peer scalars but does not populate
+	// the cluster-wide Instances slice or PrimaryNodeID; the fanout
+	// server lets every peer answer a SliceStatus request with its own
+	// snapshot so /v1/status can stitch the full cluster view.
+	fanoutSrv := fanout.NewServer(conn, cfg.Cluster.ID, cfg.Node.ID)
+	if rerr := fanoutSrv.Register(fanout.SliceStatus, statusResponderHandler(m.Status)); rerr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout register SliceStatus: %w", rerr)}
+	}
+	if serr := fanoutSrv.Serve(); serr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout server: %w", serr)}
+	}
+	res.Fanout = fanoutSrv
+	fanoutClient := fanout.NewClient(conn, cfg.Cluster.ID)
+	statusAgg := newStatusAggregator(fanoutClient, cfg.Peers, 750*time.Millisecond, res.Logger)
+
 	// Gate #8: Data-plane listener bind probe — best-effort up-front so
 	// startup fails on EADDRINUSE before pg-manager kicks off background
 	// goroutines.
@@ -304,8 +322,11 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			// Feature 002: surface the embedded-NATS snapshot under
 			// `cluster.embedded_nats` in the Status response.
 			EmbeddedSnapshot: func() any { return res.Embedded.Snapshot() },
-			ClusterID:        cfg.Cluster.ID,
-			NodeID:           cfg.Node.ID,
+			// Feature 003: enrich /v1/status with cluster-wide Instances
+			// + PrimaryNodeID via fan-out to peers.
+			Aggregator: statusAgg,
+			ClusterID:  cfg.Cluster.ID,
+			NodeID:     cfg.Node.ID,
 		})
 		if err != nil {
 			return res, &StartupError{Code: ExitControl, Err: err}

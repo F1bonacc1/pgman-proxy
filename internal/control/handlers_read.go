@@ -16,6 +16,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, env *reque
 		s.completeFail(r.Context(), w, r, env, "", CodeEngineError, err.Error(), engineLatency, "")
 		return
 	}
+	// Feature 003 /v1/status enrichment: pg-manager's Status() returns
+	// per-peer scalars (LocalRole, LocalState, LeaderNodeID) but does
+	// NOT populate Instances or PrimaryNodeID. The aggregator fans out
+	// to peers via NATS so a single /v1/status call returns the full
+	// cluster view. Pass-through when no aggregator is wired.
+	if s.aggregator != nil {
+		st = s.aggregator.EnrichStatus(r.Context(), st)
+	}
 	// Feature 002 (contracts/observability.md § Status response): augment
 	// the engine status with a `cluster.embedded_nats` sub-block when
 	// the host has wired an embedded-server snapshot callback. Single-

@@ -62,6 +62,13 @@ type Server struct {
 	// returns an empty result so single-peer test paths still pass.
 	history HistoryQuerier
 
+	// Feature 003: optional per-peer status aggregator. When set, the
+	// /v1/status handler enriches pg-manager's per-peer scalar snapshot
+	// with cluster-wide Instances + PrimaryNodeID by fanning out to
+	// siblings via NATS. Nil aggregator = pass-through (single-peer test
+	// paths, or hosts that have not wired the embedded NATS substrate).
+	aggregator PeerAggregator
+
 	clusterID string
 	nodeID    string
 
@@ -99,8 +106,25 @@ type Config struct {
 	// runtime/start.go around internal/history.Run.
 	History HistoryQuerier
 
+	// Aggregator is an optional per-peer status aggregator (feature 003
+	// /v1/status enrichment). When set, the Status handler fans out to
+	// peers via NATS and stitches the per-peer Instances + PrimaryNodeID
+	// onto the response. When nil, the handler passes through the
+	// per-peer scalar snapshot pg-manager returns.
+	Aggregator PeerAggregator
+
 	ClusterID string
 	NodeID    string
+}
+
+// PeerAggregator enriches a per-peer Manager.Status() snapshot with
+// cluster-wide Instances + PrimaryNodeID. Implemented in
+// internal/runtime to keep the wire substrate (NATS / internal/fanout)
+// out of the control package. EnrichStatus MUST be safe to call from
+// every /v1/status invocation; it MUST return the input unchanged on
+// any internal error.
+type PeerAggregator interface {
+	EnrichStatus(ctx context.Context, local pgmanager.Status) pgmanager.Status
 }
 
 // NewServer wires a Server. Returns an error when the supplied TLS
@@ -118,6 +142,7 @@ func NewServer(cfg Config) (*Server, error) {
 		metrics:          cfg.Metrics,
 		embeddedSnapshot: cfg.EmbeddedSnapshot,
 		history:          cfg.History,
+		aggregator:       cfg.Aggregator,
 		clusterID:        cfg.ClusterID,
 		nodeID:           cfg.NodeID,
 		ulidEntropy:      newULIDEntropy(),

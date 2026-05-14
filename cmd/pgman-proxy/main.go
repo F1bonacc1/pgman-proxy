@@ -242,6 +242,15 @@ func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
 			Stop: func(ctx context.Context) error { return res.Control.Stop(ctx) },
 		})
 	}
+	// Feature 003: drain the fan-out responder right after the control
+	// plane stops so no in-flight /v1/status enrichment can race with
+	// the NATS conn teardown that follows in the embedded-nats step.
+	if res.Fanout != nil {
+		steps = append(steps, runtime.DrainStep{
+			Name: "fanout",
+			Stop: func(_ context.Context) error { return res.Fanout.Close() },
+		})
+	}
 	if res.ObsSrv != nil {
 		steps = append(steps, runtime.DrainStep{
 			Name: "obs",

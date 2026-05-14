@@ -66,8 +66,8 @@ Defaults: --warn 64MB, --fail 1GB.`,
 				CapturedAt: time.Now().UTC(),
 			}
 			for _, inst := range engine.Instances {
-				if !isStandby(inst.Role) {
-					if strings.EqualFold(inst.Role, "primary") {
+				if !isStandby(string(inst.Role)) {
+					if strings.EqualFold(string(inst.Role), "primary") {
 						payload.PrimaryLSN = inst.WriteLSN
 					}
 					continue
@@ -75,7 +75,7 @@ Defaults: --warn 64MB, --fail 1GB.`,
 				sev := lagSeverity(inst.LagBytes, warnBytes, failBytes)
 				payload.Rows = append(payload.Rows, lagRow{
 					NodeID:    inst.NodeID,
-					Role:      inst.Role,
+					Role:      string(inst.Role),
 					LagBytes:  inst.LagBytes,
 					ReplayLSN: inst.ReplayLSN,
 					WriteLSN:  inst.WriteLSN,

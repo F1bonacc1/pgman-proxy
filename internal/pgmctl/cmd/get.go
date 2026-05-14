@@ -164,7 +164,7 @@ func getNodes(ctx context.Context, cmd *cobra.Command, app *AppContext, name str
 		t := output.NewTable("NODE", "ROLE", "STATE", "POSTGRES", "LAG", "REPLAY LSN", "WRITE LSN", "LAST SEEN")
 		for _, r := range rows {
 			t.AddRow(
-				r.NodeID, strings.ToLower(r.Role), strings.ToLower(r.State),
+				r.NodeID, strings.ToLower(string(r.Role)), strings.ToLower(string(r.State)),
 				boolText(r.PostgresUp), formatBytes(r.LagBytes),
 				fmt.Sprintf("%x", r.ReplayLSN), fmt.Sprintf("%x", r.WriteLSN),
 				lastSeen(r.LastSeenAt),
@@ -174,7 +174,7 @@ func getNodes(ctx context.Context, cmd *cobra.Command, app *AppContext, name str
 	}
 	t := output.NewTable("NODE", "ROLE", "STATE", "POSTGRES", "LAG")
 	for _, r := range rows {
-		t.AddRow(r.NodeID, strings.ToLower(r.Role), strings.ToLower(r.State), boolText(r.PostgresUp), formatBytes(r.LagBytes))
+		t.AddRow(r.NodeID, strings.ToLower(string(r.Role)), strings.ToLower(string(r.State)), boolText(r.PostgresUp), formatBytes(r.LagBytes))
 	}
 	return t.Render(cmd.OutOrStdout())
 }

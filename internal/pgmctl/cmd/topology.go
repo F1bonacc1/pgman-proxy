@@ -80,8 +80,8 @@ func buildTopologyPayload(e *pgmanagerStatus, n *embeddedNATSSnapshot) topologyP
 	for _, i := range e.Instances {
 		peers = append(peers, topologyPeer{
 			NodeID:     i.NodeID,
-			Role:       i.Role,
-			State:      i.State,
+			Role:       string(i.Role),
+			State:      string(i.State),
 			PostgresUp: i.PostgresUp,
 			LagBytes:   i.LagBytes,
 			IsSync:     syncSet[i.NodeID],
