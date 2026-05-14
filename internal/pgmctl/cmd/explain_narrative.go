@@ -217,42 +217,98 @@ func explainReplicationBroken(ctx context.Context, app *AppContext, nodeArg stri
 	return out, nil
 }
 
-// explainLeaderElection narrates the most recent leader-election
-// sequence from the history stream. "Not applicable" when the
-// history stream has no leader-election records in the recent window.
+// explainLeaderElection narrates the cluster's leadership trail using
+// the records that DO land in the history stream today:
+//
+//   - lcm_audit on Switchover / Failover / Promote (operator-initiated
+//     leadership changes — the cause).
+//   - proxy.history_stream_ready / control_plane.started (per-peer
+//     proxy boots, which re-trigger the leadership KV claim).
+//
+// pg-manager's became_leader / lost_leader / state transitions are
+// still flowing through obs.Logger.Info rather than Logger.Event, so
+// they don't appear in the history stream — that's a T013 follow-up
+// (only the embedded-NATS lifecycle + control_plane.started were
+// converted in the first pass). The subject ALWAYS applies; when the
+// stream is too quiet to find anything, we still surface the current
+// leader from /v1/status and explain what's missing.
 func explainLeaderElection(ctx context.Context, app *AppContext) (ExplainOutput, error) {
 	engine, _, err := fetchStatus(ctx, app)
 	if err != nil {
 		return ExplainOutput{}, err
 	}
-	// Pull recent leader-election + state-transition records.
-	events, _ := fetchHistory(ctx, app, "event", []string{"LeaderElection", "StateTransition"}, 50)
-	leaderEvents := filterLeaderEvents(events)
-	if len(leaderEvents) == 0 {
-		return ExplainOutput{}, fmt.Errorf("%w: no leader-election records in the last 30m of the history stream",
-			ErrSubjectNotApplicable)
+
+	leadershipOps := map[string]bool{"Switchover": true, "Failover": true, "Promote": true}
+	audits, _ := fetchHistory(ctx, app, "audit", nil, 200)
+	cited := []eventRow{}
+	for _, ev := range audits {
+		op, _ := ev.Details["operation"].(string)
+		if leadershipOps[op] {
+			cited = append(cited, ev)
+		}
+	}
+
+	// Proxy boots cause a KV claim retry; surface them as supporting
+	// evidence for "elections that probably happened but weren't
+	// directly recorded".
+	boots, _ := fetchHistory(ctx, app, "event", []string{"proxy.history_stream_ready"}, 50)
+
+	leader := engine.LeaderNodeID
+	if leader == "" {
+		leader = "(none — no leadership lease held)"
+	}
+
+	diag := fmt.Sprintf("current leader=%s; %d leadership audit(s), %d proxy boot(s) in window",
+		leader, len(cited), len(boots))
+	if len(cited) == 0 && len(boots) == 0 {
+		diag += " — no leader-related records found"
 	}
 
 	out := ExplainOutput{
 		APIVersion: "pgmctl/v1",
 		Kind:       "Explain",
 		Subject:    subjLeaderElection,
-		Diagnosis: fmt.Sprintf("current leader=%s; %d leader-related event(s) in the recent window",
-			engine.LeaderNodeID, len(leaderEvents)),
+		Diagnosis:  diag,
 	}
-	for _, ev := range leaderEvents {
+	out.Evidence = append(out.Evidence, ExplainEvidence{
+		Source: "status",
+		Detail: fmt.Sprintf("current leader: %s", leader),
+	})
+	for _, ev := range cited {
+		op, _ := ev.Details["operation"].(string)
+		actor, _ := ev.Details["actor"].(string)
+		outcome, _ := ev.Details["outcome"].(string)
+		target, _ := ev.Details["target"].(string)
+		detail := fmt.Sprintf("audit op=%s actor=%s outcome=%s", op, actor, outcome)
+		if target != "" {
+			detail += " target=" + target
+		}
 		out.Evidence = append(out.Evidence, ExplainEvidence{
 			Source:    "history",
 			Timestamp: ev.Time.UTC().Format(time.RFC3339Nano),
-			Detail:    fmt.Sprintf("%s %s %s", ev.Type, ev.NodeID, summariseDetails(ev.Details)),
+			Detail:    detail,
 			Reference: ev.ID,
+		})
+	}
+	for _, ev := range boots {
+		out.Evidence = append(out.Evidence, ExplainEvidence{
+			Source:    "history",
+			Timestamp: ev.Time.UTC().Format(time.RFC3339Nano),
+			Detail:    fmt.Sprintf("%s %s (proxy boot — may have re-triggered leader claim)", ev.Type, ev.NodeID),
+			Reference: ev.ID,
+		})
+	}
+	if len(cited) == 0 && len(boots) == 0 {
+		out.Evidence = append(out.Evidence, ExplainEvidence{
+			Source: "history",
+			Detail: "no Switchover / Failover / Promote audits and no proxy boots in the recent window — leadership has been stable, or pg-manager state transitions are not yet routed through the history stream (T013 follow-up)",
 		})
 	}
 
 	out.SuggestedNextSteps = []string{
-		"pgmctl watch transitions    # live state-transition stream",
-		"pgmctl status               # current cluster shape",
-		"pgmctl get audit --since 30m # operator-initiated LCM during the window",
+		"pgmctl events --category audit --since 1h     # full audit trail",
+		"pgmctl status                                  # current cluster shape",
+		"pgmctl events --type lcm_audit --since 1h",
 	}
 	return out, nil
 }
@@ -418,18 +474,3 @@ func appendNodeTransitions(ctx context.Context, app *AppContext, out *ExplainOut
 	}
 }
 
-// filterLeaderEvents returns the subset of records whose Type matches
-// one of the leader-election / promotion family.
-func filterLeaderEvents(events []eventRow) []eventRow {
-	out := make([]eventRow, 0, len(events))
-	for _, ev := range events {
-		t := ev.Type
-		if t == "LeaderElection" || t == "LeaderChange" ||
-			(t == "StateTransition" && (strings.Contains(strings.ToLower(summariseDetails(ev.Details)), "promot") ||
-				strings.Contains(strings.ToLower(summariseDetails(ev.Details)), "demot") ||
-				strings.Contains(strings.ToLower(summariseDetails(ev.Details)), "leader"))) {
-			out = append(out, ev)
-		}
-	}
-	return out
-}
