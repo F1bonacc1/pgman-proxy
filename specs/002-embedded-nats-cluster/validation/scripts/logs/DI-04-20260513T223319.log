@@ -1,0 +1,32 @@
+==================================================================
+DI-04 — pre-state
+==================================================================
+wall=2026-05-13T22:33:19+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":3199,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+initial primary: c
+baseline counters: {"writes_ok":3300,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+==================================================================
+DI-04 — issue sentinel INSERT + kill primary within ~100ms
+==================================================================
+INSERT RETURNING: 0/8F8C5E0
+INSERT 0 1
+TS before/after: 2026-05-13T22:33:22,250083106+03:00  2026-05-13T22:33:22,335241157+03:00
+killing primary node-c ...
+KILL TS: 2026-05-13T22:33:22,665076884+03:00
+==================================================================
+DI-04 — wait for new primary (≤ 60s)
+==================================================================
+new primary: b at t+12s
+==================================================================
+DI-04 — probe sentinel on new primary
+==================================================================
+probe row: di-04|1
+==================================================================
+DI-04 — settle 30s, post-state
+==================================================================
+wall=2026-05-13T22:34:07+03:00 primary=b mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":3912,"writes_failed":269,"data_loss_total":0,"extra_rows":0}
+pgman-pc-node-a:0 pgman-pc-node-b:0 pgman-pc-node-c:0 
+pgman-pc-node-a:0 pgman-pc-node-b:0 pgman-pc-node-c:0 
+==================================================================
+DI-04 — VERDICT PASS
+==================================================================
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/DI-04-20260513T223319.log

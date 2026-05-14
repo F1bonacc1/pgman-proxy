@@ -1,0 +1,100 @@
+==================================================================
+SOAK-01 — 10-min soak with periodic kills
+==================================================================
+pre-state primary=a
+pgmgr_node_b|t|0/50E44F0
+pgmgr_node_c|t|0/50E44F0
+PRE counters: writes_ok=1582 writes_failed=0 data_loss_total=0 extra_rows=0
+==================================================================
+Soak loop start at 2026-05-14T01:20:04+03:00
+==================================================================
+[t+   0s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":1682,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  11s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":1882,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  23s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":2182,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  34s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":2382,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  46s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":2582,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  57s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":2783,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  69s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":3082,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  81s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":3283,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+  92s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":3482,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+ 104s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":3782,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+ 115s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":3983,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+[t+127s] KILL non-primary node-b (primary was a)
+pgman-pc-node-b
+[t+ 127s] primary=a running=3/3 streaming=1 slots=2 slots_lost=0 ctrs={"writes_ok":NA,"writes_failed":NA,"data_loss_total":NA,"extra_rows":NA}
+[t+ 139s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":4481,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 150s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":4681,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 162s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":4882,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 174s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":5182,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 185s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":5382,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 197s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":5582,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 208s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":5882,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 220s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":6082,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 231s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":6282,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 243s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":6582,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+255s] KILL non-primary node-b (primary was a)
+pgman-pc-node-b
+[t+ 255s] primary=a running=3/3 streaming=1 slots=2 slots_lost=0 ctrs={"writes_ok":6782,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 267s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":6982,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 278s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":7282,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+ 290s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":7482,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+[t+301s] KILL PRIMARY node-a
+pgman-pc-node-a
+[t+ 301s] primary=NONE running=3/3 streaming=0 slots=0 slots_lost=0 ctrs={"writes_ok":NA,"writes_failed":NA,"data_loss_total":NA,"extra_rows":NA}
+[t+ 313s] primary=NONE running=3/3 streaming=0 slots=0 slots_lost=0 ctrs={"writes_ok":NA,"writes_failed":NA,"data_loss_total":NA,"extra_rows":NA}
+[t+ 325s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":7920,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 337s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":8120,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 348s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":8420,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 360s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":8620,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 371s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":8820,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+383s] KILL non-primary node-b (primary was a)
+pgman-pc-node-b
+[t+ 383s] primary=a running=3/3 streaming=1 slots=2 slots_lost=0 ctrs={"writes_ok":9120,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 395s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":9320,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 406s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":9520,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 418s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":9820,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 429s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":10020,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 441s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":10220,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 453s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":10520,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 464s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":10720,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 476s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":10920,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 487s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":11120,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 499s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":11420,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+510s] KILL non-primary node-b (primary was a)
+pgman-pc-node-b
+[t+ 510s] primary=a running=3/3 streaming=1 slots=2 slots_lost=0 ctrs={"writes_ok":11620,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 522s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":11820,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 534s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":12120,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 546s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":12320,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 557s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":12520,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 569s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":12820,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 580s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":13020,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[t+ 592s] primary=a running=3/3 streaming=2 slots=2 slots_lost=0 ctrs={"writes_ok":13220,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+==================================================================
+Soak window ended at 2026-05-14T01:30:08+03:00 — 60s settle
+==================================================================
+[settle+ 0s] primary=a running=3/3 streaming=2 ctrs={"writes_ok":13520,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[settle+10s] primary=a running=3/3 streaming=2 ctrs={"writes_ok":13720,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[settle+20s] primary=a running=3/3 streaming=2 ctrs={"writes_ok":13920,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[settle+30s] primary=a running=3/3 streaming=2 ctrs={"writes_ok":14220,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[settle+40s] primary=a running=3/3 streaming=2 ctrs={"writes_ok":14420,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+[settle+50s] primary=a running=3/3 streaming=2 ctrs={"writes_ok":14620,"writes_failed":263,"data_loss_total":0,"extra_rows":0}
+==================================================================
+Final assessment
+==================================================================
+final primary=a
+final slot list:
+pgmgr_node_b|t|0/55A6410
+pgmgr_node_c|t|0/55A6410
+pgmgr_node_b|t|reserved|0
+pgmgr_node_c|t|reserved|0
+repl_state:
+node-b|streaming|quorum|00:00:00.000091|00:00:00.00087|00:00:00.00092
+node-c|streaming|quorum|00:00:00.000095|00:00:00.000916|00:00:00.000958
+POST counters: writes_ok=14920 writes_failed=263 data_loss_total=0 extra_rows=0
+deltas: writes_ok+13338 writes_failed+263 data_loss+0 extra_rows+0
+==================================================================
+VERDICT SOAK-01: PASS
+==================================================================
+reasons: none
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/SOAK-01-20260513T221959Z.log

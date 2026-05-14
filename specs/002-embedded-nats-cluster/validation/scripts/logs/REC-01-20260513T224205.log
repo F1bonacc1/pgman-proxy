@@ -1,0 +1,65 @@
+==================================================================
+REC-01 — pre-state
+==================================================================
+wall=2026-05-13T22:42:05+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":11233,"writes_failed":1734,"data_loss_total":0,"extra_rows":6}
+primary: c
+target standby (to delete standby.signal on): node-a
+==================================================================
+REC-01 — stop target via process-compose
+==================================================================
+Successfully stopped: 'node-a'
+pgman-pc-node-c	Up 6 minutes
+pgman-pc-node-b	Up 11 minutes
+==================================================================
+REC-01 — delete standby.signal from PGDATA volume
+==================================================================
+before:
+-rw-------    1 999      ping             0 May 12 22:33 /data/standby.signal
+after:
+ls: /data/standby.signal: No such file or directory
+data top:
+PG_VERSION
+base
+global
+pg_commit_ts
+pg_dynshmem
+pg_hba.conf
+pg_ident.conf
+pg_logical
+pg_multixact
+pg_notify
+==================================================================
+REC-01 — start target again
+==================================================================
+Process node-a started
+==================================================================
+REC-01 — wait 30s for boot, then inspect standby.signal
+==================================================================
+standby.signal present at t+1s
+-rw------- 1 postgres postgres 0 May 13 19:42 /var/lib/postgresql/data/standby.signal
+-rw------- 1 postgres postgres 3 May 12 21:53 /var/lib/postgresql/data/PG_VERSION
+==================================================================
+REC-01 — check for primary status on target
+==================================================================
+is_primary on each: a=f b=f c=t
+current_primary -> c
+==================================================================
+REC-01 — grep startup_with_pgdata logs
+==================================================================
+{"time":"2026-05-13T19:42:09.172608853Z","level":"INFO","msg":"startup_with_pgdata: wrote standby.signal preemptively","cluster_id":"pgman-pc","node_id":"node-a","component":"runtime","data_dir":"/var/lib/postgresql/data"}
+{"time":"2026-05-13T19:42:09.434069008Z","level":"INFO","msg":"state transition","cluster_id":"pgman-pc","node_id":"node-a","component":"runtime","cluster_id":"pgman-pc","node_id":"node-a","cluster_id":"pgman-pc","node_id":"node-a","from":"unknown","to":"running","role":"standby","reason":"startup_with_pgdata"}
+{"time":"2026-05-13T19:42:09.660571513Z","level":"INFO","msg":"startup_with_pgdata: postmaster started","cluster_id":"pgman-pc","node_id":"node-a","component":"runtime","cluster_id":"pgman-pc","node_id":"node-a","cluster_id":"pgman-pc","node_id":"node-a"}
+==================================================================
+REC-01 — wait for streaming to resume
+==================================================================
+two streaming standbys after 1*2s
+==================================================================
+REC-01 — final state
+==================================================================
+wall=2026-05-13T22:42:23+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":11533,"writes_failed":1734,"data_loss_total":0,"extra_rows":6}
+node-a|streaming|quorum|00:00:00.000109|00:00:00.000923|00:00:00.001009
+node-b|streaming|quorum|00:00:00.000105|00:00:00.000893|00:00:00.000937
+==================================================================
+REC-01 — VERDICT PASS (target node-a came up as standby; standby.signal re-created)
+==================================================================
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/REC-01-20260513T224205.log

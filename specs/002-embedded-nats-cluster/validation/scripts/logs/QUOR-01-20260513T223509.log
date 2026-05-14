@@ -1,0 +1,50 @@
+==================================================================
+QUOR-01 — pre-state
+==================================================================
+wall=2026-05-13T22:35:09+03:00 primary=b mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":5112,"writes_failed":269,"data_loss_total":0,"extra_rows":0}
+primary: b
+ANY 1 ("node-a","node-c")
+on
+node-a|streaming|quorum|00:00:00.000098|00:00:00.000932|00:00:00.000971
+node-c|streaming|quorum|00:00:00.000096|00:00:00.000893|00:00:00.000938
+standbys: a c
+==================================================================
+QUOR-01 — stop both standbys (process-compose stop) so docker won't auto-restart
+==================================================================
+Successfully stopped: 'node-a'
+Successfully stopped: 'node-c'
+pgman-pc-node-b Up 4 minutes
+still-running primaries:
+  node-a is_primary=
+  node-b is_primary=t
+  node-c is_primary=
+==================================================================
+QUOR-01 — repl state on primary (should be empty)
+==================================================================
+synchronous_standby_names: ANY 1 ("node-a","node-c")
+==================================================================
+QUOR-01 — attempt INSERT with 8s server-side statement_timeout
+==================================================================
+RC=124
+wall T0: 2026-05-13T22:35:16,248677138+03:00
+wall T1: 2026-05-13T22:35:28,255304554+03:00
+==================================================================
+QUOR-01 — verify whether row was committed despite no sync standby
+==================================================================
+post-row probe: 
+==================================================================
+QUOR-01 — bring standbys back
+==================================================================
+Process node-a started
+Process node-c started
+both standbys streaming after 9*2s
+==================================================================
+QUOR-01 — post-state
+==================================================================
+wall=2026-05-13T22:35:47+03:00 primary=b mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":5269,"writes_failed":277,"data_loss_total":0,"extra_rows":6}
+node-a|streaming|quorum|00:00:00.000134|00:00:00.00094|00:00:00.001003
+node-c|streaming|quorum|00:00:00.00022|00:00:00.00097|00:00:00.001006
+==================================================================
+QUOR-01 — VERDICT PASS (commit blocked - timeout 12s outer fired)
+==================================================================
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/QUOR-01-20260513T223509.log

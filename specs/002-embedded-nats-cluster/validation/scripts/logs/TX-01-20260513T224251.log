@@ -1,0 +1,41 @@
+==================================================================
+TX-01 — pre-state
+==================================================================
+wall=2026-05-13T22:42:51+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":12133,"writes_failed":1734,"data_loss_total":0,"extra_rows":6}
+primary: c
+proxy host port: 127.0.0.1:16434
+==================================================================
+TX-01 — start long psql session in background
+==================================================================
+background pid: 40048
+==================================================================
+TX-01 — kill primary 3s after session start (mid-sleep)
+==================================================================
+KILL TS: 2026-05-13T22:42:56,541468981+03:00
+==================================================================
+TX-01 — wait for session to finish (it should error out)
+==================================================================
+---- session output ----
+psql: error: could not translate host name "c" to address: Temporary failure in name resolution
+session exit: 2
+---- end ----
+==================================================================
+TX-01 — wait for new primary
+==================================================================
+new primary at t+8s: a
+==================================================================
+TX-01 — probe tx-01 rows on new primary
+==================================================================
+probe rows: ----
+
+-----
+count: 0
+==================================================================
+TX-01 — final state (settle 20s)
+==================================================================
+wall=2026-05-13T22:43:26+03:00 primary=a mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":12648,"writes_failed":1919,"data_loss_total":0,"extra_rows":6}
+==================================================================
+TX-01 — VERDICT INCONCLUSIVE (no rows but no client error - was the session ever live?)
+==================================================================
+session log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/TX-01-session-20260513T224253.log
+scenario log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/TX-01-20260513T224251.log

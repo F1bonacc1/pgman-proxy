@@ -1,0 +1,45 @@
+==================================================================
+TX-01 — pre-state
+==================================================================
+wall=2026-05-13T22:43:57+03:00 primary=a mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":13248,"writes_failed":1919,"data_loss_total":0,"extra_rows":6}
+primary: a
+proxy host port: 127.0.0.1:16432
+==================================================================
+TX-01 — start long psql session in background
+==================================================================
+session runs from: pgman-pc-node-b (single-host DSN to node-a:6432)
+background pid: 42488
+==================================================================
+TX-01 — kill primary 3s after session start (mid-sleep)
+==================================================================
+KILL TS: 2026-05-13T22:44:02,216407045+03:00
+==================================================================
+TX-01 — wait for session to finish (it should error out)
+==================================================================
+---- session output ----
+server closed the connection unexpectedly
+	This probably means the server terminated abnormally
+	before or while processing the request.
+connection to server was lost
+session exit: 2
+---- end ----
+==================================================================
+TX-01 — wait for new primary
+==================================================================
+new primary at t+8s: c
+==================================================================
+TX-01 — probe tx-01 rows on new primary
+==================================================================
+probe rows: ----
+
+-----
+count: 0
+==================================================================
+TX-01 — final state (settle 20s)
+==================================================================
+wall=2026-05-13T22:44:32+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":13732,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+==================================================================
+TX-01 — VERDICT PASS (no tx-01 rows on new primary; client saw connection error)
+==================================================================
+session log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/TX-01-session-20260513T224358.log
+scenario log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/TX-01-20260513T224357.log

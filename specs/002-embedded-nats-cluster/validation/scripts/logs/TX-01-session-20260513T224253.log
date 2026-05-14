@@ -1,0 +1,2 @@
+psql: error: could not translate host name "c" to address: Temporary failure in name resolution
+session exit: 2

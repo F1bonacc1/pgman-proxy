@@ -1,0 +1,78 @@
+==================================================================
+NET-05 — pre-state
+==================================================================
+wall=2026-05-13T22:52:54+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":23728,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+leader: c
+==================================================================
+NET-05 — block port 6222 inbound on leader
+==================================================================
+iptables v1.8.9 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)
+iptables v1.8.9 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)
+==================================================================
+NET-05 — hold 25s; sample state every 3s
+==================================================================
+t=2026-05-13T22:52:59,776601969+03:00
+  node-a is_primary=f
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":23827,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+  lease_renewal_failures(node-c): 0
+t=2026-05-13T22:53:04,082942868+03:00
+  node-a is_primary=f
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":23928,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+  lease_renewal_failures(node-c): 0
+t=2026-05-13T22:53:08,397234822+03:00
+  node-a is_primary=f
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":24028,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+  lease_renewal_failures(node-c): 0
+t=2026-05-13T22:53:12,688480751+03:00
+  node-a is_primary=f
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":24128,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+  lease_renewal_failures(node-c): 0
+t=2026-05-13T22:53:17,010272637+03:00
+  node-a is_primary=f
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":24228,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+  lease_renewal_failures(node-c): 0
+t=2026-05-13T22:53:21,314534869+03:00
+  node-a is_primary=f
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":24328,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+  lease_renewal_failures(node-c): 0
+==================================================================
+NET-05 — flush iptables on leader
+==================================================================
+iptables v1.8.9 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)
+iptables v1.8.9 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)
+==================================================================
+NET-05 — settle 30s
+==================================================================
+wall=2026-05-13T22:53:27+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":24428,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:53:34+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":24528,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:53:40+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":24728,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:53:46+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":24828,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:53:52+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":24928,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+==================================================================
+NET-05 — final state
+==================================================================
+final primary: c (was: c)
+node-a|streaming|quorum|00:00:00.000102|00:00:00.004048|00:00:00.004094
+node-b|streaming|quorum|00:00:00.0001|00:00:00.004589|00:00:00.004628
+final data_loss_total=0 (baseline=0)
+==================================================================
+NET-05 — leadership/lease events on node-c
+==================================================================
+{"time":"2026-05-13T19:43:01.339411889Z","level":"INFO","msg":"state transition","cluster_id":"pgman-pc","node_id":"node-c","component":"runtime","cluster_id":"pgman-pc","node_id":"node-c","cluster_id":"pgman-pc","node_id":"node-c","from":"unknown","to":"running","role":"standby","reason":"startup_with_pgdata"}
+{"time":"2026-05-13T19:44:11.369419826Z","level":"INFO","msg":"state transition","cluster_id":"pgman-pc","node_id":"node-c","component":"runtime","cluster_id":"pgman-pc","node_id":"node-c","cluster_id":"pgman-pc","node_id":"node-c","from":"running","to":"promoting","role":"standby_designated","reason":"became_leader"}
+==================================================================
+NET-05 — VERDICT PASS-OR-INCONCLUSIVE (leader unchanged c; check lease_renewal_failures + survivors saw stale-leader)
+==================================================================
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/NET-05-20260513T225254.log

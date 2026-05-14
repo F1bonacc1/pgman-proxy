@@ -1,0 +1,70 @@
+==================================================================
+REC-04 — pre-state
+==================================================================
+wall=2026-05-13T22:45:09+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":14432,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+primary: c
+target standby (to be rebootstrapped): node-a
+==================================================================
+REC-04 — lower wal_keep_size to 8MB on primary
+==================================================================
+ALTER SYSTEM
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+8MB
+==================================================================
+REC-04 — initial md5 of chaos_events
+==================================================================
+H_pre = 4e4b96fb02bdc4b2f78bd1b3aae61a21
+==================================================================
+REC-04 — stop target standby via process-compose
+==================================================================
+Successfully stopped: 'node-a'
+container stopped: 0 running
+==================================================================
+REC-04 — drive primary HARD to recycle WAL past stopped standby
+==================================================================
+DO
+CHECKPOINT
+0000000E0000000000000029|59
+==================================================================
+REC-04 — start the stopped standby again
+==================================================================
+Process node-a started
+==================================================================
+REC-04 — wait up to 3 min for streaming.resumed event on node-a
+==================================================================
+saw_rebootstrap=no
+==================================================================
+REC-04 — current rebootstrap/demote events on target
+==================================================================
+{"time":"2026-05-13T19:45:17.654836355Z","level":"INFO","msg":"state transition","cluster_id":"pgman-pc","node_id":"node-a","component":"runtime","cluster_id":"pgman-pc","node_id":"node-a","cluster_id":"pgman-pc","node_id":"node-a","from":"unknown","to":"running","role":"standby","reason":"startup_with_pgdata"}
+==================================================================
+REC-04 — let standby catch up 30s
+==================================================================
+==================================================================
+REC-04 — md5 on primary and on target standby
+==================================================================
+ERROR:  string buffer exceeds maximum allowed length (1073741823 bytes)
+DETAIL:  Cannot enlarge string buffer containing 1073731400 bytes by 16406 more bytes.
+ERROR:  string buffer exceeds maximum allowed length (1073741823 bytes)
+DETAIL:  Cannot enlarge string buffer containing 1073734640 bytes by 16406 more bytes.
+H_primary_now  = 
+H_standby_now  = 
+row counts: primary=233704  standby=233706
+==================================================================
+REC-04 — final state & revert
+==================================================================
+wall=2026-05-13T22:48:53+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":18932,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+ALTER SYSTEM
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+==================================================================
+REC-04 — VERDICT INCONCLUSIVE (target md5 empty; standby may not have caught up)
+==================================================================
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/REC-04-20260513T224509.log

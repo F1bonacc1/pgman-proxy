@@ -1,0 +1,84 @@
+==================================================================
+NET-01 — pre-state
+==================================================================
+wall=2026-05-13T22:50:03+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":20328,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+leader: c
+partition target (non-leader): node-a
+baseline writes_ok=20427 dl=0 er=6
+==================================================================
+NET-01 — disconnect node-a from pgman-pc-net
+==================================================================
+disconnected at 2026-05-13T22:50:08,893904099+03:00
+==================================================================
+NET-01 — observe survivors for 60s
+==================================================================
+t=2026-05-13T22:50:13,900060833+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":20528,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:20,115683965+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":20628,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:26,344152873+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":20828,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:32,563839983+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":20928,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:38,780122579+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":21028,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:44,976943643+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":21128,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:51,185147561+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":21328,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:50:57,400526406+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":21428,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:51:03,623545825+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":21528,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+t=2026-05-13T22:51:09,827022321+03:00  primary-survivor probe:
+  node-b is_primary=f
+  node-c is_primary=t
+  ctrs={"writes_ok":21628,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+==================================================================
+NET-01 — reconnect node-a
+==================================================================
+reconnected at 2026-05-13T22:51:11,168086008+03:00
+==================================================================
+NET-01 — settle 60s post-reconnect
+==================================================================
+wall=2026-05-13T22:51:21+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":21928,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:51:32+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":22128,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:51:43+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":22328,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:51:55+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":22527,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:52:06+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":22828,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+wall=2026-05-13T22:52:17+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":23027,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+==================================================================
+NET-01 — final state
+==================================================================
+wall=2026-05-13T22:52:19+03:00 primary=c mesh-a=0 mesh-b=0 mesh-c=0 ctrs={"writes_ok":23027,"writes_failed":2116,"data_loss_total":0,"extra_rows":6}
+final primary: c (was: c)
+node-a|streaming|quorum|00:00:00.000092|00:00:00.00233|00:00:00.002374
+node-b|streaming|quorum|00:00:00.00009|00:00:00.002767|00:00:00.002807
+==================================================================
+NET-01 — route_down / route_up event counts
+==================================================================
+node-a: route_down=4 route_up=12
+node-b: route_down=50 route_up=58
+node-c: route_down=10 route_up=18
+==================================================================
+NET-01 — VERDICT PASS (leader stable=c, writes_ok 20427->23128, dl stable=0)
+==================================================================
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/NET-01-20260513T225003.log

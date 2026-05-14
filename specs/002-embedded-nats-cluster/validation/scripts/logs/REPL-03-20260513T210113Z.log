@@ -1,0 +1,98 @@
+==================================================================
+REPL-03 — slot leak after permanent peer removal
+==================================================================
+primary=b
+target peer to remove=a
+==================================================================
+Step 1: pre-state
+==================================================================
+pgmgr_node_a|t|0/1010F0E8
+pgmgr_node_c|t|0/1010F0E8
+ctrs: {"writes_ok":1099,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+==================================================================
+Step 2: permanently remove node-a
+==================================================================
+Successfully stopped: 'node-a'
+pgman-pc-node-a
+node-a gone at 2026-05-14T00:01:15+03:00
+==================================================================
+Step 3: 60s observation window (> 2x AutoDemote.Cooldown)
+==================================================================
+t+ 0s slot=pgmgr_node_a|false|reserved|2432 ctrs={"writes_ok":NA,"writes_failed":NA,"data_loss_total":NA,"extra_rows":NA}
+t+ 6s slot=pgmgr_node_a|false|reserved|40576 ctrs={"writes_ok":1199,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+12s slot=pgmgr_node_a|false|reserved|79000 ctrs={"writes_ok":1298,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+18s slot=pgmgr_node_a|false|reserved|117504 ctrs={"writes_ok":1498,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+24s slot=pgmgr_node_a|false|reserved|154712 ctrs={"writes_ok":1598,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+30s slot=pgmgr_node_a|false|reserved|193136 ctrs={"writes_ok":1698,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+36s slot=pgmgr_node_a|false|reserved|268376 ctrs={"writes_ok":1798,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+43s slot=pgmgr_node_a|false|reserved|306496 ctrs={"writes_ok":1998,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+49s slot=pgmgr_node_a|false|reserved|345000 ctrs={"writes_ok":2098,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+55s slot=pgmgr_node_a|false|reserved|383144 ctrs={"writes_ok":2198,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+==================================================================
+Step 4: sustained-write window — drive WAL past 16MB threshold
+==================================================================
+NOTICE:  table "repl03_burner" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+t+  0s slot_present=1 slot=pgmgr_node_a|false|reserved|15661152 ctrs={"writes_ok":2298,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+ 30s slot_present=1 slot= ctrs={"writes_ok":2785,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+ 60s slot_present=1 slot= ctrs={"writes_ok":3148,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+ 90s slot_present=1 slot= ctrs={"writes_ok":3507,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+120s slot_present=1 slot= ctrs={"writes_ok":3880,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+150s slot_present=1 slot= ctrs={"writes_ok":4235,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+180s slot_present=1 slot= ctrs={"writes_ok":4590,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+210s slot_present=1 slot= ctrs={"writes_ok":4930,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+240s slot_present=1 slot= ctrs={"writes_ok":5277,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+270s slot_present=1 slot= ctrs={"writes_ok":5619,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+t+300s slot_present=1 slot= ctrs={"writes_ok":5957,"writes_failed":1,"data_loss_total":0,"extra_rows":0}
+==================================================================
+Step 5: final slot state assessment
+==================================================================
+all slots on primary:
+pgmgr_node_a|f|
+pgmgr_node_c|t|3/90010FF8
+pgmgr_node_a|f|lost|
+pgmgr_node_c|t|reserved|0
+==================================================================
+VERDICT REPL-03: PASS (slot invalidated, WAL recyclable)
+==================================================================
+==================================================================
+Step 6: restore node-a
+==================================================================
+Process node-a started
+T+5s state=t streaming=0
+T+10s state=t streaming=0
+T+15s state=t streaming=0
+T+20s state=t streaming=0
+T+25s state=t streaming=0
+T+30s state=t streaming=0
+T+35s state=t streaming=0
+T+40s state=t streaming=0
+T+45s state=t streaming=0
+T+50s state=t streaming=0
+T+55s state=t streaming=0
+T+60s state=t streaming=0
+T+65s state=t streaming=0
+T+70s state=t streaming=0
+T+75s state=t streaming=0
+T+80s state=t streaming=0
+T+85s state=t streaming=0
+T+90s state=t streaming=0
+T+95s state=t streaming=0
+T+100s state=t streaming=0
+T+105s state=t streaming=0
+T+110s state=t streaming=0
+T+115s state=t streaming=0
+T+120s state=t streaming=0
+T+125s state=t streaming=0
+T+130s state=t streaming=0
+T+135s state=t streaming=0
+T+140s state=t streaming=0
+T+145s state=t streaming=0
+T+150s state=t streaming=0
+T+155s state=t streaming=0
+T+160s state=t streaming=0
+T+165s state=t streaming=0
+T+170s state=t streaming=0
+T+175s state=t streaming=0
+log: /home/eugene/projects/go/pgman-proxy/specs/002-embedded-nats-cluster/validation/scripts/logs/REPL-03-20260513T210113Z.log

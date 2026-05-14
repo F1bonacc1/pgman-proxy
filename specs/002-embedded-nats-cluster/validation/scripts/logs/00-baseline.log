@@ -1,0 +1,18 @@
+==================================================================
+BASELINE
+==================================================================
+wall=2026-05-13T22:32:36+03:00 primary=c mesh-a=NA mesh-b=NA mesh-c=NA ctrs={"writes_ok":2399,"writes_failed":0,"data_loss_total":0,"extra_rows":0}
+--- sync conf ---
+primary: c
+ANY 1 ("node-a","node-b")
+on
+--- pg_stat_replication ---
+node-a|streaming|quorum|00:00:00.00009|00:00:00.00091|00:00:00.000958
+node-b|streaming|quorum|00:00:00.000094|00:00:00.000865|00:00:00.000931
+--- slots ---
+pgmgr_node_a|f|0/70309F0
+pgmgr_node_b|t|0/8F49978
+--- per-node primary state ---
+node-a is_primary=f replay_lsn=0/8F49E38 flush_lsn=
+node-b is_primary=f replay_lsn=0/8F4A440 flush_lsn=
+node-c is_primary=t replay_lsn=0/8E8A700 flush_lsn=0/8F4AC90

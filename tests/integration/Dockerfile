@@ -49,6 +49,12 @@ ENV POSTGRES_BIN_DIR=/usr/lib/postgresql/${POSTGRES_VERSION}/bin
 # entrypoint, so we must guarantee an empty + correctly-owned PGDATA
 # ourselves before dropping privileges.
 USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         iptables \
+         iproute2 \
+         procps \
+    && rm -rf /var/lib/apt/lists/*
 RUN install -d -o postgres -g postgres -m 0700 "$PGDATA"
 
 USER postgres
