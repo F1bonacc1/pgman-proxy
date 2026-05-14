@@ -165,6 +165,7 @@ Spec: specs/003-pgmctl-cli/spec.md
 		newDescribeCmd(app),
 		newConfigCmd(app),
 		newEventsCmd(app),
+		newDumpCmd(app),
 	)
 
 	return root

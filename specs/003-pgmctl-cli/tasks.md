@@ -143,11 +143,11 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Implementation for User Story 2
 
-- [ ] T063 [P] [US2] Implement `internal/pgmctl/dump/collector.go`: parallel slice fetcher with per-slice timeout (FR-032 default 10s); slices: status, topology, config, history-events, history-audit, doctor, clock-skew, per-peer (status, config, nats_mesh, doctor) via fan-out
-- [ ] T064 [P] [US2] Implement `internal/pgmctl/dump/redact.go`: normal + strict modes; outputs the correlation table for strict mode (FR-033)
-- [ ] T065 [P] [US2] Implement `internal/pgmctl/dump/tar.go`: writes tar.gz to file path or raw tar to stdout (FR-034); single-pass streaming so an in-flight failure leaves the partial archive in a state operators can still extract
-- [ ] T066 [US2] Implement `internal/pgmctl/dump/manifest.go`: assembles the `DumpManifest` per `data-model.md`; records per-slice durations (FR-035)
-- [ ] T067 [US2] Implement `internal/pgmctl/cmd/dump.go`: cobra command wiring; flags `--output`, `--redact-level`, `--per-slice-timeout`, `--since` (depends on T063, T064, T065, T066)
+- [x] T063 [P] [US2] Implement `internal/pgmctl/dump/collector.go`: parallel slice fetcher with per-slice timeout (FR-032 default 10s); slices: status, topology, config, history-events, history-audit, doctor, clock-skew, per-peer (status, config, nats_mesh, doctor) via fan-out
+- [x] T064 [P] [US2] Implement `internal/pgmctl/dump/redact.go`: normal + strict modes; outputs the correlation table for strict mode (FR-033)
+- [x] T065 [P] [US2] Implement `internal/pgmctl/dump/tar.go`: writes tar.gz to file path or raw tar to stdout (FR-034); single-pass streaming so an in-flight failure leaves the partial archive in a state operators can still extract
+- [x] T066 [US2] Implement `internal/pgmctl/dump/manifest.go`: assembles the `DumpManifest` per `data-model.md`; records per-slice durations (FR-035)
+- [x] T067 [US2] Implement `internal/pgmctl/cmd/dump.go`: cobra command wiring; flags `--output`, `--redact-level`, `--per-slice-timeout`, `--since` (depends on T063, T064, T065, T066)
 - [x] T068 [P] [US2] Implement `internal/pgmctl/cmd/events.go`: tails `/v1/history?category=event`; same flag set as `pgmctl get events`; honours `--since`, `--type`, `--node`, `--limit` (FR-016)
 - [x] T069 [P] [US2] Extend `internal/pgmctl/cmd/get.go` (T050) to add `events` and `audit` resources backed by `/v1/history`
 - [ ] T070 [US2] Generate golden files for `dump` manifest under healthy / partial / strict-redact variants
