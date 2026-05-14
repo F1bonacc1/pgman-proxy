@@ -57,6 +57,11 @@ type Server struct {
 	// that don't actually boot the embedded server.
 	embeddedSnapshot func() any
 
+	// Feature 003: optional history-stream querier. When set, the
+	// GET /v1/history handler delegates here; when nil, the handler
+	// returns an empty result so single-peer test paths still pass.
+	history HistoryQuerier
+
 	clusterID string
 	nodeID    string
 
@@ -88,6 +93,12 @@ type Config struct {
 	// runtime/start.go.
 	EmbeddedSnapshot func() any
 
+	// History is an optional history-stream querier (feature 003 /
+	// FR-016a). When set, GET /v1/history delegates here; when nil,
+	// the endpoint returns an empty result. Construct in
+	// runtime/start.go around internal/history.Run.
+	History HistoryQuerier
+
 	ClusterID string
 	NodeID    string
 }
@@ -106,6 +117,7 @@ func NewServer(cfg Config) (*Server, error) {
 		logger:           cfg.Logger,
 		metrics:          cfg.Metrics,
 		embeddedSnapshot: cfg.EmbeddedSnapshot,
+		history:          cfg.History,
 		clusterID:        cfg.ClusterID,
 		nodeID:           cfg.NodeID,
 		ulidEntropy:      newULIDEntropy(),
@@ -132,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 	// Reads.
 	mux.Handle("GET /v1/status", s.wrap("Status", false, false, s.handleStatus))
 	mux.Handle("GET /v1/diagnose", s.wrap("Diagnose", false, false, s.handleDiagnose))
+	mux.Handle("GET /v1/history", s.wrap("HistoryQuery", false, false, s.handleHistoryQuery))
 
 	// Membership mutations (leader-only).
 	mux.Handle("POST /v1/switchover", s.wrap("Switchover", true, true, s.handleSwitchover))

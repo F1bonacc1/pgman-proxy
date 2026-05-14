@@ -116,7 +116,11 @@ func runGet(cmd *cobra.Command, app *AppContext, args []string, verbose bool) er
 	case "version":
 		return getVersion(ctx, cmd, app)
 	case "events", "audit":
-		return WithExitCode(ExitUsage, fmt.Errorf("resource %q requires the history stream — added in feature 003 Phase 4 (US2). Use `pgmctl get audit` / `pgmctl events` once /v1/history lands", resource))
+		category := "event"
+		if resource == "audit" {
+			category = "audit"
+		}
+		return runHistory(cmd, app, category, eventsFlags{since: 30 * time.Minute, limit: 1000})
 	case "config":
 		return WithExitCode(ExitUsage, fmt.Errorf("resource \"config\" needs server-side GET /v1/config; not yet implemented. Use `pgmctl config view` to inspect the local pgmctl config"))
 	default:

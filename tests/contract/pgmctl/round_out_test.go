@@ -136,22 +136,20 @@ func TestGet_Version_Offline(t *testing.T) {
 	}
 }
 
-// TestGet_EventsAndConfig_DeferredErrors asserts the deferred
-// resources surface a useful EX_USAGE error rather than a generic
-// failure.
-func TestGet_EventsAndConfig_DeferredErrors(t *testing.T) {
+// TestGet_ConfigResource_DeferredError asserts that `get config`
+// still surfaces a useful EX_USAGE error (server-side GET /v1/config
+// is not implemented yet). `get events` / `get audit` are wired
+// against /v1/history elsewhere — see events_test.go.
+func TestGet_ConfigResource_DeferredError(t *testing.T) {
 	srv := startFakeServer(t, statusHealthy())
 	defer srv.Close()
 
-	for _, res := range []string{"events", "audit", "config"} {
-		err := execRoot(t, srv.URL, "get", res)
-		if err == nil {
-			t.Errorf("get %s: want error, got nil", res)
-			continue
-		}
-		if got := cmd.ExitCodeFromError(err); got != cmd.ExitUsage {
-			t.Errorf("get %s: ExitCode = %d, want %d", res, got, cmd.ExitUsage)
-		}
+	err := execRoot(t, srv.URL, "get", "config")
+	if err == nil {
+		t.Fatalf("get config: want error, got nil")
+	}
+	if got := cmd.ExitCodeFromError(err); got != cmd.ExitUsage {
+		t.Errorf("get config: ExitCode = %d, want %d", got, cmd.ExitUsage)
 	}
 }
 

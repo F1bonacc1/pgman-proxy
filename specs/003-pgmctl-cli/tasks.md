@@ -128,9 +128,9 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Server-side support for US2
 
-- [ ] T054 [US2] Implement `internal/control/handlers_history.go` with `GET /v1/history`: query parameters per `contracts/control-plane-extensions.md § 4`; uses `internal/history.Query`; supports JSON envelope + SSE form when `Accept: text/event-stream`; emits `pgman_proxy_history_query_records_total` / `pgman_proxy_history_query_latency_seconds` metrics (depends on T015)
-- [ ] T055 [US2] Wire `GET /v1/history` into `internal/control/route.go` with `s.wrap("HistoryQuery", false, false, …)`; bearer-auth inherited; respects `control.auth.allow_unauth_reads` (001)
-- [ ] T056 [US2] Implement `internal/control/types.go` additions: `HistoryQueryResult` Go type matching `contracts/history-stream.md § Record schema`; JSON tags `apiVersion`, `kind`, `events`, `next_cursor`, `truncated`
+- [x] T054 [US2] Implement `internal/control/handlers_history.go` with `GET /v1/history`: query parameters per `contracts/control-plane-extensions.md § 4`; uses `internal/history.Query`; supports JSON envelope + SSE form when `Accept: text/event-stream`; emits `pgman_proxy_history_query_records_total` / `pgman_proxy_history_query_latency_seconds` metrics (depends on T015)
+- [x] T055 [US2] Wire `GET /v1/history` into `internal/control/route.go` with `s.wrap("HistoryQuery", false, false, …)`; bearer-auth inherited; respects `control.auth.allow_unauth_reads` (001)
+- [x] T056 [US2] Implement `internal/control/types.go` additions: `HistoryQueryResult` Go type matching `contracts/history-stream.md § Record schema`; JSON tags `apiVersion`, `kind`, `events`, `next_cursor`, `truncated`
 
 ### Tests for User Story 2
 
@@ -148,8 +148,8 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 - [ ] T065 [P] [US2] Implement `internal/pgmctl/dump/tar.go`: writes tar.gz to file path or raw tar to stdout (FR-034); single-pass streaming so an in-flight failure leaves the partial archive in a state operators can still extract
 - [ ] T066 [US2] Implement `internal/pgmctl/dump/manifest.go`: assembles the `DumpManifest` per `data-model.md`; records per-slice durations (FR-035)
 - [ ] T067 [US2] Implement `internal/pgmctl/cmd/dump.go`: cobra command wiring; flags `--output`, `--redact-level`, `--per-slice-timeout`, `--since` (depends on T063, T064, T065, T066)
-- [ ] T068 [P] [US2] Implement `internal/pgmctl/cmd/events.go`: tails `/v1/history?category=event`; same flag set as `pgmctl get events`; honours `--since`, `--type`, `--node`, `--limit` (FR-016)
-- [ ] T069 [P] [US2] Extend `internal/pgmctl/cmd/get.go` (T050) to add `events` and `audit` resources backed by `/v1/history`
+- [x] T068 [P] [US2] Implement `internal/pgmctl/cmd/events.go`: tails `/v1/history?category=event`; same flag set as `pgmctl get events`; honours `--since`, `--type`, `--node`, `--limit` (FR-016)
+- [x] T069 [P] [US2] Extend `internal/pgmctl/cmd/get.go` (T050) to add `events` and `audit` resources backed by `/v1/history`
 - [ ] T070 [US2] Generate golden files for `dump` manifest under healthy / partial / strict-redact variants
 
 **Checkpoint**: US2 ships independently — `pgmctl dump` produces a complete post-mortem artifact in one invocation, partial-reach handled cleanly, JetStream history queryable.
