@@ -17,11 +17,19 @@ spec.md. It assumes a 3-peer `pgman-proxy` cluster is already running
   see [`contracts/cli-commands.md § config`](./contracts/cli-commands.md).
 
 For development against a local 3-peer cluster brought up via the
-existing `process-compose.yaml`:
+existing `process-compose.yaml`, the dev token is baked into the
+fixture as the literal string `process-compose-dev-token` (see
+`PGMAN_PROXY_CONTROL_TOKEN` in `process-compose.yaml`). Stash it to a
+file once so both env-var and `token_file:` context forms work:
 
 ```bash
 # From repo root, with a 3-peer dev cluster running:
-export PGMCTL_ENDPOINT="https://127.0.0.1:9091"
+mkdir -p ~/.cache/pgman-proxy
+umask 077 && printf 'process-compose-dev-token' > ~/.cache/pgman-proxy/dev-token
+
+# Control plane is published per-peer: node-a → 19191, node-b → 19192,
+# node-c → 19193 (all loopback-only, plaintext for dev).
+export PGMCTL_ENDPOINT="http://127.0.0.1:19191"
 export PGMCTL_TOKEN="$(cat ~/.cache/pgman-proxy/dev-token)"
 ```
 
@@ -53,11 +61,9 @@ kind: Config
 current-context: dev
 contexts:
   - name: dev
-    endpoint: https://127.0.0.1:9091
-    expected_cluster: dev-cluster
+    endpoint: http://127.0.0.1:19191
+    expected_cluster: pgman-pc
     token_file: ~/.cache/pgman-proxy/dev-token
-    tls:
-      insecure_skip_tls_verify: true
 YAML
 
 chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/pgmctl/config.yaml"

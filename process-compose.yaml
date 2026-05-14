@@ -16,6 +16,7 @@
 #       │   pg-manager)        │  │          │  │          │
 #       │ proxy :6432 →:16432  │  │  →:16433 │  │  →:16434 │
 #       │ obs   :9090 →:19090  │  │  →:19091 │  │  →:19092 │
+#       │ ctrl  :9091 →:19191  │  │  →:19192 │  │  →:19193 │
 #       │ NATS  :4222 (intra)  │  │          │  │          │
 #       │ route :6222 (intra)  │  │          │  │          │
 #       └──────────────────────┘  └──────────┘  └──────────┘
@@ -163,6 +164,7 @@ processes:
         --network-alias node-a \
         -p 127.0.0.1:16432:6432 \
         -p 127.0.0.1:19090:9090 \
+        -p 127.0.0.1:19191:9091 \
         -v pgman-pc-node-a-data:/var/lib/postgresql/data \
         -e PGMAN_PROXY_CLUSTER_ID=pgman-pc \
         -e PGMAN_PROXY_CLUSTER_NAME=pgman-pc \
@@ -187,6 +189,8 @@ processes:
         -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-a:5432 \
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
         -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
+        -e PGMAN_PROXY_CONTROL_LISTEN_ADDR=0.0.0.0:9091 \
+        -e PGMAN_PROXY_CONTROL_TLS_PLAINTEXT_EXPLICIT_ACK=true \
         -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
         -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB\nmax_slot_wal_keep_size = 16MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
@@ -223,6 +227,7 @@ processes:
         --network-alias node-b \
         -p 127.0.0.1:16433:6432 \
         -p 127.0.0.1:19091:9090 \
+        -p 127.0.0.1:19192:9091 \
         -v pgman-pc-node-b-data:/var/lib/postgresql/data \
         -e PGMAN_PROXY_CLUSTER_ID=pgman-pc \
         -e PGMAN_PROXY_CLUSTER_NAME=pgman-pc \
@@ -247,6 +252,8 @@ processes:
         -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-b:5432 \
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
         -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
+        -e PGMAN_PROXY_CONTROL_LISTEN_ADDR=0.0.0.0:9091 \
+        -e PGMAN_PROXY_CONTROL_TLS_PLAINTEXT_EXPLICIT_ACK=true \
         -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
         -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB\nmax_slot_wal_keep_size = 16MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \
@@ -285,6 +292,7 @@ processes:
         --network-alias node-c \
         -p 127.0.0.1:16434:6432 \
         -p 127.0.0.1:19092:9090 \
+        -p 127.0.0.1:19193:9091 \
         -v pgman-pc-node-c-data:/var/lib/postgresql/data \
         -e PGMAN_PROXY_CLUSTER_ID=pgman-pc \
         -e PGMAN_PROXY_CLUSTER_NAME=pgman-pc \
@@ -309,6 +317,8 @@ processes:
         -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-c:5432 \
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
         -e PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token \
+        -e PGMAN_PROXY_CONTROL_LISTEN_ADDR=0.0.0.0:9091 \
+        -e PGMAN_PROXY_CONTROL_TLS_PLAINTEXT_EXPLICIT_ACK=true \
         -e "PGMAN_PROXY_POSTGRES_HBA_EXTRAS=host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust" \
         -e "PGMAN_PROXY_POSTGRES_CONF_EXTRAS=wal_keep_size = 128MB\nmax_slot_wal_keep_size = 16MB" \
         -e PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED=true \

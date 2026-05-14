@@ -32,12 +32,14 @@ Configuration lives at `$XDG_CONFIG_HOME/pgmctl/config.yaml`
 The simplest way to bootstrap a context:
 
 ```bash
+# The process-compose dev fixture publishes the control plane per peer
+# at http://127.0.0.1:19191 (node-a), 19192 (node-b), 19193 (node-c).
 pgmctl config set-context dev \
-  --endpoint https://127.0.0.1:9091 \
+  --endpoint http://127.0.0.1:19191 \
   --expected-cluster pgman-pc \
   --token-env PGMCTL_DEV_TOKEN
 
-export PGMCTL_DEV_TOKEN="<your bearer token>"
+export PGMCTL_DEV_TOKEN="process-compose-dev-token"
 pgmctl config view              # secrets are redacted by default
 ```
 
@@ -113,9 +115,9 @@ to exit 0 on WARN and only flag FAIL.
 | `pgmctl fence` / `unfence` / `set-config` / `failover` / `switchover` / `promote` / `restart` / `delete` | US6 | Mutating operations + cross-repo `Manager.RestartPostgres` change in `../pg-manager`. |
 
 Each shipped subcommand is exercised by contract tests under
-`tests/contract/pgmctl/`; integration tests against the live
-`process-compose` fixture land alongside the `pgman-proxy` control-plane
-port mapping in a follow-up.
+`tests/contract/pgmctl/`. The `process-compose` dev fixture now
+publishes the control plane on `127.0.0.1:1919{1,2,3}` (one port per
+peer), so live-fixture integration tests can talk to it directly.
 
 ---
 
