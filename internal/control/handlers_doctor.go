@@ -19,7 +19,37 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	pgmanager "github.com/f1bonacc1/pg-manager"
 )
+
+// enrichedEngine wraps the base Engine with a PeerAggregator so the
+// doctor checks see the same cluster-wide Status snapshot that
+// GET /v1/status returns. Without this shim, Engine.Status would
+// return only the per-peer scalar view from pg-manager and every
+// "look across peers" check would degenerate to a single-node lens
+// (Instances empty, PrimaryNodeID empty, etc.). Bug surface fixed
+// post-T071 once the inconsistency between `pgmctl health` and
+// `pgmctl doctor` was observed in the live fixture.
+type enrichedEngine struct {
+	Engine
+	agg PeerAggregator
+}
+
+// Status overrides the base Engine.Status: fetch the raw per-peer
+// snapshot, then enrich it via the aggregator (when wired). Any
+// EnrichStatus internal error returns the raw view unchanged — same
+// fail-soft contract used by handleStatus.
+func (e *enrichedEngine) Status(ctx context.Context) (pgmanager.Status, error) {
+	st, err := e.Engine.Status(ctx)
+	if err != nil {
+		return st, err
+	}
+	if e.agg != nil {
+		st = e.agg.EnrichStatus(ctx, st)
+	}
+	return st, nil
+}
 
 // docFixRequest is the wire body of POST /v1/doctor/fix.
 type docFixRequest struct {
@@ -75,7 +105,7 @@ func (s *Server) handleDoctorRun(w http.ResponseWriter, r *http.Request, env *re
 	now := engineStart.UTC()
 	runCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	results := runChecks(runCtx, s.engine, selected)
+	results := runChecks(runCtx, &enrichedEngine{Engine: s.engine, agg: s.aggregator}, selected)
 	engineLatency := time.Since(engineStart)
 
 	report := DoctorReport{

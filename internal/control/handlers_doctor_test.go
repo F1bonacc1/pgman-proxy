@@ -3,12 +3,16 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
+	"time"
 
 	pgmanager "github.com/f1bonacc1/pg-manager"
 	"github.com/f1bonacc1/pg-manager/upgrade"
+
+	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
 // readReportFromEnvelope unwraps the LCM envelope written by
@@ -144,6 +148,94 @@ func TestDoctorFix_Always_412_AdvisoryOnly(t *testing.T) {
 // through one of the fake's *Fn hooks; we deliberately leave them nil
 // so a mutator call returns the type's zero value but doesn't fail the
 // test on its own. The invariant is: no observable state change.
+// fakeAggregator mirrors a PeerAggregator that stitches a fake
+// cluster-wide Instances slice onto the local scalar Status. Used to
+// assert handleDoctorRun goes through the aggregator (and is therefore
+// consistent with /v1/status / pgmctl health).
+type fakeAggregator struct {
+	stitched []pgmanager.InstanceStatus
+	primary  pgmanager.NodeID
+}
+
+func (f *fakeAggregator) EnrichStatus(_ context.Context, local pgmanager.Status) pgmanager.Status {
+	local.Instances = f.stitched
+	if f.primary != "" {
+		local.PrimaryNodeID = f.primary
+	}
+	return local
+}
+
+// TestDoctorRun_UsesPeerAggregator — regression for the "pgmctl health
+// vs pgmctl doctor disagree" bug observed in the live fixture. The
+// engine's raw Status returns only the per-peer scalar view (Instances
+// empty); the aggregator stitches the cluster-wide slice. Without
+// routing through the aggregator, every cross-peer check degenerated
+// to a single-node lens.
+func TestDoctorRun_UsesPeerAggregator(t *testing.T) {
+	rawEngine := &fakeEngine{
+		statusFn: func(_ context.Context) (pgmanager.Status, error) {
+			// Raw per-peer view: scalar fields populated, Instances empty.
+			return pgmanager.Status{
+				ClusterID:    "test-cluster",
+				LeaderNodeID: "node-b",
+				LocalNodeID:  "node-a",
+				LocalRole:    pgmanager.RoleStandby,
+				LocalState:   pgmanager.StateRunning,
+			}, nil
+		},
+		diagnoseFn: func(_ context.Context) (pgmanager.Diagnosis, error) {
+			return pgmanager.Diagnosis{Healthy: true}, nil
+		},
+	}
+	agg := &fakeAggregator{
+		primary: "node-b",
+		stitched: []pgmanager.InstanceStatus{
+			{NodeID: "node-a", Role: pgmanager.RoleStandby, State: pgmanager.StateRunning, PostgresUp: true},
+			{NodeID: "node-b", Role: pgmanager.RolePrimary, State: pgmanager.StateRunning, PostgresUp: true},
+			{NodeID: "node-c", Role: pgmanager.RoleStandby, State: pgmanager.StateRunning, PostgresUp: true},
+		},
+	}
+
+	logger := obs.NewLogger(io.Discard, "info", "test-cluster", "test-node", "control")
+	metrics := obs.NewMetrics("test-cluster", "test-node")
+	audit := NewAudit("test-cluster", logger, &fakeNATS{}, metrics)
+	auth := NewAuthenticator("PGMAN_PROXY_TEST_TOKEN", "", false)
+	auth.getEnv = func(_ string) string { return "secret-token" }
+	router := NewLeaderRouter("redirect", time.Second, "test-cluster", nil, &fakeLeader{leader: true})
+	srv, err := NewServer(Config{
+		Addr:       "127.0.0.1:0",
+		Auth:       auth,
+		Audit:      audit,
+		Router:     router,
+		Engine:     rawEngine,
+		Aggregator: agg,
+		Logger:     logger,
+		Metrics:    metrics,
+		ClusterID:  "test-cluster",
+		NodeID:     "test-node",
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/doctor/run", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	rep := readReportFromEnvelope(t, w.Body.Bytes())
+	if rep.Summary.Fail != 0 {
+		t.Errorf("aggregator-enriched healthy fixture must produce zero FAILs; summary=%+v", rep.Summary)
+	}
+	for _, c := range rep.Checks {
+		if c.Name == "cluster.has-primary" && c.Status != SeverityPass {
+			t.Errorf("cluster.has-primary should PASS once aggregator runs; got %s (%q)", c.Status, c.Message)
+		}
+		if c.Name == "cluster.quorum" && c.Status == SeverityUnknown {
+			t.Errorf("cluster.quorum should NOT be UNKNOWN when aggregator stitches Instances; got %s", c.Message)
+		}
+	}
+}
+
 func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	baseline := pgmanager.Status{
 		ClusterID:    "test-cluster",
