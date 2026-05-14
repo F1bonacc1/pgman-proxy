@@ -323,6 +323,10 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	res.Fanout = fanoutSrv
 	fanoutClient := fanout.NewClient(conn, cfg.Cluster.ID)
 	statusAgg := newStatusAggregator(fanoutClient, cfg.Peers, 750*time.Millisecond, res.Logger)
+	// Wire the GET /v1/history querier closure; the control package can't
+	// import internal/history directly (it stays infrastructure-free), so
+	// we hand it a closure that captures the live JetStream context.
+	historyQuerier := &historyRunner{js: js, clusterID: cfg.Cluster.ID}
 
 	// Gate #8: Data-plane listener bind probe — best-effort up-front so
 	// startup fails on EADDRINUSE before pg-manager kicks off background
@@ -362,8 +366,11 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			// Feature 003: enrich /v1/status with cluster-wide Instances
 			// + PrimaryNodeID via fan-out to peers.
 			Aggregator: statusAgg,
-			ClusterID:  cfg.Cluster.ID,
-			NodeID:     cfg.Node.ID,
+			// Feature 003: GET /v1/history backed by the cluster's
+			// JetStream history stream (FR-016a).
+			History:   historyQuerier,
+			ClusterID: cfg.Cluster.ID,
+			NodeID:    cfg.Node.ID,
 		})
 		if err != nil {
 			return res, &StartupError{Code: ExitControl, Err: err}

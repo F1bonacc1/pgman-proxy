@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -174,14 +175,22 @@ func renderEventsTable(w io.Writer, r historyResult) error {
 
 // summariseDetails compresses the per-event details map into a single
 // "k=v k=v" string for the table view. -o json/yaml carries the full
-// payload.
+// payload. Keys are sorted so identical events render identically —
+// Go's map iteration order is randomized, so without an explicit sort
+// the same record produces a different string on every render and an
+// operator can't tell duplicates from genuine variants by eye.
 func summariseDetails(d map[string]any) string {
 	if len(d) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(d))
-	for k, v := range d {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	keys := make([]string, 0, len(d))
+	for k := range d {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, d[k]))
 	}
 	return strings.Join(parts, " ")
 }

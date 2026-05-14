@@ -24,7 +24,13 @@ type RouteWatcher struct {
 	interval time.Duration
 
 	mu      sync.Mutex
-	known   map[uint64]*server.RouteInfo // by Rid (route id)
+	// known is keyed by peer node id (RouteInfo.RemoteName). NATS gives
+	// every TCP-level reconnect a fresh Rid, so dedup-by-Rid spammed
+	// the history stream with one route_up per reconnect during mesh
+	// formation. The operator cares about *peer reachability*, not
+	// internal route ids — one event per logical peer-link transition
+	// is the contract documented in observability.md.
+	known   map[string]*server.RouteInfo // key: peer_node_id
 	stopped bool
 }
 
@@ -41,7 +47,7 @@ func NewRouteWatcher(srv *Server, interval time.Duration) *RouteWatcher {
 	return &RouteWatcher{
 		srv:      srv,
 		interval: interval,
-		known:    map[uint64]*server.RouteInfo{},
+		known:    map[string]*server.RouteInfo{},
 	}
 }
 
@@ -80,13 +86,17 @@ func (w *RouteWatcher) tick() {
 	if err != nil || rz == nil {
 		return
 	}
-	current := map[uint64]*server.RouteInfo{}
+	current := map[string]*server.RouteInfo{}
 	for _, ri := range rz.Routes {
-		if ri == nil {
+		if ri == nil || ri.RemoteName == "" {
+			// Skip handshake-in-flight routes (no RemoteName yet);
+			// they'll show up on the next tick once the peer has
+			// announced itself. Emitting on a nameless route would
+			// surface a useless `peer_node_id=""` event.
 			continue
 		}
-		current[ri.Rid] = ri
-		if _, seen := w.known[ri.Rid]; !seen {
+		current[ri.RemoteName] = ri
+		if _, seen := w.known[ri.RemoteName]; !seen {
 			direction := "inbound"
 			if ri.DidSolicit {
 				direction = "outbound"
@@ -101,8 +111,8 @@ func (w *RouteWatcher) tick() {
 			})
 		}
 	}
-	for rid, prev := range w.known {
-		if _, still := current[rid]; !still {
+	for peer, prev := range w.known {
+		if _, still := current[peer]; !still {
 			w.srv.emit("embedded_nats.route_down", map[string]any{
 				"node_id":        w.srv.nodeID,
 				"cluster_id":     w.srv.clusterID,
