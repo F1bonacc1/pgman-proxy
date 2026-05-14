@@ -13,12 +13,14 @@ import (
 	"github.com/f1bonacc1/pg-manager/adapters/osfs"
 	"github.com/f1bonacc1/pg-manager/manager"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/f1bonacc1/pgman-proxy/internal/cluster"
 	"github.com/f1bonacc1/pgman-proxy/internal/config"
 	"github.com/f1bonacc1/pgman-proxy/internal/control"
 	"github.com/f1bonacc1/pgman-proxy/internal/embedded"
 	"github.com/f1bonacc1/pgman-proxy/internal/fanout"
+	"github.com/f1bonacc1/pgman-proxy/internal/history"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
@@ -36,7 +38,8 @@ type StartupResult struct {
 	Conn     *nats.Conn
 	EventSub []*nats.Subscription
 	Control  *control.Server
-	Fanout   *fanout.Server // feature 003: per-peer SliceStatus responder
+	Fanout   *fanout.Server      // feature 003: per-peer SliceStatus responder
+	History  *history.Publisher  // feature 003: cluster-wide event + audit history sink
 }
 
 // StartupError carries the documented exit code so the caller can map
@@ -160,6 +163,24 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	}
 	res.Cluster = handles
 
+	// Feature 003 — bootstrap the cluster's history JetStream (T020).
+	// Idempotent + race-tolerant; every peer calls it. The publisher is
+	// shared across the audit emitter and any per-peer event sites that
+	// also want to land records in the cluster-wide history log.
+	js, jsErr := jetstream.New(conn)
+	if jsErr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: history jetstream context: %w", jsErr)}
+	}
+	historyOpts := history.DefaultStreamOptions(replicaDecision.Effective())
+	if _, hErr := history.EnsureHistoryStream(ctx, js, cfg.Cluster.ID, historyOpts); hErr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: ensure history stream: %w", hErr)}
+	}
+	res.History = history.NewPublisher(js, cfg.Cluster.ID, cfg.Node.ID)
+	res.Logger.SetHistorySink(historyLoggerSink{p: res.History})
+	res.Logger.Event("proxy.history_stream_ready", cfg.Node.ID,
+		pgmanager.Field{Key: "stream", Value: history.StreamName(cfg.Cluster.ID)},
+		pgmanager.Field{Key: "replicas", Value: replicaDecision.Effective()})
+
 	// Optional: when ReplicationAddr is set, publish it to the cluster
 	// KV and install a PeerDSNResolver so pg-manager pulls peer pg
 	// addresses from the substrate at basebackup time. When unset
@@ -280,6 +301,22 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	if rerr := fanoutSrv.Register(fanout.SliceStatus, statusResponderHandler(m.Status)); rerr != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout register SliceStatus: %w", rerr)}
 	}
+	// T019 — SliceNATSMesh: every peer returns its own embedded-NATS
+	// snapshot so the connected peer can stitch a cluster-wide mesh
+	// view (003 FR-013, dump artifact peers/<id>/nats_mesh.json).
+	if rerr := fanoutSrv.Register(fanout.SliceNATSMesh, natsMeshResponderHandler(res.Embedded)); rerr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout register SliceNATSMesh: %w", rerr)}
+	}
+	// T019 — SliceConfig / SliceDoctor: handlers register a stub that
+	// returns slice_not_implemented so callers see a structured error
+	// per fanout-protocol.md § Aggregation rules rather than a NATS
+	// timeout. Replaced by US3 (doctor) and US6 (config) phases.
+	if rerr := fanoutSrv.Register(fanout.SliceConfig, sliceNotImplementedHandler(fanout.SliceConfig)); rerr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout register SliceConfig: %w", rerr)}
+	}
+	if rerr := fanoutSrv.Register(fanout.SliceDoctor, sliceNotImplementedHandler(fanout.SliceDoctor)); rerr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout register SliceDoctor: %w", rerr)}
+	}
 	if serr := fanoutSrv.Serve(); serr != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("fanout server: %w", serr)}
 	}
@@ -305,7 +342,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			return res, &StartupError{Code: ExitControl, Err: fmt.Errorf("control plane listen %s: %w", cfg.Control.ListenAddr, err)}
 		}
 		auth := control.NewAuthenticator(cfg.Control.Auth.TokenEnv, cfg.Control.Auth.TokenFile, cfg.Control.Auth.AllowUnauthReads)
-		audit := control.NewAudit(cfg.Cluster.ID, res.Logger, conn, res.Metrics)
+		audit := control.NewAudit(cfg.Cluster.ID, res.Logger, conn, res.Metrics).WithHistory(res.History)
 		router := control.NewLeaderRouter(cfg.Control.LeaderRouteMode, cfg.Control.LeaderRouteTimeout,
 			cfg.Cluster.ID, conn, &managerLeaderState{m: m})
 		ctrl, err := control.NewServer(control.Config{
@@ -361,7 +398,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		if cfg.Control.Auth.TokenFile != "" {
 			authSource = "file"
 		}
-		res.Logger.Info("control_plane started",
+		res.Logger.Event("control_plane started", cfg.Node.ID,
 			pgmanager.Field{Key: "addr", Value: cfg.Control.ListenAddr},
 			pgmanager.Field{Key: "auth_source", Value: authSource})
 	}
@@ -654,13 +691,15 @@ func bootEmbeddedNATS(ctx context.Context, cfg config.Config, logger *obs.Logger
 	}
 
 	emit := func(kind embedded.LifecycleEventKind, fields map[string]any) {
-		// Translate the lifecycle event into a structured log entry.
+		// Translate the lifecycle event into a structured log entry AND
+		// (when a history sink has been wired) append it to the cluster
+		// history stream so /v1/history sees every embedded-NATS event.
 		f := make([]pgmanager.Field, 0, len(fields)+1)
 		f = append(f, pgmanager.Field{Key: "event", Value: string(kind)})
 		for k, v := range fields {
 			f = append(f, pgmanager.Field{Key: k, Value: v})
 		}
-		logger.Info(string(kind), f...)
+		logger.Event(string(kind), cfg.Node.ID, f...)
 	}
 
 	srv, err := embedded.NewServer(opts, cfg.Node.ID, cfg.Cluster.ID, emit)

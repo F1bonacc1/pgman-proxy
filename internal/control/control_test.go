@@ -21,6 +21,7 @@ import (
 	pgmanager "github.com/f1bonacc1/pg-manager"
 	"github.com/f1bonacc1/pg-manager/upgrade"
 
+	"github.com/f1bonacc1/pgman-proxy/internal/history"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
@@ -152,6 +153,41 @@ func (f *fakeNATS) PublishedCount() int {
 	defer f.mu.Unlock()
 	return len(f.published)
 }
+
+// fakeHistory captures PublishEvent calls for audit history-sink
+// assertions. Mirrors fakeNATS's setErr/PublishedCount shape so tests
+// can interleave failures on either sink. Satisfies HistoryPublisher
+// directly so no wrapper is needed.
+type fakeHistory struct {
+	mu       sync.Mutex
+	captured []history.HistoryEvent
+	errSet   atomic.Bool
+	errVal   atomic.Value
+}
+
+func (f *fakeHistory) setErr(e error) {
+	f.errVal.Store(&errBox{err: e})
+	f.errSet.Store(e != nil)
+}
+
+func (f *fakeHistory) PublishEvent(_ context.Context, c history.Category, evType, nodeID string, details map[string]any) (string, error) {
+	if f.errSet.Load() {
+		if v, ok := f.errVal.Load().(*errBox); ok && v.err != nil {
+			return "", v.err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.captured = append(f.captured, history.HistoryEvent{
+		Category: c, Type: evType, NodeID: nodeID, Details: details,
+	})
+	return "test-id", nil
+}
+
+// historyPublisher is a no-op identity adapter (kept distinct from
+// fakeHistory in case future tests want to chain decorators). Returns
+// the input untouched.
+func historyPublisher(h *fakeHistory) HistoryPublisher { return h }
 
 // newTestServer assembles a Server backed by fakes. tokenEnv is the
 // env-var name; the env value is "secret-token" unless tokenValue is
@@ -497,6 +533,33 @@ func TestAudit_HealthyResetsOnSuccess(t *testing.T) {
 	}
 	if !a.Healthy() {
 		t.Fatalf("audit should be healthy again after a successful publish")
+	}
+}
+
+// Feature 003 T014 — Audit fails closed when the history sink rejects
+// a record. After a transient history failure, Healthy() must report
+// false; after a successful re-publish, both sinks must reset.
+func TestAudit_HistorySinkGatesHealthy(t *testing.T) {
+	logger := obs.NewLogger(io.Discard, "info", "c", "n", "control")
+	metrics := obs.NewMetrics("c", "n")
+	pub := &fakeNATS{}
+	hist := &fakeHistory{}
+	a := NewAudit("c", logger, pub, metrics).WithHistory(historyPublisher(hist))
+	rec := AuditRecord{RequestID: "R1", Operation: "Switchover", Outcome: OutcomeAccepted}
+
+	hist.setErr(errors.New("history wedged"))
+	if err := a.Emit(context.Background(), rec); err == nil {
+		t.Fatalf("emit should surface history sink error")
+	}
+	if a.Healthy() {
+		t.Fatalf("audit should be unhealthy after history publish failure")
+	}
+	hist.setErr(nil)
+	if err := a.Emit(context.Background(), rec); err != nil {
+		t.Fatalf("emit should succeed after history recovers: %v", err)
+	}
+	if !a.Healthy() {
+		t.Fatalf("audit should be healthy after both sinks succeed")
 	}
 }
 

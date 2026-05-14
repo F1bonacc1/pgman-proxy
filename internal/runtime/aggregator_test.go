@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,6 +267,35 @@ func TestEnrichStatus_AsyncOnlyPolicyKeepsNilSyncStandbys(t *testing.T) {
 		t.Errorf("SyncStandbys = %v, want nil (AsyncOnly)", got.SyncStandbys)
 	}
 }
+
+// TestNatsMeshResponderHandler_NilServerErrors ensures the handler
+// fails cleanly when wired without an embedded server (test paths /
+// degraded boots). The protocol then marks the reply `status:failed`
+// with `code:slice_internal`.
+func TestNatsMeshResponderHandler_NilServerErrors(t *testing.T) {
+	h := natsMeshResponderHandler(nil)
+	if _, err := h(context.Background(), nil, ""); err == nil {
+		t.Fatalf("expected an error from nil-server handler")
+	}
+}
+
+// TestSliceNotImplementedHandler_ReturnsTypedError ensures the stub
+// handler always reports the slice name in its error so operators
+// reading dump output / fanout audit logs can disambiguate.
+func TestSliceNotImplementedHandler_ReturnsTypedError(t *testing.T) {
+	for _, s := range []string{"config", "doctor"} {
+		h := sliceNotImplementedHandler(fanoutSliceForTest(s))
+		_, err := h(context.Background(), nil, "")
+		if err == nil {
+			t.Fatalf("slice %s: expected error", s)
+		}
+		if !strings.Contains(err.Error(), s) {
+			t.Errorf("slice %s: error %q does not name the slice", s, err.Error())
+		}
+	}
+}
+
+func fanoutSliceForTest(s string) fanout.Slice { return fanout.Slice(s) }
 
 // TestEnrichStatus_NilClientReturnsInputUnchanged ensures single-peer
 // test paths (no fan-out wiring) pass through pg-manager's per-peer

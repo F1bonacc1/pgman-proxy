@@ -25,6 +25,7 @@ import (
 
 	pgmanager "github.com/f1bonacc1/pg-manager"
 
+	"github.com/f1bonacc1/pgman-proxy/internal/history"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
@@ -34,12 +35,23 @@ type NATSPublisher interface {
 	Publish(subject string, data []byte) error
 }
 
-// Audit is the dual-sink emitter. Construct via NewAudit; pass into
-// every handler.
+// HistoryPublisher is the slice of *history.Publisher the audit
+// emitter needs. Carved into an interface so tests can inject a fake
+// without booting JetStream; the concrete *history.Publisher satisfies
+// it natively.
+type HistoryPublisher interface {
+	PublishEvent(ctx context.Context, category history.Category, evType, nodeID string, details map[string]any) (string, error)
+}
+
+// Audit is the multi-sink emitter. Construct via NewAudit; pass into
+// every handler. Feature 003 added a third sink (the cluster's history
+// JetStream); a publish failure on EITHER NATS-subject OR history sink
+// trips the fail-closed gate (FR-028).
 type Audit struct {
 	subject string
 	logger  *obs.Logger
 	bus     NATSPublisher
+	history HistoryPublisher
 	metrics *obs.MetricSet
 
 	// natsFailures counts back-to-back NATS publish failures. The
@@ -47,6 +59,12 @@ type Audit struct {
 	// publish resets it. We track it as a counter for the metric and
 	// as a boolean for the gate.
 	natsFailures atomic.Uint64
+
+	// historyFailures mirrors natsFailures for the history-stream sink.
+	// Feature 003: GET /v1/history is the operator-visible audit trail,
+	// so a publish failure here is just as fatal to "everyone can see
+	// every mutating op" as a NATS-subject failure.
+	historyFailures atomic.Uint64
 }
 
 // NewAudit constructs an Audit emitter targeting the documented
@@ -58,6 +76,15 @@ func NewAudit(clusterID string, logger *obs.Logger, bus NATSPublisher, metrics *
 		bus:     bus,
 		metrics: metrics,
 	}
+}
+
+// WithHistory wires the cluster history publisher as a third audit
+// sink. nil is accepted (tests that don't boot JetStream skip it). Must
+// be called before the first Emit if used; the field is read without
+// locking on the publish hot path.
+func (a *Audit) WithHistory(p HistoryPublisher) *Audit {
+	a.history = p
+	return a
 }
 
 // Emit writes the record to both sinks. Returns the FIRST sink error
@@ -92,14 +119,66 @@ func (a *Audit) Emit(_ context.Context, rec AuditRecord) error {
 				pgmanager.Field{Key: "request_id", Value: rec.RequestID},
 				pgmanager.Field{Key: "subject", Value: a.subject},
 				pgmanager.Field{Key: "error", Value: err.Error()})
-			// firstErr is always nil at this branch (the marshal-error
-			// path returned via the outer else-if), so we always assign.
 			firstErr = fmt.Errorf("audit nats: %w", err)
 		} else {
 			a.natsFailures.Store(0)
 		}
 	}
+
+	// History sink — appends to the cluster's JetStream history stream
+	// so GET /v1/history (003 FR-007) sees every mutating op. Wired
+	// only when a publisher was attached via WithHistory.
+	if a.history != nil {
+		details := auditRecordToDetails(rec)
+		if _, herr := a.history.PublishEvent(context.Background(), history.CategoryAudit, "lcm_audit", rec.NodeID, details); herr != nil {
+			a.bumpHistoryFailure()
+			a.logger.Error("lcm audit emit failed",
+				pgmanager.Field{Key: "sink", Value: "history"},
+				pgmanager.Field{Key: "request_id", Value: rec.RequestID},
+				pgmanager.Field{Key: "error", Value: herr.Error()})
+			if firstErr == nil {
+				firstErr = fmt.Errorf("audit history: %w", herr)
+			}
+		} else {
+			a.historyFailures.Store(0)
+		}
+	}
 	return firstErr
+}
+
+// auditRecordToDetails projects an AuditRecord onto the
+// HistoryEvent.Details map. The history stream is operator-visible so
+// we publish every non-empty field — operators reading
+// GET /v1/history want the same shape they'd see in slog.
+func auditRecordToDetails(rec AuditRecord) map[string]any {
+	d := map[string]any{
+		"request_id": rec.RequestID,
+		"operation":  rec.Operation,
+		"actor":      rec.Actor,
+		"outcome":    rec.Outcome,
+	}
+	if rec.Target != "" {
+		d["target"] = rec.Target
+	}
+	if rec.SourceAddr != "" {
+		d["source_addr"] = rec.SourceAddr
+	}
+	if rec.TotalLatencyMS != 0 {
+		d["total_latency_ms"] = rec.TotalLatencyMS
+	}
+	if rec.EngineLatencyMS != 0 {
+		d["engine_latency_ms"] = rec.EngineLatencyMS
+	}
+	if rec.ErrorCode != "" {
+		d["error_code"] = rec.ErrorCode
+	}
+	if rec.LeaderAtRequest != "" {
+		d["leader_at_request"] = rec.LeaderAtRequest
+	}
+	if rec.Time != "" {
+		d["audit_time"] = rec.Time
+	}
+	return d
 }
 
 // logControlPlaneRequest emits the per-request `control_plane request`
@@ -127,9 +206,10 @@ func (a *Audit) logControlPlaneRequest(rec AuditRecord) {
 }
 
 // Healthy reports whether mutating ops should be allowed (FR-028).
-// False whenever the most recent NATS publish failed.
+// False whenever the most recent NATS publish OR history publish
+// failed. The slog sink is best-effort and never gates Healthy.
 func (a *Audit) Healthy() bool {
-	return a.natsFailures.Load() == 0
+	return a.natsFailures.Load() == 0 && a.historyFailures.Load() == 0
 }
 
 // ErrAuditUnavailable is the typed sentinel returned (and surfaced via
@@ -143,6 +223,17 @@ func (a *Audit) bumpFailure(sink string) {
 	a.natsFailures.Add(1)
 	if a.metrics != nil {
 		a.metrics.LCMAuditEmitFailuresTot.WithLabelValues(sink).Inc()
+	}
+}
+
+// bumpHistoryFailure mirrors bumpFailure for the JetStream history sink.
+// Kept on a separate counter so Healthy() can still recognise the NATS
+// subject as a known-good state if only the history sink is wedged
+// (and vice-versa).
+func (a *Audit) bumpHistoryFailure() {
+	a.historyFailures.Add(1)
+	if a.metrics != nil {
+		a.metrics.LCMAuditEmitFailuresTot.WithLabelValues("history").Inc()
 	}
 }
 

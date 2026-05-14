@@ -17,10 +17,12 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	pgmanager "github.com/f1bonacc1/pg-manager"
 
+	"github.com/f1bonacc1/pgman-proxy/internal/embedded"
 	"github.com/f1bonacc1/pgman-proxy/internal/fanout"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
@@ -150,5 +152,29 @@ func statusResponderHandler(status func(ctx context.Context) (pgmanager.Status, 
 			Reachable: true,
 			Timestamp: time.Now().UTC(),
 		}, nil
+	}
+}
+
+// natsMeshResponderHandler returns the fanout.Handler that answers a
+// SliceNATSMesh request. It captures the embedded server's snapshot at
+// reply time — every peer responds with its own view of the mesh.
+func natsMeshResponderHandler(srv *embedded.Server) fanout.Handler {
+	return func(_ context.Context, _ map[string]any, _ string) (any, error) {
+		if srv == nil {
+			return nil, fmt.Errorf("nats_mesh: embedded server unavailable")
+		}
+		return srv.Snapshot(), nil
+	}
+}
+
+// sliceNotImplementedHandler returns a fanout.Handler that always
+// fails with a documented "slice not implemented in this build" error.
+// Used for SliceConfig + SliceDoctor until US3/US6 land the real
+// implementations. The peer-aggregation path treats `status: failed`
+// replies with a structured `_error` placeholder per
+// fanout-protocol.md § Aggregation rules.
+func sliceNotImplementedHandler(slice fanout.Slice) fanout.Handler {
+	return func(_ context.Context, _ map[string]any, _ string) (any, error) {
+		return nil, fmt.Errorf("slice %q not implemented in this build (003 follow-up)", slice)
 	}
 }
