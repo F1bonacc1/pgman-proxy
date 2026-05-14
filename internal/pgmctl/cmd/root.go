@@ -157,6 +157,13 @@ Spec: specs/003-pgmctl-cli/spec.md
 	root.AddCommand(
 		newStatusCmd(app),
 		newVersionCmd(app),
+		newTopologyCmd(app),
+		newHealthCmd(app),
+		newLagCmd(app),
+		newGetCmd(app),
+		newListCmd(app),
+		newDescribeCmd(app),
+		newConfigCmd(app),
 	)
 
 	return root

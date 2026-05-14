@@ -108,13 +108,13 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 - [x] T045 [P] [US1] Implement `internal/pgmctl/cmd/status.go`: calls `GET /v1/status` via the client foundations; renders via the four output renderers; honours `--cluster <name>` cluster-id pinning (FR-010)
 - [x] T046 [P] [US1] Implement `internal/pgmctl/cmd/version.go`: prints client + server version; uses T035's skew detection
-- [ ] T047 [P] [US1] Implement `internal/pgmctl/cmd/topology.go`: ASCII tree renderer for `GET /v1/topology`; JSON/YAML pass-through (FR-013)
-- [ ] T048 [P] [US1] Implement `internal/pgmctl/cmd/health.go`: composes status + (foundational) doctor-style rollup endpoint OR a server-side `/v1/health` if needed; emits one-line-per-component rollup (FR-014). For the MVP, derive the rollup client-side from `/v1/status` to avoid a new endpoint.
-- [ ] T049 [P] [US1] Implement `internal/pgmctl/cmd/lag.go`: derives per-standby lag from `/v1/diagnose`; `--warn` / `--fail` flags; lag in bytes + time (FR-015)
-- [ ] T050 [P] [US1] Implement `internal/pgmctl/cmd/get.go`, `list.go`, `describe.go`: resource verbs for `nodes`, `peers`, `slots`, `topology`, `config`, `version` (FR-012). `events` and `audit` resources are added in US2.
-- [ ] T051 [US1] Implement `internal/pgmctl/cmd/config_cmd.go`: `pgmctl config view|use-context|set-context|delete-context` (FR-007); `view` redacts secrets; `set-context` accepts source-references only, never plaintext values
+- [x] T047 [P] [US1] Implement `internal/pgmctl/cmd/topology.go`: ASCII tree renderer for `GET /v1/topology`; JSON/YAML pass-through (FR-013)
+- [x] T048 [P] [US1] Implement `internal/pgmctl/cmd/health.go`: composes status + (foundational) doctor-style rollup endpoint OR a server-side `/v1/health` if needed; emits one-line-per-component rollup (FR-014). For the MVP, derive the rollup client-side from `/v1/status` to avoid a new endpoint.
+- [x] T049 [P] [US1] Implement `internal/pgmctl/cmd/lag.go`: derives per-standby lag from `/v1/diagnose`; `--warn` / `--fail` flags; lag in bytes + time (FR-015)
+- [x] T050 [P] [US1] Implement `internal/pgmctl/cmd/get.go`, `list.go`, `describe.go`: resource verbs for `nodes`, `peers`, `slots`, `topology`, `config`, `version` (FR-012). `events` and `audit` resources are added in US2.
+- [x] T051 [US1] Implement `internal/pgmctl/cmd/config_cmd.go`: `pgmctl config view|use-context|set-context|delete-context` (FR-007); `view` redacts secrets; `set-context` accepts source-references only, never plaintext values
 - [ ] T052 [US1] Generate golden files for status under healthy / warn / fail / no-color / json / yaml / wide variants; commit to `tests/golden/pgmctl/`
-- [ ] T053 [US1] Documentation: write a one-page `docs/pgmctl/README.md` summary derived from `quickstart.md` § 1–3
+- [x] T053 [US1] Documentation: write a one-page `docs/pgmctl/README.md` summary derived from `quickstart.md` § 1–3
 
 **Checkpoint**: US1 ships independently — `pgmctl status` works against any reachable pgman-proxy peer, with table / JSON / YAML / wide / colored / no-color outputs and proper exit codes.
 
