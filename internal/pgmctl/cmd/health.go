@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -123,13 +124,18 @@ Composed client-side from GET /v1/status and GET /v1/diagnose.`,
 				Message:   leadMsg,
 			})
 
-			// Quorum heuristic: if we don't have a primary OR leader,
-			// quorum is broken. Otherwise we trust the proxy.
-			quorumSev := output.SevPass
-			quorumMsg := "ok"
-			if engine.PrimaryNodeID == "" || engine.LeaderNodeID == "" {
-				quorumSev, quorumMsg = output.SevFail, "missing primary or leader"
-			}
+			peersSev, peersMsg := peersHealth(engine)
+			payload.Lines = append(payload.Lines, healthLine{
+				Component: "peers",
+				Status:    peersSev,
+				Message:   peersMsg,
+			})
+
+			// Quorum: ≥ floor(N/2)+1 peers reachable AND primary AND
+			// leader present. Without inspecting Instances this used to
+			// short-circuit to PASS whenever a single peer answered for
+			// the cluster, hiding the death of every other peer.
+			quorumSev, quorumMsg := quorumHealth(engine)
 			payload.Lines = append(payload.Lines, healthLine{
 				Component: "quorum",
 				Status:    quorumSev,
@@ -174,6 +180,90 @@ Composed client-side from GET /v1/status and GET /v1/diagnose.`,
 				return WithExitCode(ExitUnhealthy, fmt.Errorf("cluster is not fully healthy"))
 			}
 		},
+	}
+}
+
+// peersHealth folds the stitched per-peer Instances slice into a
+// one-line "X/Y healthy" rollup. A peer is considered healthy when
+// PostgresUp=true and State=running. Missing or fenced peers degrade
+// the line: any FAILED → FAIL; any UNKNOWN / FENCED → WARN.
+func peersHealth(engine *pgmanagerStatus) (output.Severity, string) {
+	total := len(engine.Instances)
+	if total == 0 {
+		// /v1/status's aggregator is unwired; we can't tell anything.
+		return output.SevUnknown, "no peer information"
+	}
+	var failed, unknown, fenced []string
+	healthy := 0
+	for _, inst := range engine.Instances {
+		state := strings.ToLower(string(inst.State))
+		switch state {
+		case "running":
+			if inst.PostgresUp {
+				healthy++
+				continue
+			}
+			failed = append(failed, fmt.Sprintf("%s(pg-down)", inst.NodeID))
+		case "failed":
+			failed = append(failed, string(inst.NodeID))
+		case "fenced":
+			fenced = append(fenced, string(inst.NodeID))
+		case "unknown", "":
+			unknown = append(unknown, string(inst.NodeID))
+		default:
+			unknown = append(unknown, fmt.Sprintf("%s(%s)", inst.NodeID, state))
+		}
+	}
+
+	parts := []string{}
+	if len(failed) > 0 {
+		parts = append(parts, "failed: "+strings.Join(failed, ","))
+	}
+	if len(fenced) > 0 {
+		parts = append(parts, "fenced: "+strings.Join(fenced, ","))
+	}
+	if len(unknown) > 0 {
+		parts = append(parts, "unreachable: "+strings.Join(unknown, ","))
+	}
+
+	base := fmt.Sprintf("%d/%d healthy", healthy, total)
+	if len(parts) == 0 {
+		return output.SevPass, base
+	}
+	msg := base + " (" + strings.Join(parts, "; ") + ")"
+	switch {
+	case len(failed) > 0:
+		return output.SevFail, msg
+	default:
+		return output.SevWarn, msg
+	}
+}
+
+// quorumHealth computes whether the cluster still has a write-eligible
+// majority. The classic majority quorum rule is `reachable ≥ N/2 + 1`
+// where N is the declared peer count — without this, a single
+// surviving peer that happens to be primary+leader incorrectly papers
+// over the death of every other peer.
+func quorumHealth(engine *pgmanagerStatus) (output.Severity, string) {
+	total := len(engine.Instances)
+	if total == 0 {
+		return output.SevUnknown, "no peer information"
+	}
+	reachable := 0
+	for _, inst := range engine.Instances {
+		state := strings.ToLower(string(inst.State))
+		if state != "" && state != "unknown" {
+			reachable++
+		}
+	}
+	need := total/2 + 1
+	switch {
+	case engine.PrimaryNodeID == "" || engine.LeaderNodeID == "":
+		return output.SevFail, "missing primary or leader"
+	case reachable < need:
+		return output.SevFail, fmt.Sprintf("only %d/%d reachable (need %d)", reachable, total, need)
+	default:
+		return output.SevPass, fmt.Sprintf("%d/%d reachable (≥ %d)", reachable, total, need)
 	}
 }
 
