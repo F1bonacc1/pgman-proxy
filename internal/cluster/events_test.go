@@ -31,7 +31,7 @@ func captureEvent(t *testing.T, subject string, payload any) map[string]any {
 			t.Fatalf("marshal payload: %v", err)
 		}
 	}
-	handleCoordinationEvent(&nats.Msg{Subject: subject, Data: data}, logger, metrics, nil)
+	handleCoordinationEvent(&nats.Msg{Subject: subject, Data: data}, "test-node", logger, metrics, nil)
 
 	line := strings.TrimSpace(buf.String())
 	if line == "" {
@@ -189,7 +189,7 @@ func TestHandleCoordinationEvent_PublishesToHistorySink(t *testing.T) {
 	handleCoordinationEvent(&nats.Msg{
 		Subject: "pgmanager.pgman-pc.leader_changed",
 		Data:    payload,
-	}, logger, metrics, sink)
+	}, "node-b", logger, metrics, sink)
 
 	if len(sink.captured) != 1 {
 		t.Fatalf("expected 1 history publish, got %d", len(sink.captured))
@@ -206,6 +206,58 @@ func TestHandleCoordinationEvent_PublishesToHistorySink(t *testing.T) {
 	}
 	if got.details["subject"] != "pgmanager.pgman-pc.leader_changed" {
 		t.Errorf("subject not preserved in details: %+v", got.details)
+	}
+}
+
+// TestHandleCoordinationEvent_FiltersOutSiblingEmitters — regression
+// for the N-fold duplication bug observed in the live fixture. When
+// the payload's node_id names a DIFFERENT peer, the local subscriber
+// must NOT publish to history (only slog). pg-manager broadcasts each
+// event on a single NATS subject; the emitter peer owns the history
+// publish so the stream lands one record per event, not N.
+func TestHandleCoordinationEvent_FiltersOutSiblingEmitters(t *testing.T) {
+	buf := &obs.SafeBuffer{}
+	logger := obs.NewLogger(buf, "info", "test-cluster", "node-a", "test")
+	metrics := obs.NewMetrics("test-cluster", "node-a")
+	sink := &fakeHistorySink{}
+
+	// Event emitted by node-b; this subscriber's selfNodeID is node-a.
+	// History publish MUST be suppressed; slog still records the receipt.
+	payload, _ := json.Marshal(map[string]any{
+		"node_id":    "node-b",
+		"new_leader": "node-b",
+	})
+	handleCoordinationEvent(&nats.Msg{
+		Subject: "pgmanager.pgman-pc.leader_changed",
+		Data:    payload,
+	}, "node-a", logger, metrics, sink)
+
+	if got := len(sink.captured); got != 0 {
+		t.Errorf("sibling-emitted event must NOT publish to history; got %d records", got)
+	}
+	if !strings.Contains(buf.String(), "leader_changed") {
+		t.Errorf("slog line should still record the sibling event")
+	}
+}
+
+// TestHandleCoordinationEvent_MissingNodeIDPublishesAnyway — when the
+// payload doesn't carry an emitter node_id (cluster-level events), we
+// publish on every observer. Better to risk duplicates than to drop
+// the record entirely. Documents the design choice.
+func TestHandleCoordinationEvent_MissingNodeIDPublishesAnyway(t *testing.T) {
+	buf := &obs.SafeBuffer{}
+	logger := obs.NewLogger(buf, "info", "test-cluster", "node-a", "test")
+	metrics := obs.NewMetrics("test-cluster", "node-a")
+	sink := &fakeHistorySink{}
+
+	payload, _ := json.Marshal(map[string]any{"some_field": "value"})
+	handleCoordinationEvent(&nats.Msg{
+		Subject: "pgmanager.pgman-pc.failover_quorum_published",
+		Data:    payload,
+	}, "node-a", logger, metrics, sink)
+
+	if got := len(sink.captured); got != 1 {
+		t.Errorf("event without node_id must publish; got %d records", got)
 	}
 }
 
@@ -234,7 +286,7 @@ func TestHandleCoordinationEvent_MalformedPayloadIsTolerated(t *testing.T) {
 	handleCoordinationEvent(&nats.Msg{
 		Subject: "pgmanager.pgman-pc.auto_rebootstrap.detected",
 		Data:    []byte("not-json"),
-	}, logger, metrics, nil)
+	}, "test-node", logger, metrics, nil)
 
 	line := strings.TrimSpace(buf.String())
 	var rec map[string]any

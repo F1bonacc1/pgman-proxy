@@ -228,7 +228,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// Subscribe to pg-manager coordination events (FR-006). Pass the
 	// history publisher so leadership / state-transition / fenced /
 	// failover events land in the history JetStream (003 FR-007).
-	subs, err := cluster.SubscribeCoordinationEvents(conn, cfg.Cluster.ID, res.Logger, res.Metrics,
+	subs, err := cluster.SubscribeCoordinationEvents(conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger, res.Metrics,
 		historyLoggerSink{p: res.History})
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: err}

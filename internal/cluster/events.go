@@ -46,7 +46,7 @@ type HistorySink interface {
 // it is a passive observer.
 func SubscribeCoordinationEvents(
 	conn *nats.Conn,
-	clusterID string,
+	clusterID, selfNodeID string,
 	logger *obs.Logger,
 	metrics *obs.MetricSet,
 	historySink HistorySink,
@@ -86,7 +86,7 @@ func SubscribeCoordinationEvents(
 	for _, topic := range exactTopics {
 		subject := fmt.Sprintf("pgmanager.%s.%s", clusterID, topic)
 		sub, err := conn.Subscribe(subject, func(m *nats.Msg) {
-			handleCoordinationEvent(m, logger, metrics, historySink)
+			handleCoordinationEvent(m, selfNodeID, logger, metrics, historySink)
 		})
 		if err != nil {
 			for _, prev := range subs {
@@ -99,7 +99,7 @@ func SubscribeCoordinationEvents(
 	for _, family := range wildcardFamilies {
 		subject := fmt.Sprintf("pgmanager.%s.%s.>", clusterID, family)
 		sub, err := conn.Subscribe(subject, func(m *nats.Msg) {
-			handleCoordinationEvent(m, logger, metrics, historySink)
+			handleCoordinationEvent(m, selfNodeID, logger, metrics, historySink)
 		})
 		if err != nil {
 			for _, prev := range subs {
@@ -112,7 +112,7 @@ func SubscribeCoordinationEvents(
 	return subs, nil
 }
 
-func handleCoordinationEvent(m *nats.Msg, logger *obs.Logger, metrics *obs.MetricSet, historySink HistorySink) {
+func handleCoordinationEvent(m *nats.Msg, selfNodeID string, logger *obs.Logger, metrics *obs.MetricSet, historySink HistorySink) {
 	subject := m.Subject
 	outcome := classifyOutcome(subject)
 	metrics.CoordinationEventsTotal.WithLabelValues(subject, outcome).Inc()
@@ -153,19 +153,33 @@ func handleCoordinationEvent(m *nats.Msg, logger *obs.Logger, metrics *obs.Metri
 	// history JetStream so /v1/history (003 FR-007) sees it. The
 	// event type is the third subject segment (e.g. "leader_changed"
 	// or "auto_rebootstrap.detected") so consumers can filter by type.
+	//
+	// Emitter-filter — pg-manager broadcasts every coordination event
+	// on a single NATS subject; every peer's subscription receives the
+	// same message. Without filtering, an N-peer cluster would land N
+	// copies of every event in the history stream. The emitter peer
+	// owns the canonical publish; siblings just observe. When the
+	// payload carries no node_id we publish anyway (better than losing
+	// the event) and let downstream dedup catch the rest.
 	if historySink != nil {
-		evType := subjectTail(subject)
 		emitterNode, _ := payload["node_id"].(string)
-		details := map[string]any{
-			"subject": subject,
-			"outcome": outcome,
+		if emitterNode == "" || emitterNode == selfNodeID {
+			evType := subjectTail(subject)
+			// Decorate state_transition payloads with from_name /
+			// to_name so downstream renderers don't need to maintain
+			// a duplicate state-enum table.
+			enrichPayload(evType, payload)
+			details := map[string]any{
+				"subject": subject,
+				"outcome": outcome,
+			}
+			if len(payload) > 0 {
+				details["payload"] = payload
+			}
+			// Best-effort: a history-sink failure must NOT block the rest
+			// of the handler; the slog line above remains authoritative.
+			_, _ = historySink.PublishEvent(context.Background(), "event", evType, emitterNode, details)
 		}
-		if len(payload) > 0 {
-			details["payload"] = payload
-		}
-		// Best-effort: a history-sink failure must NOT block the rest
-		// of the handler; the slog line above remains authoritative.
-		_, _ = historySink.PublishEvent(context.Background(), "event", evType, emitterNode, details)
 	}
 }
 
@@ -180,6 +194,48 @@ func subjectTail(subject string) string {
 		return subject
 	}
 	return parts[2]
+}
+
+// State enum names — mirrored from pg-manager/types.go (Constitution V
+// stable surface). Index into this slice with the from/to ordinals
+// pg-manager publishes in state_transition events.
+var pgmanagerStateNames = []string{
+	"unknown",
+	"init",
+	"bootstrapping",
+	"running",
+	"promoting",
+	"demoting",
+	"rewinding",
+	"fenced",
+	"failed",
+	"stopped",
+}
+
+// stateName resolves a state ordinal to its canonical string. Returns
+// "state(<n>)" for out-of-range values so we never lose the data.
+func stateName(ord int) string {
+	if ord < 0 || ord >= len(pgmanagerStateNames) {
+		return fmt.Sprintf("state(%d)", ord)
+	}
+	return pgmanagerStateNames[ord]
+}
+
+// enrichPayload mutates state_transition payloads to add `from_name`
+// and `to_name` keys alongside the numeric `from` / `to` ordinals so
+// downstream renderers (pgmctl events / explain) show "running →
+// promoting" without having to maintain a duplicate enum table.
+// No-op for any other event type.
+func enrichPayload(topic string, payload map[string]any) {
+	if topic != "state_transition" || payload == nil {
+		return
+	}
+	if from, ok := payload["from"].(float64); ok {
+		payload["from_name"] = stateName(int(from))
+	}
+	if to, ok := payload["to"].(float64); ok {
+		payload["to_name"] = stateName(int(to))
+	}
 }
 
 // appendEmitterFields promotes the pg-manager EventHeader fields that
