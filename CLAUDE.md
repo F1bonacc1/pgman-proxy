@@ -1,24 +1,32 @@
 <!-- SPECKIT START -->
-Active feature: `002-embedded-nats-cluster` (branch: `002-embedded-nats-cluster`).
+Active feature: `003-pgmctl-cli` (branch: `003-pgmctl-cli`).
 
 For the in-flight feature, read:
 
-- `specs/002-embedded-nats-cluster/spec.md`
-- `specs/002-embedded-nats-cluster/plan.md`
-- `specs/002-embedded-nats-cluster/research.md`
-- `specs/002-embedded-nats-cluster/data-model.md`
-- `specs/002-embedded-nats-cluster/contracts/`
-- `specs/002-embedded-nats-cluster/quickstart.md`
+- `specs/003-pgmctl-cli/spec.md`
+- `specs/003-pgmctl-cli/plan.md`
+- `specs/003-pgmctl-cli/research.md`
+- `specs/003-pgmctl-cli/data-model.md`
+- `specs/003-pgmctl-cli/contracts/`
+- `specs/003-pgmctl-cli/quickstart.md`
 
-Feature 002 amends feature 001 (`specs/001-active-active-pg-proxy/`) by
-removing the external-NATS dependency: every proxy peer embeds a NATS
-server in-process, and the peers form a NATS cluster. 001's FR-003 is
-reversed; the constitution amendment to v1.2.0 is in
-`specs/002-embedded-nats-cluster/contracts/constitution-amendment.md`
-and lands as the first task at `/speckit-tasks` time.
+Feature 003 adds `pgmctl` — a kubectl-style CLI for operators of a
+running pgman-proxy cluster. It is a **client** (no embedded NATS, no
+PostgreSQL connection, no cluster routes); it consumes the 001 control
+plane and the 002 embedded-NATS observability surface. The plan
+introduces five additive, MINOR-version expansions of the 001 contract:
+SSE watch streams, doctor discovery/execution, managed-PostgreSQL
+restart + peer self-terminate, JetStream-backed event/audit history,
+and an inter-peer fan-out subject set. A logs-tail endpoint is
+**explicitly excluded** (clarified out of scope on 2026-05-14). One
+upstream change in `../pg-manager` is required first:
+`func (m *Manager) RestartPostgres(ctx context.Context) error`.
+
+Prior features still apply:
+- 001 `specs/001-active-active-pg-proxy/` — base proxy + control plane.
+- 002 `specs/002-embedded-nats-cluster/` — embedded NATS cluster.
 
 Non-negotiable principles live in `.specify/memory/constitution.md`
-(v1.1.0; amendment to v1.2.0 pending). The wrapped engine is
-`../pg-manager`; reference assembly is
+(v1.2.0). The wrapped engine is `../pg-manager`; reference assembly is
 `../pg-manager/examples/three_node_nats/main.go`.
 <!-- SPECKIT END -->
