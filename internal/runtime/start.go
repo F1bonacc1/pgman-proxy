@@ -225,8 +225,11 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// which is the sibling pgman-proxy node ID (RD-001a).
 	embedded.NewRouteWatcher(res.Embedded, 0).Start(ctx)
 
-	// Subscribe to pg-manager coordination events (FR-006).
-	subs, err := cluster.SubscribeCoordinationEvents(conn, cfg.Cluster.ID, res.Logger, res.Metrics)
+	// Subscribe to pg-manager coordination events (FR-006). Pass the
+	// history publisher so leadership / state-transition / fenced /
+	// failover events land in the history JetStream (003 FR-007).
+	subs, err := cluster.SubscribeCoordinationEvents(conn, cfg.Cluster.ID, res.Logger, res.Metrics,
+		historyLoggerSink{p: res.History})
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: err}
 	}

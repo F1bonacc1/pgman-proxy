@@ -218,49 +218,48 @@ func explainReplicationBroken(ctx context.Context, app *AppContext, nodeArg stri
 }
 
 // explainLeaderElection narrates the cluster's leadership trail using
-// the records that DO land in the history stream today:
+// every record source that touches leadership:
 //
-//   - lcm_audit on Switchover / Failover / Promote (operator-initiated
-//     leadership changes — the cause).
-//   - proxy.history_stream_ready / control_plane.started (per-peer
-//     proxy boots, which re-trigger the leadership KV claim).
+//   - leader_changed (pg-manager TopicLeaderChanged — the actual edge).
+//   - state_transition (pg-manager state-machine moves: promoting,
+//     demoting, …).
+//   - lcm_audit with operation ∈ {Switchover, Failover, Promote}
+//     (operator-initiated leadership changes — the cause).
+//   - proxy.history_stream_ready (per-peer proxy boots, which
+//     re-trigger the leadership KV claim).
 //
-// pg-manager's became_leader / lost_leader / state transitions are
-// still flowing through obs.Logger.Info rather than Logger.Event, so
-// they don't appear in the history stream — that's a T013 follow-up
-// (only the embedded-NATS lifecycle + control_plane.started were
-// converted in the first pass). The subject ALWAYS applies; when the
-// stream is too quiet to find anything, we still surface the current
-// leader from /v1/status and explain what's missing.
+// All four sources are queried; whichever has records wins. The
+// subject ALWAYS applies — when every source is empty, we surface
+// the current leader from /v1/status and say so out loud.
 func explainLeaderElection(ctx context.Context, app *AppContext) (ExplainOutput, error) {
 	engine, _, err := fetchStatus(ctx, app)
 	if err != nil {
 		return ExplainOutput{}, err
 	}
 
+	leaderChanges, _ := fetchHistory(ctx, app, "event", []string{"leader_changed"}, 50)
+	transitions, _ := fetchHistory(ctx, app, "event", []string{"state_transition"}, 50)
+	boots, _ := fetchHistory(ctx, app, "event", []string{"proxy.history_stream_ready"}, 50)
+
 	leadershipOps := map[string]bool{"Switchover": true, "Failover": true, "Promote": true}
 	audits, _ := fetchHistory(ctx, app, "audit", nil, 200)
-	cited := []eventRow{}
+	auditCited := []eventRow{}
 	for _, ev := range audits {
 		op, _ := ev.Details["operation"].(string)
 		if leadershipOps[op] {
-			cited = append(cited, ev)
+			auditCited = append(auditCited, ev)
 		}
 	}
-
-	// Proxy boots cause a KV claim retry; surface them as supporting
-	// evidence for "elections that probably happened but weren't
-	// directly recorded".
-	boots, _ := fetchHistory(ctx, app, "event", []string{"proxy.history_stream_ready"}, 50)
 
 	leader := engine.LeaderNodeID
 	if leader == "" {
 		leader = "(none — no leadership lease held)"
 	}
 
-	diag := fmt.Sprintf("current leader=%s; %d leadership audit(s), %d proxy boot(s) in window",
-		leader, len(cited), len(boots))
-	if len(cited) == 0 && len(boots) == 0 {
+	totalFound := len(leaderChanges) + len(transitions) + len(auditCited) + len(boots)
+	diag := fmt.Sprintf("current leader=%s; %d leader_changed / %d state_transition / %d audit / %d boot record(s)",
+		leader, len(leaderChanges), len(transitions), len(auditCited), len(boots))
+	if totalFound == 0 {
 		diag += " — no leader-related records found"
 	}
 
@@ -274,7 +273,33 @@ func explainLeaderElection(ctx context.Context, app *AppContext) (ExplainOutput,
 		Source: "status",
 		Detail: fmt.Sprintf("current leader: %s", leader),
 	})
-	for _, ev := range cited {
+	for _, ev := range leaderChanges {
+		newLeader := extractNested(ev.Details, "payload", "new_leader")
+		oldLeader := extractNested(ev.Details, "payload", "old_leader")
+		term := extractNested(ev.Details, "payload", "term")
+		detail := "leader_changed"
+		if oldLeader != "" || newLeader != "" {
+			detail = fmt.Sprintf("leader_changed: %s → %s", oldLeader, newLeader)
+		}
+		if term != "" {
+			detail += " (term=" + term + ")"
+		}
+		out.Evidence = append(out.Evidence, ExplainEvidence{
+			Source:    "history",
+			Timestamp: ev.Time.UTC().Format(time.RFC3339Nano),
+			Detail:    detail,
+			Reference: ev.ID,
+		})
+	}
+	for _, ev := range transitions {
+		out.Evidence = append(out.Evidence, ExplainEvidence{
+			Source:    "history",
+			Timestamp: ev.Time.UTC().Format(time.RFC3339Nano),
+			Detail:    fmt.Sprintf("state_transition %s %s", ev.NodeID, summariseDetails(ev.Details)),
+			Reference: ev.ID,
+		})
+	}
+	for _, ev := range auditCited {
 		op, _ := ev.Details["operation"].(string)
 		actor, _ := ev.Details["actor"].(string)
 		outcome, _ := ev.Details["outcome"].(string)
@@ -298,19 +323,49 @@ func explainLeaderElection(ctx context.Context, app *AppContext) (ExplainOutput,
 			Reference: ev.ID,
 		})
 	}
-	if len(cited) == 0 && len(boots) == 0 {
+	if totalFound == 0 {
 		out.Evidence = append(out.Evidence, ExplainEvidence{
 			Source: "history",
-			Detail: "no Switchover / Failover / Promote audits and no proxy boots in the recent window — leadership has been stable, or pg-manager state transitions are not yet routed through the history stream (T013 follow-up)",
+			Detail: "no leader_changed / state_transition / leadership audit / proxy boot records in the recent window — leadership has been stable",
 		})
 	}
 
 	out.SuggestedNextSteps = []string{
-		"pgmctl events --category audit --since 1h     # full audit trail",
-		"pgmctl status                                  # current cluster shape",
-		"pgmctl events --type lcm_audit --since 1h",
+		"pgmctl events --type leader_changed --since 1h",
+		"pgmctl events --type state_transition --since 1h",
+		"pgmctl status                                       # current cluster shape",
 	}
 	return out, nil
+}
+
+// extractNested digs into a nested map for a string field; returns
+// "" when any hop is missing or the leaf is not a string-like value.
+// pg-manager event payloads land under details["payload"] (per
+// cluster.handleCoordinationEvent), so we have to descend one level.
+func extractNested(m map[string]any, path ...string) string {
+	cur := m
+	for i, k := range path {
+		v, ok := cur[k]
+		if !ok {
+			return ""
+		}
+		if i == len(path)-1 {
+			switch s := v.(type) {
+			case string:
+				return s
+			case float64:
+				return fmt.Sprintf("%v", s)
+			default:
+				return fmt.Sprintf("%v", v)
+			}
+		}
+		next, ok := v.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = next
+	}
+	return ""
 }
 
 // explainCurrentState is a "where am I" one-shot rollup. Always

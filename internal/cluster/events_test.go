@@ -4,6 +4,7 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func captureEvent(t *testing.T, subject string, payload any) map[string]any {
 			t.Fatalf("marshal payload: %v", err)
 		}
 	}
-	handleCoordinationEvent(&nats.Msg{Subject: subject, Data: data}, logger, metrics)
+	handleCoordinationEvent(&nats.Msg{Subject: subject, Data: data}, logger, metrics, nil)
 
 	line := strings.TrimSpace(buf.String())
 	if line == "" {
@@ -147,6 +148,84 @@ func TestHandleCoordinationEvent_EmptyPayload(t *testing.T) {
 // TestHandleCoordinationEvent_MalformedPayloadIsTolerated pins that a
 // non-JSON body (defensive: should never happen, but the subscription
 // MUST NOT panic on it) falls back to the basic log line cleanly.
+// fakeHistorySink captures PublishEvent calls so the test can assert
+// the cluster handler routes coordination events into the history
+// JetStream when a sink is wired.
+type fakeHistorySink struct {
+	captured []struct {
+		category string
+		evType   string
+		nodeID   string
+		details  map[string]any
+	}
+}
+
+func (f *fakeHistorySink) PublishEvent(_ context.Context, category, evType, nodeID string, details map[string]any) (string, error) {
+	f.captured = append(f.captured, struct {
+		category string
+		evType   string
+		nodeID   string
+		details  map[string]any
+	}{category, evType, nodeID, details})
+	return "fake-id", nil
+}
+
+// TestHandleCoordinationEvent_PublishesToHistorySink — regression for
+// the "pgmctl explain leader-election always NA" bug. When the sink
+// is wired, every coordination event must land in history with the
+// pg-manager topic constant as the `type`. Without this the explain
+// command (and operators) never see leadership transitions.
+func TestHandleCoordinationEvent_PublishesToHistorySink(t *testing.T) {
+	buf := &obs.SafeBuffer{}
+	logger := obs.NewLogger(buf, "info", "test-cluster", "test-node", "test")
+	metrics := obs.NewMetrics("test-cluster", "test-node")
+	sink := &fakeHistorySink{}
+
+	payload, _ := json.Marshal(map[string]any{
+		"node_id":   "node-b",
+		"term":      42,
+		"new_leader": "node-b",
+	})
+	handleCoordinationEvent(&nats.Msg{
+		Subject: "pgmanager.pgman-pc.leader_changed",
+		Data:    payload,
+	}, logger, metrics, sink)
+
+	if len(sink.captured) != 1 {
+		t.Fatalf("expected 1 history publish, got %d", len(sink.captured))
+	}
+	got := sink.captured[0]
+	if got.category != "event" {
+		t.Errorf("category = %q, want event", got.category)
+	}
+	if got.evType != "leader_changed" {
+		t.Errorf("evType = %q, want leader_changed", got.evType)
+	}
+	if got.nodeID != "node-b" {
+		t.Errorf("nodeID = %q, want node-b (from payload.node_id)", got.nodeID)
+	}
+	if got.details["subject"] != "pgmanager.pgman-pc.leader_changed" {
+		t.Errorf("subject not preserved in details: %+v", got.details)
+	}
+}
+
+// TestSubjectTail_RetainsMultiSegmentTopics — `auto_rebootstrap.detected`
+// must survive verbatim so the history record's type matches the
+// pg-manager topic constant.
+func TestSubjectTail_RetainsMultiSegmentTopics(t *testing.T) {
+	cases := map[string]string{
+		"pgmanager.pgman-pc.leader_changed":              "leader_changed",
+		"pgmanager.pgman-pc.auto_rebootstrap.detected":   "auto_rebootstrap.detected",
+		"pgmanager.pgman-pc.divergence.flagged":          "divergence.flagged",
+		"pgmanager.pgman-pc.conninfo.reconciled":         "conninfo.reconciled",
+	}
+	for subj, want := range cases {
+		if got := subjectTail(subj); got != want {
+			t.Errorf("subjectTail(%q) = %q, want %q", subj, got, want)
+		}
+	}
+}
+
 func TestHandleCoordinationEvent_MalformedPayloadIsTolerated(t *testing.T) {
 	buf := &obs.SafeBuffer{}
 	logger := obs.NewLogger(buf, "info", "test-cluster", "test-node", "test")
@@ -155,7 +234,7 @@ func TestHandleCoordinationEvent_MalformedPayloadIsTolerated(t *testing.T) {
 	handleCoordinationEvent(&nats.Msg{
 		Subject: "pgmanager.pgman-pc.auto_rebootstrap.detected",
 		Data:    []byte("not-json"),
-	}, logger, metrics)
+	}, logger, metrics, nil)
 
 	line := strings.TrimSpace(buf.String())
 	var rec map[string]any
