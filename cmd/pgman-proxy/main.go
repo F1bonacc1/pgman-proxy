@@ -215,7 +215,14 @@ func run(args []string) int {
 		buildShutdownSteps(res),
 		logger,
 	)
-	if drain.ExitCode() != runtime.ExitOK {
+	// Drain errors only get to set the exit code when we don't already
+	// have a more-specific code from managerErr. Otherwise the manager-
+	// step in drain typically re-surfaces the same singleton / connection
+	// error that already terminated Manager.Start, and its generic
+	// ExitInternal would overwrite ExitSingleton (or whatever specific
+	// code the original failure produced), hiding the real cause from
+	// operators tailing logs.
+	if drain.ExitCode() != runtime.ExitOK && exitCode == runtime.ExitOK {
 		exitCode = drain.ExitCode()
 	}
 	return exitCode
