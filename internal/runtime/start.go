@@ -353,6 +353,19 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		audit := control.NewAudit(cfg.Cluster.ID, res.Logger, conn, res.Metrics).WithHistory(res.History)
 		router := control.NewLeaderRouter(cfg.Control.LeaderRouteMode, cfg.Control.LeaderRouteTimeout,
 			cfg.Cluster.ID, conn, &managerLeaderState{m: m})
+
+		// Feature 003 / US6 — supervisor-presence detection. Used by the
+		// POST /v1/restart target=proxy pre-flight to refuse self-
+		// terminate when no recognised supervisor would bring us back.
+		supervisor := DetectSupervisor(cfg.Proxy.AssumeSupervised)
+		res.Logger.Info("proxy.supervisor_presence_detected",
+			pgmanager.Field{Key: "presence", Value: string(supervisor)},
+			pgmanager.Field{Key: "assume_supervised", Value: cfg.Proxy.AssumeSupervised})
+		selfTerm := &selfTerminator{
+			localNodeID: cfg.Node.ID,
+			presence:    string(supervisor),
+			logger:      res.Logger,
+		}
 		ctrl, err := control.NewServer(control.Config{
 			Addr:                 cfg.Control.ListenAddr,
 			TLSCertFile:          cfg.Control.TLS.CertFile,
@@ -375,7 +388,16 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			History: historyQuerier,
 			// Feature 003: /v1/watch/* SSE handlers subscribe to the
 			// cluster's history JetStream via this watcher.
-			Watch:     historyWatcher,
+			Watch: historyWatcher,
+			// Feature 003 / US6: self-terminator for /v1/restart
+			// target=proxy. Drain + os.Exit handled in shutdown.go.
+			Proxy: selfTerm,
+			// Reloader currently unwired — POST /v1/config/set will
+			// return engine_error until the SIGHUP plumbing exposes
+			// an in-process trigger. Operators stage YAML changes and
+			// SIGHUP today; the endpoint is reachable for audit-trail
+			// continuity.
+			Reloader:  nil,
 			ClusterID: cfg.Cluster.ID,
 			NodeID:    cfg.Node.ID,
 		})

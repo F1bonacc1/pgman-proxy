@@ -43,6 +43,10 @@ type Engine interface {
 	TriggerBackup(ctx context.Context) (pgmanager.BackupID, error)
 	PrepareUpgrade(ctx context.Context, plan pgmanager.UpgradePlan) error
 	ExecuteUpgrade(ctx context.Context, plan pgmanager.UpgradePlan, preSwap upgrade.PreSwap) error
+	// Feature 003 / US6: operator-triggered restart of the LOCAL
+	// PostgreSQL process. Returns the executor's error verbatim so
+	// the handler can map to the right audit outcome.
+	RestartPostgres(ctx context.Context) error
 }
 
 // Compile-time assertion: *manager.Manager satisfies Engine.
@@ -128,6 +132,12 @@ const (
 	// with a fix whose blast_radius is advisory has nothing to apply.
 	CodeAdvisoryOnly = "advisory_only"
 	CodeInternal     = "internal"
+
+	// 003 / US6 — restart + setconfig codes
+	// (contracts/control-plane-extensions.md § Error codes added by 003).
+	CodeSupervisorNotDetected = "supervisor_not_detected"
+	CodeWrongPeer             = "wrong_peer"
+	CodeSetConfigKeyDisallowed = "set_config_key_disallowed"
 )
 
 // httpStatusForCode maps the documented error codes to their HTTP
@@ -144,9 +154,9 @@ func httpStatusForCode(code string) int {
 		return http.StatusConflict
 	case CodeLeadershipInTransition, CodeAuditUnavailable:
 		return http.StatusServiceUnavailable
-	case CodeBackupExecutorMissing, CodeAdvisoryOnly:
+	case CodeBackupExecutorMissing, CodeAdvisoryOnly, CodeSupervisorNotDetected:
 		return http.StatusPreconditionFailed
-	case CodeInvalidArgument:
+	case CodeInvalidArgument, CodeWrongPeer, CodeSetConfigKeyDisallowed:
 		return http.StatusBadRequest
 	case CodeLeaderRouteTimeout:
 		return http.StatusGatewayTimeout

@@ -75,6 +75,17 @@ type Server struct {
 	// 200 OK.
 	watch WatchSubscriber
 
+	// Feature 003 / US6: optional proxy self-terminator for the
+	// POST /v1/restart target=proxy path. Nil terminator means the
+	// handler refuses with `internal` so test paths that omit it
+	// can't accidentally exit.
+	proxy ProxySelfTerminator
+
+	// Feature 003 / US6: optional reloader for POST /v1/config/set.
+	// Nil reloader => handler returns engine_error (the route stays
+	// reachable so the audit trail captures the attempt).
+	reloader Reloader
+
 	clusterID string
 	nodeID    string
 
@@ -125,6 +136,18 @@ type Config struct {
 	// keepalive-only streams.
 	Watch WatchSubscriber
 
+	// Proxy is an optional self-terminator backing the
+	// POST /v1/restart target=proxy path (feature 003 / US6).
+	// When nil the restart handler refuses with `internal` so
+	// test paths that omit it can't accidentally exit.
+	Proxy ProxySelfTerminator
+
+	// Reloader is an optional in-process SIGHUP-equivalent backing
+	// POST /v1/config/set (feature 003 / US6). When nil the
+	// setconfig handler returns engine_error so the audit trail
+	// still captures the attempt.
+	Reloader Reloader
+
 	ClusterID string
 	NodeID    string
 }
@@ -156,6 +179,8 @@ func NewServer(cfg Config) (*Server, error) {
 		history:          cfg.History,
 		aggregator:       cfg.Aggregator,
 		watch:            cfg.Watch,
+		proxy:            cfg.Proxy,
+		reloader:         cfg.Reloader,
 		clusterID:        cfg.ClusterID,
 		nodeID:           cfg.NodeID,
 		ulidEntropy:      newULIDEntropy(),
@@ -207,6 +232,16 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/doctor/checks", s.wrap("DoctorChecks", false, false, s.handleDoctorChecks))
 	mux.Handle("POST /v1/doctor/run", s.wrap("DoctorRun", false, false, s.handleDoctorRun))
 	mux.Handle("POST /v1/doctor/fix", s.wrap("DoctorFix", true, false, s.handleDoctorFix))
+
+	// Restart (003 / US6). Mutating, local-only (target=postgres
+	// restarts the receiving peer's pg; target=proxy self-terminates
+	// the receiving peer).
+	mux.Handle("POST /v1/restart", s.wrap("Restart", true, false, s.handleRestart))
+
+	// SetConfig (003 / US6). Mutating, local-only — triggers a
+	// SIGHUP-equivalent in-process reload constrained to the
+	// hot-reload allow-list (peer routes + cluster password).
+	mux.Handle("POST /v1/config/set", s.wrap("SetConfig", true, false, s.handleSetConfig))
 
 	// Watch SSE endpoints (003 / contracts/control-plane-extensions.md § 1).
 	// All four are reads — auth gated by allow_unauth_reads. Accept

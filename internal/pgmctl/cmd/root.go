@@ -169,6 +169,13 @@ Spec: specs/003-pgmctl-cli/spec.md
 		newDoctorCmd(app),
 		newExplainCmd(app),
 		newWatchCmd(app),
+		newFenceCmd(app),
+		newUnfenceCmd(app),
+		newSetConfigCmd(app),
+		newFailoverCmd(app),
+		newSwitchoverCmd(app),
+		newPromoteCmd(app),
+		newRestartCmd(app),
 	)
 
 	return root

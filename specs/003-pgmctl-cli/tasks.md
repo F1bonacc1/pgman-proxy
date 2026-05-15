@@ -250,37 +250,37 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Upstream prerequisite (Wave 0)
 
-- [ ] T103 [US6] In sibling repo `../pg-manager`, add `func (m *Manager) RestartPostgres(ctx context.Context) error` per RD-001; emit the same transition events Start/Stop emit; tag as a new release; merge upstream
-- [ ] T104 [US6] In `pgman-proxy/go.mod`, bump the `github.com/f1bonacc1/pg-manager` pin from `replace ../pg-manager` to the tagged version produced by T103; run `go mod tidy`; commit
+- [X] T103 [US6] In sibling repo `../pg-manager`, add `func (m *Manager) RestartPostgres(ctx context.Context) error` per RD-001; emit the same transition events Start/Stop emit; tag as a new release; merge upstream
+- [X] T104 [US6] In `pgman-proxy/go.mod`, bump the `github.com/f1bonacc1/pg-manager` pin from `replace ../pg-manager` to the tagged version produced by T103; run `go mod tidy`; commit
 
 ### Server-side support for US6
 
-- [ ] T105 [US6] Implement `internal/control/handlers_restart.go` per `contracts/proxy-self-terminate.md`: `POST /v1/restart` with `target=postgres|proxy` dispatch; `postgres` calls `Manager.RestartPostgres`; `proxy` runs supervisor-presence pre-check then enters drain/exit flow
-- [ ] T106 [US6] Implement supervisor-presence detection in `internal/runtime/supervisor.go`: heuristics per RD-009 / `contracts/proxy-self-terminate.md § Supervisor presence detection`; runtime field `proxy.SupervisorPresence` populated at startup; log line `proxy.supervisor_presence_detected` emitted
-- [ ] T107 [US6] Implement self-terminate handler path in `handlers_restart.go`: pre-check audit; respond 200 with envelope; flush; emit `proxy.self_restart_initiated`; drain via existing 001 FR-014 shutdown path; call `os.Exit(0)`
-- [ ] T108 [US6] Wire `POST /v1/restart` into `internal/control/route.go`; `s.wrap("Restart", true, leaderOnlyForPostgresTarget, …)`
-- [ ] T109 [US6] Add config key `proxy.assume_supervised: bool` in `internal/config/`; default `false`; documented in CHANGELOG / quickstart
-- [ ] T110 [US6] Implement `internal/control/handlers_setconfig.go` (`POST /v1/config/set`): SIGHUP-trigger wrapper for the 002 hot-reload allow-list (peer-routes list + cluster password handle); rejects keys outside the allow-list with `set_config_key_disallowed` (400)
-- [ ] T111 [US6] Wire `POST /v1/config/set` into `internal/control/route.go`; mutating; not leader-only
+- [X] T105 [US6] Implement `internal/control/handlers_restart.go` per `contracts/proxy-self-terminate.md`: `POST /v1/restart` with `target=postgres|proxy` dispatch; `postgres` calls `Manager.RestartPostgres`; `proxy` runs supervisor-presence pre-check then enters drain/exit flow
+- [X] T106 [US6] Implement supervisor-presence detection in `internal/runtime/supervisor.go`: heuristics per RD-009 / `contracts/proxy-self-terminate.md § Supervisor presence detection`; runtime field `proxy.SupervisorPresence` populated at startup; log line `proxy.supervisor_presence_detected` emitted
+- [X] T107 [US6] Implement self-terminate handler path in `handlers_restart.go`: pre-check audit; respond 200 with envelope; flush; emit `proxy.self_restart_initiated`; drain via existing 001 FR-014 shutdown path; call `os.Exit(0)`
+- [X] T108 [US6] Wire `POST /v1/restart` into `internal/control/route.go`; `s.wrap("Restart", true, leaderOnlyForPostgresTarget, …)`
+- [X] T109 [US6] Add config key `proxy.assume_supervised: bool` in `internal/config/`; default `false`; documented in CHANGELOG / quickstart
+- [X] T110 [US6] Implement `internal/control/handlers_setconfig.go` (`POST /v1/config/set`): SIGHUP-trigger wrapper for the 002 hot-reload allow-list (peer-routes list + cluster password handle); rejects keys outside the allow-list with `set_config_key_disallowed` (400)
+- [X] T111 [US6] Wire `POST /v1/config/set` into `internal/control/route.go`; mutating; not leader-only
 
 ### Tests for User Story 6
 
 - [ ] T112 [P] [US6] Contract test `tests/contract/pgmctl/mutating_grid_test.go` — six-assertion grid per SC-006, repeated for every mutating subcommand: fence, unfence, set-config, failover, switchover, promote, restart-postgres, restart-proxy, delete
-- [ ] T113 [P] [US6] Contract test `tests/contract/restart_test.go` — five-case grid per `contracts/proxy-self-terminate.md § Tests`: postgres happy path, proxy happy path under tini, proxy refused without supervisor, proxy refused with wrong peer, proxy refused under audit-unavailable
-- [ ] T114 [P] [US6] Contract test `tests/contract/setconfig_allowlist_test.go`: peer-routes change accepted; password change accepted; arbitrary other-key rejected with `set_config_key_disallowed`
+- [X] T113 [P] [US6] Contract test `tests/contract/restart_test.go` — five-case grid per `contracts/proxy-self-terminate.md § Tests`: postgres happy path, proxy happy path under tini, proxy refused without supervisor, proxy refused with wrong peer, proxy refused under audit-unavailable
+- [X] T114 [P] [US6] Contract test `tests/contract/setconfig_allowlist_test.go`: peer-routes change accepted; password change accepted; arbitrary other-key rejected with `set_config_key_disallowed`
 - [ ] T115 [P] [US6] Integration test `tests/integration/pgmctl/mutating_audit_trail_test.go`: every mutating command produces exactly one audit record visible via `pgmctl get audit --request-id <id>`
 - [ ] T116 [P] [US6] Integration test `tests/integration/pgmctl/restart_proxy_supervised_test.go`: 3-peer fixture under tini-style supervisor; `pgmctl restart node-2 --target=proxy --force --cluster <name>`; peer-2 exits and re-joins; data-plane connections through siblings unaffected (cluster failover budget per Constitution Performance baseline ≤ 5s p99)
 
 ### Implementation for User Story 6
 
-- [ ] T117 [P] [US6] Implement `internal/pgmctl/cmd/fence.go` and `unfence.go`: single-resource mutating ops; `[y/N]` prompt; `-y` bypass; `POST /v1/fence` / `POST /v1/unfence` (depends on T032)
-- [ ] T118 [P] [US6] Implement `internal/pgmctl/cmd/set_config.go`: client-side allow-list mirror of 002 FR-014a (refuses disallowed keys client-side before sending); `[y/N]` prompt; `-y` bypass
-- [ ] T119 [P] [US6] Implement `internal/pgmctl/cmd/failover.go`: cluster-affecting; typed cluster-name confirmation; `--force --cluster <name>` bypass; `POST /v1/failover`
-- [ ] T120 [P] [US6] Implement `internal/pgmctl/cmd/switchover.go`: same pattern; `--target <node>` required; `POST /v1/switchover`
-- [ ] T121 [P] [US6] Implement `internal/pgmctl/cmd/promote.go`: cluster-affecting; `POST /v1/promote`; local-only per 001
-- [ ] T122 [P] [US6] Implement `internal/pgmctl/cmd/restart.go`: `--target=postgres|proxy` selector; typed cluster-name confirmation; for `--target=proxy`, pre-resolves the right peer via `Status` and `--endpoint` override to land on the target node (depends on T105)
+- [X] T117 [P] [US6] Implement `internal/pgmctl/cmd/fence.go` and `unfence.go`: single-resource mutating ops; `[y/N]` prompt; `-y` bypass; `POST /v1/fence` / `POST /v1/unfence` (depends on T032)
+- [X] T118 [P] [US6] Implement `internal/pgmctl/cmd/set_config.go`: client-side allow-list mirror of 002 FR-014a (refuses disallowed keys client-side before sending); `[y/N]` prompt; `-y` bypass
+- [X] T119 [P] [US6] Implement `internal/pgmctl/cmd/failover.go`: cluster-affecting; typed cluster-name confirmation; `--force --cluster <name>` bypass; `POST /v1/failover`
+- [X] T120 [P] [US6] Implement `internal/pgmctl/cmd/switchover.go`: same pattern; `--target <node>` required; `POST /v1/switchover`
+- [X] T121 [P] [US6] Implement `internal/pgmctl/cmd/promote.go`: cluster-affecting; `POST /v1/promote`; local-only per 001
+- [X] T122 [P] [US6] Implement `internal/pgmctl/cmd/restart.go`: `--target=postgres|proxy` selector; typed cluster-name confirmation; for `--target=proxy`, pre-resolves the right peer via `Status` and `--endpoint` override to land on the target node (depends on T105)
 - [ ] T123 [P] [US6] Implement `internal/pgmctl/cmd/delete.go`: cluster-affecting; wraps `POST /v1/topology` with a decommission-peer payload; documents in prompt that the proxy process on the target is NOT killed (FR-030)
-- [ ] T124 [US6] Implement `request_id` print-to-stdout on every accepted mutating op so operators can correlate with `pgmctl get audit --request-id <id>` (FR-039)
+- [X] T124 [US6] Implement `request_id` print-to-stdout on every accepted mutating op so operators can correlate with `pgmctl get audit --request-id <id>` (FR-039)
 - [ ] T125 [US6] Generate golden files for every mutating prompt's exact wording; pin into `tests/golden/pgmctl/prompts_*.txt`
 
 **Checkpoint**: US6 ships independently — every mutating operation is wired, confirmed correctly, audited end-to-end. Combined with US1–US5, all six user stories are now deliverable.

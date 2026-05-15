@@ -106,6 +106,14 @@ type ProxyConfig struct {
 	ListenAddr   string        `yaml:"listen_addr"   json:"listen_addr"`
 	DialTimeout  time.Duration `yaml:"dial_timeout"  json:"dial_timeout"`
 	SwitchPolicy string        `yaml:"switch_policy" json:"switch_policy"` // hard_close | drain | pause
+
+	// AssumeSupervised overrides supervisor-presence detection for
+	// POST /v1/restart target=proxy. When true, the handler accepts
+	// the self-terminate request even if no tini / systemd / k8s /
+	// process-compose marker was detected. Use only when running
+	// under a custom supervisor the auto-detector doesn't recognise.
+	// (feature 003 / US6 / RD-009)
+	AssumeSupervised bool `yaml:"assume_supervised" json:"assume_supervised"`
 }
 
 // PostgresConfig governs how this peer talks to its local PostgreSQL.

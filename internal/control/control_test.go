@@ -39,6 +39,7 @@ type fakeEngine struct {
 	triggerBackupFn  func(context.Context) (pgmanager.BackupID, error)
 	prepareUpgradeFn func(context.Context, pgmanager.UpgradePlan) error
 	executeUpgradeFn func(context.Context, pgmanager.UpgradePlan, upgrade.PreSwap) error
+	restartPostgresFn func(context.Context) error
 }
 
 func (f *fakeEngine) Status(ctx context.Context) (pgmanager.Status, error) {
@@ -104,6 +105,12 @@ func (f *fakeEngine) PrepareUpgrade(ctx context.Context, plan pgmanager.UpgradeP
 func (f *fakeEngine) ExecuteUpgrade(ctx context.Context, plan pgmanager.UpgradePlan, pre upgrade.PreSwap) error {
 	if f.executeUpgradeFn != nil {
 		return f.executeUpgradeFn(ctx, plan, pre)
+	}
+	return nil
+}
+func (f *fakeEngine) RestartPostgres(ctx context.Context) error {
+	if f.restartPostgresFn != nil {
+		return f.restartPostgresFn(ctx)
 	}
 	return nil
 }
