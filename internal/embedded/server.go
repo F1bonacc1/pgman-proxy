@@ -18,6 +18,14 @@ type LifecycleEventKind string
 const (
 	EventServerStarted   LifecycleEventKind = "embedded_nats.server_started"
 	EventServerReady     LifecycleEventKind = "embedded_nats.server_ready"
+	// EventServerStopping is the durable boundary marker emitted while
+	// the embedded NATS server is still alive — the *last* lifecycle
+	// event that can be persisted to the JetStream history stream
+	// before shutdown tears the publish path down. EventServerStopped
+	// still fires after the server is gone, but it can only reach slog
+	// at that point; operators querying `pgmctl events` for the end of
+	// a peer's lifecycle should look for `server_stopping`.
+	EventServerStopping  LifecycleEventKind = "embedded_nats.server_stopping"
 	EventServerStopped   LifecycleEventKind = "embedded_nats.server_stopped"
 	EventStorageDegraded LifecycleEventKind = "embedded_nats.storage_degraded"
 	EventReloadApplied   LifecycleEventKind = "embedded_nats.reload_applied"
@@ -179,6 +187,25 @@ func (s *Server) WaitForRouteMesh(ctx context.Context, expectedPeers int, interv
 			}
 		}
 	}
+}
+
+// SignalStopping emits the EventServerStopping lifecycle marker while
+// the server (and therefore the host's NATS publish path) is still
+// alive. Call it from the shutdown orchestrator BEFORE any step that
+// would tear down the NATS connection used by the host's history sink;
+// otherwise the only durable record of this peer's shutdown is the
+// post-mortem slog line emitted by Shutdown, which can't be replayed
+// from `pgmctl events`. Idempotent — a second call after the server
+// has stopped is a no-op.
+func (s *Server) SignalStopping() {
+	if s == nil || s.stopped.Load() {
+		return
+	}
+	s.emit(EventServerStopping, map[string]any{
+		"node_id":    s.nodeID,
+		"cluster_id": s.clusterID,
+		"uptime_ms":  time.Since(s.startedAt).Milliseconds(),
+	})
 }
 
 // Shutdown drains the embedded NATS server cleanly. Blocks until the

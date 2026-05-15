@@ -263,6 +263,38 @@ func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
 			Stop: func(ctx context.Context) error { return res.Manager.Stop(ctx) },
 		})
 	}
+	// Event subscriptions MUST be unsubscribed BEFORE the cluster step
+	// drains the shared NATS connection. Otherwise every Unsubscribe
+	// returns "nats: connection draining" (each subscriber emits one
+	// shutdown-step-error WARN — measured at ~20 per peer-shutdown
+	// during chaos testing).
+	for _, sub := range res.EventSub {
+		steps = append(steps, runtime.DrainStep{
+			Name: "event-subscription",
+			Stop: func(_ context.Context) error { return sub.Unsubscribe() },
+		})
+	}
+	// Emit the final durable lifecycle marker — `server_stopping` — while
+	// the embedded NATS server AND the cluster conn are both still alive,
+	// so the JetStream history publish actually lands. After it lands,
+	// detach the history sink so any subsequent Logger.Event calls during
+	// shutdown (notably `server_stopped`, fired AFTER Embedded.Shutdown
+	// has torn the in-process server down) degrade to slog-only instead
+	// of logging an `obs.history_publish_failed` WARN against a closed
+	// conn. Operators querying `pgmctl events` for end-of-life records
+	// should look for `server_stopping`.
+	if res.Embedded != nil {
+		steps = append(steps, runtime.DrainStep{
+			Name: "embedded-pre-stop",
+			Stop: func(_ context.Context) error {
+				res.Embedded.SignalStopping()
+				if res.Logger != nil {
+					res.Logger.SetHistorySink(nil)
+				}
+				return nil
+			},
+		})
+	}
 	if res.Cluster != nil {
 		steps = append(steps, runtime.DrainStep{
 			Name: "cluster",
@@ -272,18 +304,13 @@ func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
 			},
 		})
 	}
-	for _, sub := range res.EventSub {
-		sub := sub
-		steps = append(steps, runtime.DrainStep{
-			Name: "event-subscription",
-			Stop: func(_ context.Context) error { return sub.Unsubscribe() },
-		})
-	}
 	// Feature 002: embedded NATS server drains LAST. Order matters —
 	// pg-manager adapters must release their leadership lease through
 	// the embedded server before the server exits, otherwise the lease
 	// stays held in the cluster's view until expiry
-	// (contracts/lifecycle.md § Shutdown sequence).
+	// (contracts/lifecycle.md § Shutdown sequence). The `server_stopped`
+	// event fired by Shutdown() reaches slog only (the history sink was
+	// detached in the embedded-pre-stop step above).
 	if res.Embedded != nil {
 		steps = append(steps, runtime.DrainStep{
 			Name: "embedded-nats",
