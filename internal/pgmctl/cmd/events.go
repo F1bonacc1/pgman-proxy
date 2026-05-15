@@ -44,13 +44,14 @@ type historyResult struct {
 // eventsFlags is the shared filter set for `pgmctl events` and the
 // `events`/`audit` resource forms of `pgmctl get`.
 type eventsFlags struct {
-	since    time.Duration
-	until    string
-	types    []string
-	nodes    []string
-	limit    int
-	cursor   string
-	category string // event|audit|both ("" = both)
+	since     time.Duration
+	until     string
+	types     []string
+	nodes     []string
+	limit     int
+	cursor    string
+	category  string // event|audit|both ("" = both)
+	listTypes bool   // group-by-type rollup over the window
 }
 
 func newEventsCmd(app *AppContext) *cobra.Command {
@@ -84,6 +85,7 @@ func addEventsFlags(c *cobra.Command, f *eventsFlags, includeCategory bool) {
 	c.Flags().StringSliceVar(&f.nodes, "node", nil, "Filter to specific node ids (repeatable)")
 	c.Flags().IntVar(&f.limit, "limit", 1000, "Maximum number of events to return")
 	c.Flags().StringVar(&f.cursor, "cursor", "", "Resume from after this event id (ULID)")
+	c.Flags().BoolVar(&f.listTypes, "list-types", false, "Show the distinct event types observed in the window (with counts + last-seen)")
 	if includeCategory {
 		c.Flags().StringVar(&f.category, "category", "", "Filter to one category: event|audit; empty = both")
 	}
@@ -138,6 +140,10 @@ func runHistory(cmd *cobra.Command, app *AppContext, categoryOverride string, f 
 		}
 	}
 
+	if f.listTypes {
+		return renderTypeRollup(cmd.OutOrStdout(), app, result)
+	}
+
 	switch app.Format {
 	case output.FormatJSON:
 		return output.EmitJSON(cmd.OutOrStdout(), "HistoryQueryResult", result)
@@ -145,6 +151,83 @@ func runHistory(cmd *cobra.Command, app *AppContext, categoryOverride string, f 
 		return output.EmitYAML(cmd.OutOrStdout(), "HistoryQueryResult", result)
 	}
 	return renderEventsTable(cmd.OutOrStdout(), result)
+}
+
+// typeRollupRow is one row of the --list-types output: one type, how
+// many records carry it, and when the most recent one fired.
+type typeRollupRow struct {
+	Type     string    `json:"type" yaml:"type"`
+	Count    int       `json:"count" yaml:"count"`
+	LastSeen time.Time `json:"last_seen" yaml:"last_seen"`
+}
+
+type typeRollupResult struct {
+	APIVersion string          `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string          `json:"kind" yaml:"kind"`
+	Window     string          `json:"window" yaml:"window"`
+	Total      int             `json:"total_events" yaml:"total_events"`
+	Types      []typeRollupRow `json:"types" yaml:"types"`
+}
+
+// renderTypeRollup groups history records by type, counting and
+// recording each type's most recent occurrence. Rows are sorted by
+// count desc, then by type name asc. Output respects --output json/yaml.
+func renderTypeRollup(w io.Writer, app *AppContext, r historyResult) error {
+	counts := map[string]int{}
+	lastSeen := map[string]time.Time{}
+	for _, ev := range r.Events {
+		counts[ev.Type]++
+		if ev.Time.After(lastSeen[ev.Type]) {
+			lastSeen[ev.Type] = ev.Time
+		}
+	}
+
+	rows := make([]typeRollupRow, 0, len(counts))
+	for t, n := range counts {
+		rows = append(rows, typeRollupRow{Type: t, Count: n, LastSeen: lastSeen[t]})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].Type < rows[j].Type
+	})
+
+	result := typeRollupResult{
+		APIVersion: "pgmctl/v1",
+		Kind:       "HistoryTypeRollup",
+		Total:      len(r.Events),
+		Types:      rows,
+	}
+
+	switch app.Format {
+	case output.FormatJSON:
+		return output.EmitJSON(w, "HistoryTypeRollup", result)
+	case output.FormatYAML:
+		return output.EmitYAML(w, "HistoryTypeRollup", result)
+	}
+
+	if len(rows) == 0 {
+		_, err := fmt.Fprintln(w, "no events in window")
+		return err
+	}
+	t := output.NewTable("COUNT", "TYPE", "LAST SEEN")
+	for _, row := range rows {
+		t.AddRow(
+			fmt.Sprintf("%d", row.Count),
+			row.Type,
+			row.LastSeen.UTC().Format(time.RFC3339),
+		)
+	}
+	if err := t.Render(w); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\n%d total event(s) over window; %d distinct type(s).\n",
+		result.Total, len(rows))
+	if r.Truncated {
+		fmt.Fprintln(w, "(result was truncated by --limit; counts cover only the returned slice)")
+	}
+	return nil
 }
 
 // renderEventsTable writes the documented `TIME TYPE NODE DETAILS`
