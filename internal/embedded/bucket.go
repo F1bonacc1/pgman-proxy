@@ -104,7 +104,13 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 	}
 
 	name := bucketName(clusterID)
-	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// 60 s — phase-1 cold-start contention (all peers racing to land
+	// meta-cluster RAFT + provision this bucket + tune AllowDirect on
+	// the underlying stream) can blow through a 30 s budget while a
+	// peer waits for the meta-cluster leader to settle. Bumping the
+	// budget keeps a transient slow election from killing the boot
+	// (chaos-rig RCA, 2026-05-16). The function is still bounded.
+	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	kv, err := js.KeyValue(callCtx, name)
@@ -183,6 +189,14 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 	}
 	scfg := stream.CachedInfo().Config
 	if scfg.AllowDirect {
+		// On a freshly-created replicated stream, the underlying RAFT
+		// group can take several seconds to elect a leader. UpdateStream
+		// blocks waiting for the stream leader; without this wait the
+		// 60 s callCtx budget gets burned on a single hung call during
+		// cold-start contention (chaos-rig RCA, 2026-05-16).
+		if err := WaitForStreamReady(callCtx, js, streamName, 30*time.Second, 500*time.Millisecond); err != nil {
+			return fmt.Errorf("wait for KV stream %q leader before AllowDirect tune: %w", streamName, err)
+		}
 		scfg.AllowDirect = false
 		if _, err := js.UpdateStream(callCtx, scfg); err != nil {
 			return fmt.Errorf("disable AllowDirect on KV stream %q: %w", streamName, err)
@@ -200,6 +214,72 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 // returns ErrStreamNotFound), which is the surface we want.
 func bucketStreamName(bucket string) string {
 	return "KV_" + bucket
+}
+
+// WaitForStreamReady blocks until the named stream's RAFT group has
+// elected a leader, or budget elapses. Necessary before any boot-time
+// "verify-the-stream-works" probe: a freshly-created replicated stream
+// often has no leader for several seconds while the underlying RAFT
+// group forms quorum, and any API call against the stream
+// (UpdateStream, Publish, etc.) returns `nats: no response from
+// stream` / a 503 during that window. If a caller treats that
+// transient failure as fatal, cold-start cluster wedges in a boot loop
+// (chaos-rig RCA, 2026-05-16).
+//
+// Used in two boot paths:
+//
+//   - history stream readiness, gating the FR-027 audit emit (Gate
+//     #11a in runtime/start.go).
+//   - cluster KV stream readiness, gating UpdateStream(AllowDirect)
+//     inside PreCreateClusterKV.
+//
+// Single-replica streams have no real election (Cluster == nil or
+// Leader is already self) and the wait returns immediately. Each
+// probe has a 3 s deadline; on failure the function sleeps interval
+// (defaulting to 500 ms) and retries within the budget.
+func WaitForStreamReady(ctx context.Context, js jetstream.JetStream, streamName string, budget, interval time.Duration) error {
+	if js == nil {
+		return errors.New("WaitForStreamReady: nil JetStream context")
+	}
+	if streamName == "" {
+		return errors.New("WaitForStreamReady: empty stream name")
+	}
+	if budget <= 0 {
+		budget = 30 * time.Second
+	}
+	if interval <= 0 {
+		interval = 500 * time.Millisecond
+	}
+	deadline := time.Now().Add(budget)
+	var lastErr error
+	for {
+		probeCtx, probeCancel := context.WithTimeout(ctx, 3*time.Second)
+		stream, err := js.Stream(probeCtx, streamName)
+		var info *jetstream.StreamInfo
+		if err == nil {
+			info, err = stream.Info(probeCtx)
+		}
+		probeCancel()
+		if err == nil && info != nil {
+			if info.Cluster == nil || info.Cluster.Leader != "" {
+				return nil
+			}
+			lastErr = errors.New("WaitForStreamReady: stream has no elected leader")
+		} else if err != nil {
+			lastErr = err
+		}
+		if !time.Now().Before(deadline) {
+			if lastErr == nil {
+				lastErr = errors.New("WaitForStreamReady: probe returned no result")
+			}
+			return fmt.Errorf("WaitForStreamReady: stream %q not ready within %s: %w", streamName, budget, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // OpenClusterKV returns a handle to the cluster KV bucket

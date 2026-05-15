@@ -412,6 +412,21 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			}
 		}()
 
+		// Gate #11a: wait for the history stream's RAFT group to elect
+		// a leader before the boot-gate audit emit below. Without this,
+		// on a cold cluster start the audit Emit races stream-leader
+		// election: publishes return `nats: no response from stream`,
+		// the fatal-on-first-failure gate puts every peer into an
+		// exit-81 boot loop, and the cluster wedges (chaos-rig RCA,
+		// 2026-05-16). Bounded by 30 s; if the stream truly cannot
+		// reach quorum in that time, exit-81 is the right answer.
+		streamReadyCtx, streamReadyCancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := embedded.WaitForStreamReady(streamReadyCtx, js, history.StreamName(cfg.Cluster.ID), 30*time.Second, 500*time.Millisecond); err != nil {
+			streamReadyCancel()
+			return res, &StartupError{Code: ExitControl, Err: fmt.Errorf("history stream not ready: %w", err)}
+		}
+		streamReadyCancel()
+
 		// Gate #11: initial LCM-audit emit verifying both sinks (FR-027).
 		// A failure here exits with EX_CONTROL so operators see the
 		// audit pipeline is broken before any LCM request lands.
