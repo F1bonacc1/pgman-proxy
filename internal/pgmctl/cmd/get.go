@@ -31,6 +31,7 @@ var knownGetResources = []string{
 }
 
 func newGetCmd(app *AppContext) *cobra.Command {
+	var f eventsFlags
 	c := &cobra.Command{
 		Use:   "get <resource> [<name>]",
 		Short: "Get a resource (nodes, peers, slots, topology, version, events, audit, config)",
@@ -40,7 +41,7 @@ func newGetCmd(app *AppContext) *cobra.Command {
   slots            — replication slots from /v1/diagnose
   topology         — cluster topology tree (derived from /v1/status)
   version          — client + server versions (uses /v1/version when present)
-  events, audit    — DEFERRED (added in feature 003 Phase 4 — history stream)
+  events, audit    — history-stream records (--since / --type / --node / --limit / --cursor / --list-types)
   config           — DEFERRED (server-side GET /v1/config not yet implemented)
 `,
 		Args: cobra.MinimumNArgs(1),
@@ -48,13 +49,19 @@ func newGetCmd(app *AppContext) *cobra.Command {
 			return knownGetResources, cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGet(cmd, app, args, false)
+			return runGet(cmd, app, args, false, f)
 		},
 	}
+	// Events/audit history-stream flags. Inert when the resource
+	// isn't events or audit; cobra surfaces them on `pgmctl get --help`
+	// so operators discover them without having to know they only
+	// apply to two of the resources.
+	addEventsFlags(c, &f, false)
 	return c
 }
 
 func newListCmd(app *AppContext) *cobra.Command {
+	var f eventsFlags
 	c := &cobra.Command{
 		Use:   "list <resource>",
 		Short: "List a resource (alias of `get` for collection-shaped resources)",
@@ -63,13 +70,15 @@ Provided so operators don't have to remember whether a resource is a
 collection or a singleton.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGet(cmd, app, args, false)
+			return runGet(cmd, app, args, false, f)
 		},
 	}
+	addEventsFlags(c, &f, false)
 	return c
 }
 
 func newDescribeCmd(app *AppContext) *cobra.Command {
+	var f eventsFlags
 	c := &cobra.Command{
 		Use:   "describe <resource>[/<name>]",
 		Short: "Verbose form of `get` — emits the full record set",
@@ -78,15 +87,16 @@ emits the full struct including fields normally suppressed in the
 narrow column set.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGet(cmd, app, args, true)
+			return runGet(cmd, app, args, true, f)
 		},
 	}
+	addEventsFlags(c, &f, false)
 	return c
 }
 
 // runGet dispatches a single resource kind. Resource and optional name
 // are taken from args.
-func runGet(cmd *cobra.Command, app *AppContext, args []string, verbose bool) error {
+func runGet(cmd *cobra.Command, app *AppContext, args []string, verbose bool, evFlags eventsFlags) error {
 	resource := strings.ToLower(args[0])
 	var name string
 	// Accept "resource/name" or "resource name" forms.
@@ -120,7 +130,14 @@ func runGet(cmd *cobra.Command, app *AppContext, args []string, verbose bool) er
 		if resource == "audit" {
 			category = "audit"
 		}
-		return runHistory(cmd, app, category, eventsFlags{since: 30 * time.Minute, limit: 1000})
+		f := evFlags
+		if f.since == 0 {
+			f.since = 30 * time.Minute
+		}
+		if f.limit == 0 {
+			f.limit = 1000
+		}
+		return runHistory(cmd, app, category, f)
 	case "config":
 		return WithExitCode(ExitUsage, fmt.Errorf("resource \"config\" needs server-side GET /v1/config; not yet implemented. Use `pgmctl config view` to inspect the local pgmctl config"))
 	default:

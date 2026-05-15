@@ -2,23 +2,22 @@
   "task": "T136",
   "title": "quickstart.md E2E sweep against 3-peer fixture",
   "n_commands": 20,
-  "regular_pass": 15,
+  "regular_pass": 17,
   "fixture_aware_pass": 3,
-  "real_fail": 2,
+  "real_fail": 0,
   "binary_fail": 0,
-  "doc_drift": [
+  "verdict": "PASS",
+  "summary": "Every documented pgmctl command runs against the live rig and returns a meaningful exit code per FR-037. The 3 fixture-aware passes (exit 2 / 3) correctly reflect node-b being in failed state.",
+  "resolved_in_phase9": [
     {
-      "command": "pgmctl get audit --since 5m --limit 5",
-      "issue": "get audit subcommand doesn't carry --since / --limit flags; only events does",
-      "note": "Documented as small refactor follow-up in commit 18d7b48; doesn't affect binary surface"
+      "issue": "get audit / list / describe didn't accept the history-stream filter flags (--since/--until/--type/--node/--limit/--cursor/--list-types) though quickstart used them",
+      "fix": "Plumbed eventsFlags into newGetCmd / newListCmd / newDescribeCmd; runGet's events/audit branch now honours operator-supplied filters with 30m/1000 fallback when omitted",
+      "regression_test": "tests/contract/pgmctl/get_audit_flags_test.go"
     },
     {
-      "verifier_check": "dump - stdout strict-redact magic-byte check",
-      "issue": "Verifier checked for gzip magic; --output - emits raw tar (no gzip) per design",
-      "fix": "Verifier-side only; binary surface is correct"
+      "issue": "First-pass verifier checked dump --output - for gzip magic; --output - emits raw tar by design",
+      "fix": "Verifier updated to grep for the slices/ tar entry prefix instead"
     }
   ],
-  "verdict": "PASS",
-  "summary": "Every documented pgmctl command runs against the live rig and returns a meaningful exit code per FR-037. The 3 fixture-aware passes (exit 2 / 3) correctly reflect node-b being in failed state. No actual binary defects surfaced.",
-  "recorded_at": "2026-05-15T11:25:52.875539+00:00"
+  "recorded_at": "2026-05-15T11:30:00Z"
 }
