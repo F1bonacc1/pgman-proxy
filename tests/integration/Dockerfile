@@ -54,7 +54,20 @@ RUN apt-get update \
          iptables \
          iproute2 \
          procps \
+         libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
+# Chaos-testing convenience: grant the non-root `postgres` user the
+# capabilities needed to manipulate iptables inside the container, so
+# integration / chaos rigs can inject network partitions without
+# `docker exec -u root`. The container must already be started with
+# `--cap-add=NET_ADMIN` (NET_RAW is in the default capability set);
+# setcap simply exposes those caps to the unprivileged binary invocation.
+# Targets the xtables multi-call binaries that the iptables / ip6tables
+# / iptables-{nft,legacy} symlinks ultimately dispatch to. Either backend
+# may be selected via update-alternatives, so we cover both. INTEGRATION
+# / DEV IMAGE ONLY — never apply to production images.
+RUN setcap CAP_NET_ADMIN,CAP_NET_RAW+ep /usr/sbin/xtables-nft-multi \
+ && setcap CAP_NET_ADMIN,CAP_NET_RAW+ep /usr/sbin/xtables-legacy-multi
 RUN install -d -o postgres -g postgres -m 0700 "$PGDATA"
 
 USER postgres
