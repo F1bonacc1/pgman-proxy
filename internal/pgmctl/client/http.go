@@ -164,6 +164,59 @@ func NewRequestID() string {
 	return strings.ToLower(ulid.Make().String())
 }
 
+// StreamSSE issues a long-lived GET that expects a `text/event-stream`
+// response and returns the live HTTP response so the caller can parse
+// SSE frames. The caller MUST `defer resp.Body.Close()`.
+//
+// Distinct from GetJSON because:
+//   - The 30s default per-request timeout would kill the stream; this
+//     method bypasses it (the context governs cancellation).
+//   - Auth + UA + cluster-pin remain identical to the JSON path.
+//   - Extra headers (Last-Event-ID / etc.) come through via the
+//     headers map.
+func (c *Client) StreamSSE(ctx context.Context, path string, headers map[string]string) (*http.Response, error) {
+	u, err := c.base.Parse(path)
+	if err != nil {
+		return nil, fmt.Errorf("parse path %q: %w", path, err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	tok, err := c.tokenSrc.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve bearer token: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("X-Request-Id", NewRequestID())
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	// Use a fresh client with no timeout — SSE streams live for the
+	// lifetime of ctx. We borrow the transport so TLS / CA configuration
+	// is identical.
+	cli := &http.Client{Transport: c.httpClient.Transport}
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, &NetworkError{Cause: err, Endpoint: u.String()}
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		resp.Body.Close()
+		return nil, &APIError{HTTPStatus: resp.StatusCode, Code: "auth_invalid", Message: "authentication failed"}
+	}
+	if resp.StatusCode == http.StatusNotAcceptable {
+		resp.Body.Close()
+		return nil, &APIError{HTTPStatus: resp.StatusCode, Code: "not_acceptable", Message: "server refused SSE — check that the endpoint supports /v1/watch/*"}
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, &APIError{HTTPStatus: resp.StatusCode, Code: "stream_open_failed", Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+	}
+	return resp, nil
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*Envelope, error) {
 	u, err := c.base.Parse(path)
 	if err != nil {

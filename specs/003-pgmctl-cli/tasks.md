@@ -197,24 +197,24 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 ### Server-side support for US4
 
-- [ ] T085 [US4] Implement `internal/control/handlers_watch.go` per `contracts/control-plane-extensions.md § 1`: paths `GET /v1/watch/status`, `/v1/watch/transitions`, `/v1/watch/events`, `/v1/watch/node/<id>`; SSE framing (`text/event-stream`); 15s keepalive cadence; `Last-Event-ID` resumption against the history stream
-- [ ] T086 [US4] Wire all four watch endpoints into `internal/control/route.go`; require `Accept: text/event-stream` (406 otherwise); bearer-auth inherited
-- [ ] T087 [US4] Implement gap-marker emission in `handlers_watch.go`: a JetStream subscription lag, quorum loss, or resume-window-exceeded condition emits a single `event: gap_marker` frame with a `reason` field
-- [ ] T088 [US4] Add metrics in `internal/obs/metrics.go`: `pgman_proxy_watch_streams_active{topic}` (gauge), `pgman_proxy_watch_events_emitted_total{topic,kind}` (counter), `pgman_proxy_watch_gaps_total{topic,reason}` (counter)
+- [X] T085 [US4] Implement `internal/control/handlers_watch.go` per `contracts/control-plane-extensions.md § 1`: paths `GET /v1/watch/status`, `/v1/watch/transitions`, `/v1/watch/events`, `/v1/watch/node/<id>`; SSE framing (`text/event-stream`); 15s keepalive cadence; `Last-Event-ID` resumption against the history stream
+- [X] T086 [US4] Wire all four watch endpoints into `internal/control/route.go`; require `Accept: text/event-stream` (406 otherwise); bearer-auth inherited
+- [X] T087 [US4] Implement gap-marker emission in `handlers_watch.go`: a JetStream subscription lag, quorum loss, or resume-window-exceeded condition emits a single `event: gap_marker` frame with a `reason` field
+- [X] T088 [US4] Add metrics in `internal/obs/metrics.go`: `pgman_proxy_watch_streams_active{topic}` (gauge), `pgman_proxy_watch_events_emitted_total{topic,kind}` (counter), `pgman_proxy_watch_gaps_total{topic,reason}` (counter)
 
 ### Tests for User Story 4
 
-- [ ] T089 [P] [US4] Contract test `tests/contract/watch_sse_test.go`: each topic emits valid SSE; `Last-Event-ID` resumption returns events strictly after that id; `:keepalive` cadence ≈ 15s
-- [ ] T090 [P] [US4] Contract test `tests/contract/watch_gap_marker_test.go`: induce subscription lag → `event: gap_marker` arrives with documented `reason` value
+- [X] T089 [P] [US4] Contract test `tests/contract/watch_sse_test.go`: each topic emits valid SSE; `Last-Event-ID` resumption returns events strictly after that id; `:keepalive` cadence ≈ 15s
+- [X] T090 [P] [US4] Contract test `tests/contract/watch_gap_marker_test.go`: induce subscription lag → `event: gap_marker` arrives with documented `reason` value
 - [ ] T091 [P] [US4] Integration test `tests/integration/pgmctl/watch_status_redraw_test.go`: trigger a state transition; assert pgmctl redraws within 1s p95 (SC-009)
-- [ ] T092 [P] [US4] Integration test `tests/integration/pgmctl/watch_reconnect_test.go`: drop SSE mid-stream; pgmctl reconnects with exponential backoff; gap marker line is rendered; max-reconnect ceiling produces non-zero exit
+- [X] T092 [P] [US4] Integration test `tests/integration/pgmctl/watch_reconnect_test.go`: drop SSE mid-stream; pgmctl reconnects with exponential backoff; gap marker line is rendered; max-reconnect ceiling produces non-zero exit
 
 ### Implementation for User Story 4
 
-- [ ] T093 [P] [US4] Implement `internal/pgmctl/watch/status.go`: differential cell-redraw using raw ANSI cursor escapes (RD-010); fixed line layout for cluster summary + peer table; full repaint on SIGWINCH
-- [ ] T094 [P] [US4] Implement `internal/pgmctl/watch/append.go`: append-only renderer for `transitions`, `events`, `node` topics; one new line per event; highlighted gap-marker divider
-- [ ] T095 [P] [US4] Implement `internal/pgmctl/watch/reconnect.go`: exponential backoff (250ms base, factor 2, cap 10s, max 30 attempts); surfaces reconnect attempts on a status bar line (depends on T026)
-- [ ] T096 [US4] Implement `internal/pgmctl/cmd/watch.go`: cobra subtree `watch status|transitions|events|node <id>`; rejects `--output json/yaml` for watch (use `events --since 0` instead); Ctrl-C exits cleanly with code 0 (depends on T093, T094, T095)
+- [X] T093 [P] [US4] Implement `internal/pgmctl/watch/status.go`: differential cell-redraw using raw ANSI cursor escapes (RD-010); fixed line layout for cluster summary + peer table; full repaint on SIGWINCH
+- [X] T094 [P] [US4] Implement `internal/pgmctl/watch/append.go`: append-only renderer for `transitions`, `events`, `node` topics; one new line per event; highlighted gap-marker divider
+- [X] T095 [P] [US4] Implement `internal/pgmctl/watch/reconnect.go`: exponential backoff (250ms base, factor 2, cap 10s, max 30 attempts); surfaces reconnect attempts on a status bar line (depends on T026)
+- [X] T096 [US4] Implement `internal/pgmctl/cmd/watch.go`: cobra subtree `watch status|transitions|events|node <id>`; rejects `--output json/yaml` for watch (use `events --since 0` instead); Ctrl-C exits cleanly with code 0 (depends on T093, T094, T095)
 
 **Checkpoint**: US4 ships independently — operators have a live watch surface for status / transitions / events / per-node, with bounded redraw latency and graceful drop recovery.
 

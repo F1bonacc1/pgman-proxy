@@ -49,6 +49,11 @@ type MetricSet struct {
 	EmbeddedNATSLifecycleEventsTotal *prometheus.CounterVec
 	EmbeddedNATSRouteAuthFailures    *prometheus.CounterVec
 	EmbeddedNATSReloadOutcomes       *prometheus.CounterVec
+
+	// Watch SSE metrics (feature 003 T088 / contracts/control-plane-extensions.md § 1).
+	WatchStreamsActive      *prometheus.GaugeVec
+	WatchEventsEmittedTotal *prometheus.CounterVec
+	WatchGapsTotal          *prometheus.CounterVec
 }
 
 // latencyBuckets is the histogram bucket set used for latency-shaped
@@ -187,6 +192,20 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		ConstLabels: constLabels,
 	}, []string{"result"})
 
+	// Watch SSE metrics (T088).
+	m.WatchStreamsActive = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pgman_proxy_watch_streams_active", Help: "Currently-open SSE watch subscriptions, by topic.",
+		ConstLabels: constLabels,
+	}, []string{"topic"})
+	m.WatchEventsEmittedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pgman_proxy_watch_events_emitted_total", Help: "SSE frames written to clients, by topic and frame kind.",
+		ConstLabels: constLabels,
+	}, []string{"topic", "kind"})
+	m.WatchGapsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pgman_proxy_watch_gaps_total", Help: "gap_marker frames emitted, by topic and reason.",
+		ConstLabels: constLabels,
+	}, []string{"topic", "reason"})
+
 	reg.MustRegister(
 		m.ConnectionsOpen, m.ConnectionsAcceptedTot, m.ConnectionsClosedTot, m.ConnectionDuration,
 		m.QueryLatency, m.ErrorsTotal,
@@ -197,6 +216,7 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		m.EmbeddedNATSUp, m.EmbeddedNATSRoutesMeshed, m.EmbeddedNATSReplicasFactor,
 		m.EmbeddedNATSStorageBytes, m.EmbeddedNATSStorageDegraded,
 		m.EmbeddedNATSLifecycleEventsTotal, m.EmbeddedNATSRouteAuthFailures, m.EmbeddedNATSReloadOutcomes,
+		m.WatchStreamsActive, m.WatchEventsEmittedTotal, m.WatchGapsTotal,
 	)
 	return m
 }

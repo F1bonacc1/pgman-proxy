@@ -330,6 +330,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// import internal/history directly (it stays infrastructure-free), so
 	// we hand it a closure that captures the live JetStream context.
 	historyQuerier := &historyRunner{js: js, clusterID: cfg.Cluster.ID}
+	historyWatcher := &watchSubscriber{w: history.NewWatcher(js, cfg.Cluster.ID)}
 
 	// Gate #8: Data-plane listener bind probe — best-effort up-front so
 	// startup fails on EADDRINUSE before pg-manager kicks off background
@@ -371,7 +372,10 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			Aggregator: statusAgg,
 			// Feature 003: GET /v1/history backed by the cluster's
 			// JetStream history stream (FR-016a).
-			History:   historyQuerier,
+			History: historyQuerier,
+			// Feature 003: /v1/watch/* SSE handlers subscribe to the
+			// cluster's history JetStream via this watcher.
+			Watch:     historyWatcher,
 			ClusterID: cfg.Cluster.ID,
 			NodeID:    cfg.Node.ID,
 		})

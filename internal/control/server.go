@@ -69,6 +69,12 @@ type Server struct {
 	// paths, or hosts that have not wired the embedded NATS substrate).
 	aggregator PeerAggregator
 
+	// Feature 003: optional live history subscriber backing the
+	// /v1/watch/* SSE endpoints. When nil the watch handlers fall back
+	// to keepalive-only streams so single-peer test paths still answer
+	// 200 OK.
+	watch WatchSubscriber
+
 	clusterID string
 	nodeID    string
 
@@ -113,6 +119,12 @@ type Config struct {
 	// per-peer scalar snapshot pg-manager returns.
 	Aggregator PeerAggregator
 
+	// Watch is an optional live history subscriber backing the
+	// /v1/watch/* SSE endpoints (feature 003 / contracts/control-plane-
+	// extensions.md § 1). When nil, the watch handlers degrade to
+	// keepalive-only streams.
+	Watch WatchSubscriber
+
 	ClusterID string
 	NodeID    string
 }
@@ -143,6 +155,7 @@ func NewServer(cfg Config) (*Server, error) {
 		embeddedSnapshot: cfg.EmbeddedSnapshot,
 		history:          cfg.History,
 		aggregator:       cfg.Aggregator,
+		watch:            cfg.Watch,
 		clusterID:        cfg.ClusterID,
 		nodeID:           cfg.NodeID,
 		ulidEntropy:      newULIDEntropy(),
@@ -194,6 +207,16 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/doctor/checks", s.wrap("DoctorChecks", false, false, s.handleDoctorChecks))
 	mux.Handle("POST /v1/doctor/run", s.wrap("DoctorRun", false, false, s.handleDoctorRun))
 	mux.Handle("POST /v1/doctor/fix", s.wrap("DoctorFix", true, false, s.handleDoctorFix))
+
+	// Watch SSE endpoints (003 / contracts/control-plane-extensions.md § 1).
+	// All four are reads — auth gated by allow_unauth_reads. Accept
+	// header enforcement happens inside the handler (after the wrap()
+	// middleware has set request-id headers so a 406 response still
+	// carries a correlation id).
+	mux.Handle("GET /v1/watch/status", s.wrap("WatchStatus", false, false, s.handleWatchStatus))
+	mux.Handle("GET /v1/watch/transitions", s.wrap("WatchTransitions", false, false, s.handleWatchTransitions))
+	mux.Handle("GET /v1/watch/events", s.wrap("WatchEvents", false, false, s.handleWatchEvents))
+	mux.Handle("GET /v1/watch/node/{id}", s.wrap("WatchNode", false, false, s.handleWatchNode))
 
 	return mux
 }

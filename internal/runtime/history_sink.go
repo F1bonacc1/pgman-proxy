@@ -37,3 +37,15 @@ type historyRunner struct {
 func (r *historyRunner) Query(ctx context.Context, q history.Query) (history.Result, error) {
 	return history.Run(ctx, r.js, r.clusterID, q)
 }
+
+// watchSubscriber adapts a (*history.Watcher) to control.WatchSubscriber.
+// Keeping it separate from historyRunner so callers can swap the Watch
+// path independently (e.g., tests that want a faked stream).
+type watchSubscriber struct {
+	w *history.Watcher
+}
+
+// Watch implements control.WatchSubscriber.
+func (s *watchSubscriber) Watch(ctx context.Context, opts history.WatchOptions) (<-chan history.HistoryEvent, <-chan error) {
+	return s.w.Watch(ctx, opts)
+}
