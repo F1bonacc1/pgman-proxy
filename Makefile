@@ -23,7 +23,7 @@ PKG         := github.com/f1bonacc1/pgman-proxy/cmd/pgman-proxy
 PGMCTL_BIN  ?= bin/pgmctl
 PGMCTL_PKG  := github.com/f1bonacc1/pgman-proxy/cmd/pgmctl
 
-.PHONY: all build pgmctl test lint integration smoke release pgmctl-release clean grep-gates
+.PHONY: all build pgmctl pgmctl-docs test lint integration smoke release pgmctl-release clean grep-gates
 
 all: lint test build pgmctl grep-gates
 
@@ -34,6 +34,12 @@ build:
 pgmctl:
 	mkdir -p bin
 	$(GO) build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(PGMCTL_BIN) $(PGMCTL_PKG)
+
+# pgmctl-docs: regenerate the per-command reference markdown and the
+# groff(1) man pages from the live cobra command tree. Run after
+# any change to the command tree, flag set, or help text. Idempotent.
+pgmctl-docs:
+	$(GO) run ./cmd/pgmctl-docs --reference docs/pgmctl/reference --man docs/pgmctl/man
 
 # Cross-compile pgmctl for the v1 release matrix per research.md RD-012.
 pgmctl-release:

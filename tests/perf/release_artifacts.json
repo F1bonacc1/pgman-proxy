@@ -1,0 +1,57 @@
+{
+  "task": "T137_T138",
+  "title": "Multi-arch release dry-run + SHA-256 verification",
+  "version": "v1.0.0-rc1",
+  "artifacts": [
+    {
+      "target": "linux-amd64",
+      "binary_kb": 9536,
+      "tar_gz_kb": 3792,
+      "checksum_verified": true,
+      "elf_static": true,
+      "smoke_version": "PASS",
+      "smoke_help": "PASS"
+    },
+    {
+      "target": "linux-arm64",
+      "binary_kb": 9216,
+      "tar_gz_kb": 3408,
+      "checksum_verified": true,
+      "elf_static": true,
+      "smoke_version": "DEFERRED (no arm64 emulation in CI)",
+      "smoke_help": "DEFERRED"
+    },
+    {
+      "target": "darwin-amd64",
+      "binary_kb": 9536,
+      "tar_gz_kb": 3840,
+      "checksum_verified": true,
+      "macho_pie": true,
+      "smoke_version": "DEFERRED (no macOS host)",
+      "smoke_help": "DEFERRED"
+    },
+    {
+      "target": "darwin-arm64",
+      "binary_kb": 8704,
+      "tar_gz_kb": 3525,
+      "checksum_verified": true,
+      "macho_pie": true,
+      "smoke_version": "DEFERRED (no macOS host)",
+      "smoke_help": "DEFERRED"
+    }
+  ],
+  "checksums": {
+    "algorithm": "sha256",
+    "all_verified_in_dist": true,
+    "verification_cmd": "(cd dist && sha256sum -c pgmctl-*.tar.gz.sha256)"
+  },
+  "signing": {
+    "tool": "cosign",
+    "available_on_host": false,
+    "status": "deferred \u2014 host has no cosign installed; CI release pipeline owns signing"
+  },
+  "verdict_build": "PASS",
+  "verdict_checksums": "PASS",
+  "verdict_signing": "DEFERRED",
+  "recorded_at": "2026-05-15T11:27:15.486677+00:00"
+}

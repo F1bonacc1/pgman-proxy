@@ -1,0 +1,108 @@
+.nh
+.TH "PGMCTL" "1" "May 2026" "pgman-proxy" "pgmctl Manual"
+
+.SH NAME
+pgmctl-config-set-context - Create or update a named context
+
+
+.SH SYNOPSIS
+\fBpgmctl config set-context  [flags]\fP
+
+
+.SH DESCRIPTION
+Create a new context, or update the named context in place.
+
+.PP
+Credentials: exactly one of --token-env, --token-file, or --token-command
+must be supplied. Plaintext tokens are NEVER accepted on the flag list —
+that's a deliberate non-feature to keep secrets out of shell history.
+
+
+.SH OPTIONS
+\fB--endpoint\fP=""
+	Control-plane URL (https://host:port)
+
+.PP
+\fB--expected-cluster\fP=""
+	Cluster id pinned to this context
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for set-context
+
+.PP
+\fB--insecure-skip-tls-verify\fP[=false]
+	Disable TLS verification for this context
+
+.PP
+\fB--tls-ca-file\fP=""
+	TLS trust anchor PEM bundle
+
+.PP
+\fB--tls-server-name\fP=""
+	TLS SNI server name override
+
+.PP
+\fB--token-command\fP=[]
+	Command whose stdout is the bearer token (repeatable for argv parts)
+
+.PP
+\fB--token-env\fP=""
+	Env var name holding the bearer token
+
+.PP
+\fB--token-file\fP=""
+	File path holding the bearer token
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--cluster\fP=""
+	Expected cluster id; pinned before any cluster-affecting op
+
+.PP
+\fB--config\fP=""
+	Path to pgmctl config (overrides $XDG_CONFIG_HOME/pgmctl/config.yaml)
+
+.PP
+\fB--context\fP=""
+	Configured context name
+
+.PP
+\fB--force\fP[=false]
+	Skip cluster-name confirmation (requires --cluster )
+
+.PP
+\fB--insecure-skip-version-check\fP[=false]
+	Proceed despite minor / major version skew
+
+.PP
+\fB--no-color\fP[=false]
+	Suppress ANSI escapes unconditionally
+
+.PP
+\fB-o\fP, \fB--output\fP="table"
+	Output format (table, json, yaml, wide)
+
+.PP
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress non-essential output
+
+.PP
+\fB--strict\fP[=false]
+	Treat WARN as non-zero exit
+
+.PP
+\fB--timeout\fP=10s
+	Overall command timeout
+
+.PP
+\fB-v\fP, \fB--verbose\fP[=0]
+	Increase verbosity (-v / -vv / -vvv)
+
+.PP
+\fB-y\fP, \fB--yes\fP[=false]
+	Skip single-resource confirmation prompts
+
+
+.SH SEE ALSO
+\fBpgmctl-config(1)\fP

@@ -1,0 +1,95 @@
+.nh
+.TH "PGMCTL" "1" "May 2026" "pgman-proxy" "pgmctl Manual"
+
+.SH NAME
+pgmctl-watch - Live views of cluster state via Server-Sent Events
+
+
+.SH SYNOPSIS
+\fBpgmctl watch [flags]\fP
+
+
+.SH DESCRIPTION
+Subscribe to the cluster control plane's /v1/watch/* SSE endpoints
+and render a live view that updates as state changes.
+
+.PP
+Subcommands:
+  status        Fixed-line cluster summary, redrawn on every change.
+  transitions   Append-only state-transition log.
+  events        Append-only history-event log (filterable).
+  node      Append-only stream of one node's events.
+
+.PP
+Watch streams reconnect automatically with exponential backoff. A
+gap_marker line indicates the stream may have missed events.
+
+.PP
+For machine-readable consumption use 'pgmctl events --since 0' instead
+of redirecting watch output; -o json/yaml is rejected here.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for watch
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--cluster\fP=""
+	Expected cluster id; pinned before any cluster-affecting op
+
+.PP
+\fB--config\fP=""
+	Path to pgmctl config (overrides $XDG_CONFIG_HOME/pgmctl/config.yaml)
+
+.PP
+\fB--context\fP=""
+	Configured context name
+
+.PP
+\fB--endpoint\fP=""
+	Single-shot pgman-proxy endpoint override
+
+.PP
+\fB--force\fP[=false]
+	Skip cluster-name confirmation (requires --cluster )
+
+.PP
+\fB--insecure-skip-tls-verify\fP[=false]
+	Disable TLS verification (warned)
+
+.PP
+\fB--insecure-skip-version-check\fP[=false]
+	Proceed despite minor / major version skew
+
+.PP
+\fB--no-color\fP[=false]
+	Suppress ANSI escapes unconditionally
+
+.PP
+\fB-o\fP, \fB--output\fP="table"
+	Output format (table, json, yaml, wide)
+
+.PP
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress non-essential output
+
+.PP
+\fB--strict\fP[=false]
+	Treat WARN as non-zero exit
+
+.PP
+\fB--timeout\fP=10s
+	Overall command timeout
+
+.PP
+\fB-v\fP, \fB--verbose\fP[=0]
+	Increase verbosity (-v / -vv / -vvv)
+
+.PP
+\fB-y\fP, \fB--yes\fP[=false]
+	Skip single-resource confirmation prompts
+
+
+.SH SEE ALSO
+\fBpgmctl(1)\fP, \fBpgmctl-watch-events(1)\fP, \fBpgmctl-watch-node(1)\fP, \fBpgmctl-watch-status(1)\fP, \fBpgmctl-watch-transitions(1)\fP

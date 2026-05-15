@@ -1,0 +1,105 @@
+.nh
+.TH "PGMCTL" "1" "May 2026" "pgman-proxy" "pgmctl Manual"
+
+.SH NAME
+pgmctl-dump - Capture every slice into a single tar.gz / tar artifact
+
+
+.SH SYNOPSIS
+\fBpgmctl dump [flags]\fP
+
+
+.SH DESCRIPTION
+Captures cluster-wide state in parallel — status, topology, history
+events + audit, doctor (when implemented), clock-skew, config — and writes
+a single tar archive at --output. Use --output - to stream raw tar to
+stdout (compression off).
+
+.PP
+Per-slice failures don't fail the dump: each slice is recorded in
+manifest.json with an outcome (ok|failed). The command exits 0 when every
+slice succeeded and 3 (EX_PARTIAL) when at least one slice failed (FR-037).
+
+.PP
+Exit codes:
+  0   clean dump
+  3   one or more slices failed (manifest documents the gap)
+  124 outer command timeout
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for dump
+
+.PP
+\fB--output\fP=""
+	Output path; '-' streams raw tar to stdout
+
+.PP
+\fB--per-slice-timeout\fP=10s
+	Per-slice fetch timeout
+
+.PP
+\fB--redact-level\fP="normal"
+	Redaction level: normal|strict
+
+.PP
+\fB--since\fP=0s
+	Time window for history slices (e.g. 30m, 24h); empty = server default
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--cluster\fP=""
+	Expected cluster id; pinned before any cluster-affecting op
+
+.PP
+\fB--config\fP=""
+	Path to pgmctl config (overrides $XDG_CONFIG_HOME/pgmctl/config.yaml)
+
+.PP
+\fB--context\fP=""
+	Configured context name
+
+.PP
+\fB--endpoint\fP=""
+	Single-shot pgman-proxy endpoint override
+
+.PP
+\fB--force\fP[=false]
+	Skip cluster-name confirmation (requires --cluster )
+
+.PP
+\fB--insecure-skip-tls-verify\fP[=false]
+	Disable TLS verification (warned)
+
+.PP
+\fB--insecure-skip-version-check\fP[=false]
+	Proceed despite minor / major version skew
+
+.PP
+\fB--no-color\fP[=false]
+	Suppress ANSI escapes unconditionally
+
+.PP
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress non-essential output
+
+.PP
+\fB--strict\fP[=false]
+	Treat WARN as non-zero exit
+
+.PP
+\fB--timeout\fP=10s
+	Overall command timeout
+
+.PP
+\fB-v\fP, \fB--verbose\fP[=0]
+	Increase verbosity (-v / -vv / -vvv)
+
+.PP
+\fB-y\fP, \fB--yes\fP[=false]
+	Skip single-resource confirmation prompts
+
+
+.SH SEE ALSO
+\fBpgmctl(1)\fP

@@ -1,0 +1,31 @@
+{
+  "fixture": "tpr",
+  "n_checks": 8,
+  "expected_fail": [
+    "nodes.no-failed-state",
+    "postgres.responding"
+  ],
+  "tp": 2,
+  "fn": 0,
+  "fp": 0,
+  "tn": 6,
+  "tpr": 1.0,
+  "fpr": 0.0,
+  "verdict_tpr": "PASS",
+  "verdict_fpr": "PASS",
+  "names": [
+    "cluster.has-primary",
+    "cluster.has-leader",
+    "cluster.quorum",
+    "nodes.all-reachable",
+    "nodes.no-failed-state",
+    "postgres.responding",
+    "replication.lag-acceptable",
+    "engine.diagnose-clean"
+  ],
+  "fail_names_observed": [
+    "nodes.no-failed-state",
+    "postgres.responding"
+  ],
+  "recorded_at": "2026-05-15T11:20:59.408008+00:00"
+}

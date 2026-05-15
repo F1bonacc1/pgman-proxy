@@ -1,0 +1,16 @@
+{
+  "sc": "SC-009",
+  "bar_ms": 1000,
+  "n": 20,
+  "p50_ms": 0.6244182586669922,
+  "p95_ms": 0.9021759033203125,
+  "p99_ms": 0.9191036224365234,
+  "min_ms": 0.5326271057128906,
+  "max_ms": 0.9191036224365234,
+  "verdict": "PASS",
+  "recorded_at": "2026-05-15T11:19:27.309315+00:00",
+  "endpoint": "http://127.0.0.1:19191",
+  "fixture": "process-compose.yaml 3-peer rig, node-b failed (2/3 healthy)",
+  "binary": "./bin/pgmctl (SSE via curl)",
+  "note": "delta_ms = local_receipt_time - server_event_time; clock skew is part of the measured value (local clock vs server clock are both this host)."
+}

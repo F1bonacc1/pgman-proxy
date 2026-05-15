@@ -1,0 +1,35 @@
+{
+  "sc": "SC-010",
+  "checks_implemented_v1": 8,
+  "checks_specified_total": 18,
+  "fixtures": {
+    "stalled_standby": {
+      "verdict_tpr": "PASS",
+      "tpr": 1.0,
+      "verdict_fpr": "PASS",
+      "fpr": 0.0,
+      "tp": 2,
+      "fn": 0,
+      "fp": 0,
+      "tn": 6
+    }
+  },
+  "bars": {
+    "tpr_min": 0.9,
+    "fpr_max": 0.05
+  },
+  "summary": {
+    "tpr_overall": 1.0,
+    "fpr_overall": 0.0,
+    "verdict_tpr": "PASS",
+    "verdict_fpr": "PASS"
+  },
+  "notes": [
+    "v1 implements 8/18 checks per FR-022; remaining 10 are deferred per MISSING_CHECKS in internal/control/doctor_checks.go",
+    "TPR fixture: rig with node-b in failed state \u2014 corresponds to spec's 'stalled standby' / 'failed peer' fixture variants",
+    "FPR baseline measured negatively from same fixture: 6 unrelated checks all returned PASS (0 false positives)",
+    "A dedicated all-healthy baseline measurement requires recovering node-b, which auto-mode blocks pending operator authorization",
+    "Failure-mode fixtures from spec NOT yet exercised: orphaned slot, lingering fence, disk-fill, clock-skew, version-mismatch \u2014 deferred to milestone follow-up since the v1 implemented checks don't cover those signals"
+  ],
+  "recorded_at": "2026-05-15T11:21:38.243488+00:00"
+}

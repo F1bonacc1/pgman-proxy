@@ -1,0 +1,111 @@
+.nh
+.TH "PGMCTL" "1" "May 2026" "pgman-proxy" "pgmctl Manual"
+
+.SH NAME
+pgmctl-events - Tail the cluster's event history
+
+
+.SH SYNOPSIS
+\fBpgmctl events [flags]\fP
+
+
+.SH DESCRIPTION
+Stream the cluster's event history from the JetStream-backed
+history stream (feature 003 FR-016a) via GET /v1/history.
+
+.PP
+Defaults: --since 30m, --limit 1000.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	Resume from after this event id (ULID)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for events
+
+.PP
+\fB--limit\fP=1000
+	Maximum number of events to return
+
+.PP
+\fB--list-types\fP[=false]
+	Show the distinct event types observed in the window (with counts + last-seen)
+
+.PP
+\fB--node\fP=[]
+	Filter to specific node ids (repeatable)
+
+.PP
+\fB--since\fP=30m0s
+	Only show events newer than this duration (e.g. 5m, 24h)
+
+.PP
+\fB--type\fP=[]
+	Filter to specific event types (repeatable)
+
+.PP
+\fB--until\fP=""
+	Only show events older than this RFC3339 timestamp
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--cluster\fP=""
+	Expected cluster id; pinned before any cluster-affecting op
+
+.PP
+\fB--config\fP=""
+	Path to pgmctl config (overrides $XDG_CONFIG_HOME/pgmctl/config.yaml)
+
+.PP
+\fB--context\fP=""
+	Configured context name
+
+.PP
+\fB--endpoint\fP=""
+	Single-shot pgman-proxy endpoint override
+
+.PP
+\fB--force\fP[=false]
+	Skip cluster-name confirmation (requires --cluster )
+
+.PP
+\fB--insecure-skip-tls-verify\fP[=false]
+	Disable TLS verification (warned)
+
+.PP
+\fB--insecure-skip-version-check\fP[=false]
+	Proceed despite minor / major version skew
+
+.PP
+\fB--no-color\fP[=false]
+	Suppress ANSI escapes unconditionally
+
+.PP
+\fB-o\fP, \fB--output\fP="table"
+	Output format (table, json, yaml, wide)
+
+.PP
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress non-essential output
+
+.PP
+\fB--strict\fP[=false]
+	Treat WARN as non-zero exit
+
+.PP
+\fB--timeout\fP=10s
+	Overall command timeout
+
+.PP
+\fB-v\fP, \fB--verbose\fP[=0]
+	Increase verbosity (-v / -vv / -vvv)
+
+.PP
+\fB-y\fP, \fB--yes\fP[=false]
+	Skip single-resource confirmation prompts
+
+
+.SH SEE ALSO
+\fBpgmctl(1)\fP

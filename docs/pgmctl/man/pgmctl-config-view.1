@@ -1,0 +1,86 @@
+.nh
+.TH "PGMCTL" "1" "May 2026" "pgman-proxy" "pgmctl Manual"
+
+.SH NAME
+pgmctl-config-view - Render the active configuration with secrets redacted
+
+
+.SH SYNOPSIS
+\fBpgmctl config view [flags]\fP
+
+
+.SH DESCRIPTION
+Print the configuration file as YAML. Secret source references
+(token files, token commands, env var names) are shown verbatim because
+they are NOT the secret values themselves. To intentionally surface the
+actual token contents, pass --show-secrets — refused in non-TTY contexts.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for view
+
+.PP
+\fB--show-secrets\fP[=false]
+	Reveal token values inline (refused in non-TTY contexts)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--cluster\fP=""
+	Expected cluster id; pinned before any cluster-affecting op
+
+.PP
+\fB--config\fP=""
+	Path to pgmctl config (overrides $XDG_CONFIG_HOME/pgmctl/config.yaml)
+
+.PP
+\fB--context\fP=""
+	Configured context name
+
+.PP
+\fB--endpoint\fP=""
+	Single-shot pgman-proxy endpoint override
+
+.PP
+\fB--force\fP[=false]
+	Skip cluster-name confirmation (requires --cluster )
+
+.PP
+\fB--insecure-skip-tls-verify\fP[=false]
+	Disable TLS verification (warned)
+
+.PP
+\fB--insecure-skip-version-check\fP[=false]
+	Proceed despite minor / major version skew
+
+.PP
+\fB--no-color\fP[=false]
+	Suppress ANSI escapes unconditionally
+
+.PP
+\fB-o\fP, \fB--output\fP="table"
+	Output format (table, json, yaml, wide)
+
+.PP
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress non-essential output
+
+.PP
+\fB--strict\fP[=false]
+	Treat WARN as non-zero exit
+
+.PP
+\fB--timeout\fP=10s
+	Overall command timeout
+
+.PP
+\fB-v\fP, \fB--verbose\fP[=0]
+	Increase verbosity (-v / -vv / -vvv)
+
+.PP
+\fB-y\fP, \fB--yes\fP[=false]
+	Skip single-resource confirmation prompts
+
+
+.SH SEE ALSO
+\fBpgmctl-config(1)\fP

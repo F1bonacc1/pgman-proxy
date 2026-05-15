@@ -291,20 +291,20 @@ Single Go module rooted at `github.com/f1bonacc1/pgman-proxy`. CLI lives under `
 
 **Purpose**: Cross-cutting improvements that benefit every story.
 
-- [ ] T126 [P] Documentation: `docs/pgmctl/reference/` — one `.md` per subcommand with synopsis, flags, exit codes, examples (sourced from `contracts/cli-commands.md`)
-- [ ] T127 [P] Documentation: `docs/pgmctl/man/pgmctl.1` — top-level groff man page; built from the cobra command tree via `cobra --doc=man`
-- [ ] T128 [P] Documentation: update `README.md` (root) with a "pgmctl" section that points at `quickstart.md` and the install instructions
-- [ ] T129 [P] Documentation: add a `CHANGELOG.md` entry under `v1.0.0` (or the next unreleased version) covering the five new server-side endpoints, the `Manager.RestartPostgres` upstream pin bump, and the kubeconfig-style config format
-- [ ] T130 [P] Performance audit: measure `pgmctl status` p95 against a 3-peer fixture; assert SC-002 (≤ 1.5s); record in `tests/perf/pgmctl_status_baseline.json`
-- [ ] T131 [P] Performance audit: measure `pgmctl dump` p95 against a healthy 3-peer fixture; assert SC-003 (≤ 15s, artifact < 10 MiB)
-- [ ] T132 [P] Performance audit: measure `pgmctl watch status` p95 redraw + idle CPU; assert SC-009 (≤ 1s redraw, < 1% one-core idle)
-- [ ] T133 [P] Doctor TPR/FPR audit: run the v1 failure-mode fixture set + a healthy baseline; assert SC-010 (TPR ≥ 90%, FPR ≤ 5%)
-- [ ] T134 Security audit: grep the repo for any path that emits the bearer token; assert FR-009 holds across status / dump / verbose / trace
-- [ ] T135 Security audit: assert `--print-config`-style outputs continue to redact secrets at every level; assert strict-redact removes hosts/IPs/node-ids in the dump artifact
-- [ ] T136 [P] Run `quickstart.md` end-to-end against a fresh 3-peer fixture and a fresh kubeconfig; confirm every command in the quickstart produces the documented output
-- [ ] T137 [P] Build-and-release dry run: tag a pre-release; trigger `make pgmctl-release`; smoke-test each artifact (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) by running `pgmctl version` and `pgmctl --help` in a clean container/VM
-- [ ] T138 [P] Signing: produce SHA-256 checksums for every release artifact; verify the existing release workflow attaches them (cosign-signed bundle if release infra supports it)
-- [ ] T139 Final integration sweep: run the full `tests/integration/pgmctl/` suite end-to-end against the existing process-compose fixture cluster; investigate and resolve any flakes
+- [X] T126 [P] Documentation: `docs/pgmctl/reference/` — one `.md` per subcommand with synopsis, flags, exit codes, examples (sourced from `contracts/cli-commands.md`)
+- [X] T127 [P] Documentation: `docs/pgmctl/man/pgmctl.1` — top-level groff man page; built from the cobra command tree via `cobra --doc=man`
+- [X] T128 [P] Documentation: update `README.md` (root) with a "pgmctl" section that points at `quickstart.md` and the install instructions
+- [X] T129 [P] Documentation: add a `CHANGELOG.md` entry under `v1.0.0` (or the next unreleased version) covering the five new server-side endpoints, the `Manager.RestartPostgres` upstream pin bump, and the kubeconfig-style config format
+- [X] T130 [P] Performance audit: measure `pgmctl status` p95 against a 3-peer fixture; assert SC-002 (≤ 1.5s); record in `tests/perf/pgmctl_status_baseline.json`
+- [X] T131 [P] Performance audit: measure `pgmctl dump` p95 against a healthy 3-peer fixture; assert SC-003 (≤ 15s, artifact < 10 MiB)
+- [X] T132 [P] Performance audit: measure `pgmctl watch status` p95 redraw + idle CPU; assert SC-009 (≤ 1s redraw, < 1% one-core idle)
+- [X] T133 [P] Doctor TPR/FPR audit: run the v1 failure-mode fixture set + a healthy baseline; assert SC-010 (TPR ≥ 90%, FPR ≤ 5%)
+- [X] T134 Security audit: grep the repo for any path that emits the bearer token; assert FR-009 holds across status / dump / verbose / trace
+- [X] T135 Security audit: assert `--print-config`-style outputs continue to redact secrets at every level; assert strict-redact removes hosts/IPs/node-ids in the dump artifact
+- [X] T136 [P] Run `quickstart.md` end-to-end against a fresh 3-peer fixture and a fresh kubeconfig; confirm every command in the quickstart produces the documented output
+- [X] T137 [P] Build-and-release dry run: tag a pre-release; trigger `make pgmctl-release`; smoke-test each artifact (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) by running `pgmctl version` and `pgmctl --help` in a clean container/VM
+- [X] T138 [P] Signing: produce SHA-256 checksums for every release artifact; verify the existing release workflow attaches them (cosign-signed bundle if release infra supports it)
+- [X] T139 Final integration sweep: run the full `tests/integration/pgmctl/` suite end-to-end against the existing process-compose fixture cluster; investigate and resolve any flakes
 
 **Checkpoint**: Release-ready. Quickstart validates; performance bars met; security audit clean; docs and manpages published; release artifacts smoke-tested.
 

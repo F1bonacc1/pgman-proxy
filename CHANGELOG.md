@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — feature 003 `pgmctl` operator CLI
+
+The operator CLI ships as a kubectl-style client. Single statically-
+linked Go binary; consumes only the documented `/v1/*` control plane
+and the embedded-NATS observability surface. Build with `make pgmctl`;
+regenerate docs with `make pgmctl-docs`.
+
+**Subcommands** (see `docs/pgmctl/reference/` for per-command pages):
+- Read: `status`, `health`, `topology`, `lag`, `get`, `list`, `describe`,
+  `events`, `dump`, `doctor`, `explain`, `watch`.
+- Mutating (single-resource, `[y/N]` prompt, `--yes` bypass):
+  `fence`, `unfence`, `set-config`.
+- Cluster-affecting (typed cluster-name confirmation, `--force --cluster <name>` bypass):
+  `failover`, `switchover`, `promote`, `restart`.
+
+**Server-side endpoints** added by 003 (all additive MINOR-version
+changes to the 001 contract; see `contracts/control-plane-extensions.md`):
+- `GET /v1/watch/{status,transitions,events,node/<id>}` — SSE
+  streams with 15s keepalive, `Last-Event-ID` resumption, and
+  `gap_marker` framing.
+- `GET /v1/doctor/checks` + `POST /v1/doctor/run` + `POST /v1/doctor/fix` —
+  eight v1 checks with severity, evidence, and an advisory-only
+  fix mode in v1.
+- `POST /v1/restart {target=postgres|proxy}` — local-mode restart;
+  `target=proxy` requires detected process supervisor or
+  `proxy.assume_supervised=true`.
+- `GET /v1/history` — JetStream-backed event + audit history with
+  `--since`, `--type`, `--node`, `--cursor`, `--list-types`.
+- `POST /v1/config/set` — SIGHUP-equivalent reload trigger,
+  restricted to a closed allow-list (`cluster.route_peers`,
+  `cluster.password`).
+
+**Upstream pin**: `github.com/f1bonacc1/pg-manager` now requires
+`Manager.RestartPostgres(ctx context.Context) error`. Wired via
+`replace ../pg-manager` during development; release builds MUST pin
+to the tagged release that ships the method.
+
+**Configuration**: pgmctl reads `$XDG_CONFIG_HOME/pgmctl/config.yaml`
+(mode `0600` required; loader refuses looser perms). Kubeconfig-style
+contexts; one active per invocation. Bearer token sources:
+`token-env`, `token-file`, `token-command`. New proxy-side config key
+`proxy.assume_supervised: bool` (default false) overrides supervisor-
+presence detection for `restart --target=proxy`.
+
+**Observability**: nine new Prometheus series under
+`pgman_proxy_watch_*`, `pgman_proxy_history_*`, and `pgman_proxy_fanout_*`.
+New structured-log events: `watch.stream_started`, `watch.stream_closed`,
+`proxy.supervisor_presence_detected`, `proxy.self_restart_initiated`,
+`proxy.history_stream_ready`, `proxy.leader_changed` (synthesized from
+state_transition; closes a pg-manager zombie-event gap pending
+upstream `B-010`).
+
+**Security invariants verified by test**:
+- FR-009 — bearer-token leak audit (`internal/control/auth_leak_test.go`):
+  token literal never appears in logs, response envelopes, or audit
+  records across accepted / refused / mutating / sink-failure paths.
+- FR-033 — strict-redact removes cluster id, node ids, hosts, IPs,
+  and embedded-NATS listen addrs from dump artifacts
+  (`internal/pgmctl/dump/redact_strict_test.go`).
+
 ### Fixed — v1 stability pass (SOAK-01 28k-row data loss)
 
 - **STAB-01 — stale-standby promotion (REQ-DL-01 violation)**: leader
