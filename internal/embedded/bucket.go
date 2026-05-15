@@ -135,9 +135,6 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 		return fmt.Errorf("read cluster KV bucket %q status: %w", name, err)
 	}
 	current := status.Config().Replicas
-	if current == replicas {
-		return nil
-	}
 	if current > replicas {
 		return fmt.Errorf(
 			"cluster KV bucket %q has Replicas=%d, target %d (would shrink — FR-011a / RD-004); "+
@@ -145,17 +142,64 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 			name, current, replicas,
 		)
 	}
-	if _, err := js.UpdateKeyValue(callCtx, jetstream.KeyValueConfig{
-		Bucket:   name,
-		History:  8,
-		Replicas: replicas,
-	}); err != nil {
-		return fmt.Errorf(
-			"upgrade cluster KV bucket %q Replicas %d -> %d: %w",
-			name, current, replicas, err,
-		)
+	if current < replicas {
+		if _, err := js.UpdateKeyValue(callCtx, jetstream.KeyValueConfig{
+			Bucket:   name,
+			History:  8,
+			Replicas: replicas,
+		}); err != nil {
+			return fmt.Errorf(
+				"upgrade cluster KV bucket %q Replicas %d -> %d: %w",
+				name, current, replicas, err,
+			)
+		}
+	}
+
+	// Force read-your-writes consistency by disabling AllowDirect on the
+	// underlying JetStream stream. `js.CreateKeyValue` hardcodes
+	// AllowDirect=true on the stream it provisions (nats.go v1.51.0,
+	// jetstream/kv.go:684), which routes KV Get requests to *any*
+	// replica via the `$JS.API.DIRECT.GET.*` subject — fast, but no
+	// read-your-writes guarantee (NATS KV docs explicitly note this).
+	//
+	// For coordination data (pg-manager leadership lease + failover
+	// quorum snapshot) we need stricter consistency: a survivor that
+	// polls the leader key must observe the current leader's just-
+	// committed renewal, not a lagging replica's older view. Without
+	// this, the Leadership tickOnce stale-observation counter
+	// (staleThreshold=3) flips on a *live* leader during a partition
+	// because the local replica is slow to receive the leader's CAS
+	// Update, producing false evictions and multi-tens-of-seconds of
+	// failover delay (chaos-rig RCA, 2026-05-16).
+	//
+	// Setting AllowDirect=false forces KV Gets through the stream
+	// leader (`$JS.API.STREAM.MSG.GET.*`) — strictly slower, but
+	// linearisable. Idempotent: skip the UpdateStream when the field
+	// already matches.
+	streamName := bucketStreamName(name)
+	stream, err := js.Stream(callCtx, streamName)
+	if err != nil {
+		return fmt.Errorf("fetch KV stream %q to tune AllowDirect: %w", streamName, err)
+	}
+	scfg := stream.CachedInfo().Config
+	if scfg.AllowDirect {
+		scfg.AllowDirect = false
+		if _, err := js.UpdateStream(callCtx, scfg); err != nil {
+			return fmt.Errorf("disable AllowDirect on KV stream %q: %w", streamName, err)
+		}
 	}
 	return nil
+}
+
+// bucketStreamName returns the JetStream stream name that backs a KV
+// bucket. Mirrors nats.go's kvBucketNameTmpl ("KV_%s"). Hard-coupled to
+// the SDK's naming convention by design — pgman-proxy needs to reach
+// underneath the KV abstraction to override AllowDirect, which the KV
+// config does not expose. If the SDK ever changes this template the
+// bucket-creation path here will start failing loudly (Stream lookup
+// returns ErrStreamNotFound), which is the surface we want.
+func bucketStreamName(bucket string) string {
+	return "KV_" + bucket
 }
 
 // OpenClusterKV returns a handle to the cluster KV bucket
