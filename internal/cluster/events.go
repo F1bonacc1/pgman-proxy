@@ -179,8 +179,57 @@ func handleCoordinationEvent(m *nats.Msg, selfNodeID string, logger *obs.Logger,
 			// Best-effort: a history-sink failure must NOT block the rest
 			// of the handler; the slog line above remains authoritative.
 			_, _ = historySink.PublishEvent(context.Background(), "event", evType, emitterNode, details)
+
+			// Synthesize `proxy.leader_changed` from state_transition
+			// records whose reason names a leadership edge. pg-manager
+			// declares LeaderChangedEvent + TopicLeaderChanged in
+			// observability/events.go but no production code emits
+			// them — they're zombie types. The same information lives
+			// in state_transition payloads (reason=became_leader /
+			// lost_leader), so we project it into a dedicated event
+			// type proxy-side. Operators querying for leadership edges
+			// get hits without having to know about the upstream gap.
+			if evType == "state_transition" {
+				if synth := synthesizeLeaderChange(payload); synth != nil {
+					synth["derived_from"] = "state_transition"
+					_, _ = historySink.PublishEvent(context.Background(), "event",
+						"proxy.leader_changed", emitterNode, synth)
+				}
+			}
 		}
 	}
+}
+
+// synthesizeLeaderChange returns a leader_changed details payload when
+// the input state_transition crosses a leadership edge. Returns nil
+// for transitions that aren't leadership-related, so callers can
+// branch cheaply.
+func synthesizeLeaderChange(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	reason, _ := payload["reason"].(string)
+	if reason != "became_leader" && reason != "lost_leader" {
+		return nil
+	}
+	nodeID, _ := payload["node_id"].(string)
+	out := map[string]any{
+		"reason":  reason,
+		"node_id": nodeID,
+	}
+	if term, ok := payload["term"]; ok {
+		out["term"] = term
+	}
+	if occurredAt, ok := payload["occurred_at"]; ok {
+		out["occurred_at"] = occurredAt
+	}
+	switch reason {
+	case "became_leader":
+		out["new_leader"] = nodeID
+	case "lost_leader":
+		out["old_leader"] = nodeID
+	}
+	return out
 }
 
 // subjectTail returns everything after the second dot in a subject of

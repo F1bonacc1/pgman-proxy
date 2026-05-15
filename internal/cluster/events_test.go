@@ -261,6 +261,62 @@ func TestHandleCoordinationEvent_MissingNodeIDPublishesAnyway(t *testing.T) {
 	}
 }
 
+// TestHandleCoordinationEvent_SynthesizesLeaderChanged — pg-manager
+// declares LeaderChangedEvent but never emits it (zombie type). The
+// cluster handler synthesizes proxy.leader_changed from
+// state_transition records whose reason is became_leader / lost_leader
+// so operators can query for the leadership edge by event type.
+func TestHandleCoordinationEvent_SynthesizesLeaderChanged(t *testing.T) {
+	logger := obs.NewLogger(&obs.SafeBuffer{}, "info", "test-cluster", "node-c", "test")
+	metrics := obs.NewMetrics("test-cluster", "node-c")
+	sink := &fakeHistorySink{}
+
+	payload, _ := json.Marshal(map[string]any{
+		"node_id": "node-c",
+		"from":    3,
+		"to":      4,
+		"reason":  "became_leader",
+		"term":    1,
+	})
+	handleCoordinationEvent(&nats.Msg{
+		Subject: "pgmanager.pgman-pc.state_transition",
+		Data:    payload,
+	}, "node-c", logger, metrics, sink)
+
+	if len(sink.captured) != 2 {
+		t.Fatalf("expected 2 records (state_transition + proxy.leader_changed), got %d", len(sink.captured))
+	}
+	gotTypes := []string{sink.captured[0].evType, sink.captured[1].evType}
+	wantTypes := []string{"state_transition", "proxy.leader_changed"}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Errorf("record[%d].evType = %q, want %q", i, gotTypes[i], want)
+		}
+	}
+	leaderRec := sink.captured[1]
+	if leaderRec.details["new_leader"] != "node-c" {
+		t.Errorf("proxy.leader_changed: new_leader = %v, want node-c", leaderRec.details["new_leader"])
+	}
+	if leaderRec.details["derived_from"] != "state_transition" {
+		t.Errorf("proxy.leader_changed: must carry derived_from marker")
+	}
+}
+
+// TestSynthesizeLeaderChange_IgnoresNonLeaderReasons — startup,
+// auto_rebootstrap, and other non-leadership state_transition reasons
+// must NOT spawn a synthesized proxy.leader_changed record.
+func TestSynthesizeLeaderChange_IgnoresNonLeaderReasons(t *testing.T) {
+	for _, reason := range []string{"startup_with_pgdata", "auto_rebootstrap", "promote_requested"} {
+		got := synthesizeLeaderChange(map[string]any{
+			"node_id": "node-a",
+			"reason":  reason,
+		})
+		if got != nil {
+			t.Errorf("reason=%q must NOT synthesize a leader_changed record, got %+v", reason, got)
+		}
+	}
+}
+
 // TestSubjectTail_RetainsMultiSegmentTopics — `auto_rebootstrap.detected`
 // must survive verbatim so the history record's type matches the
 // pg-manager topic constant.

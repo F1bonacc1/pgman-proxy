@@ -237,7 +237,12 @@ func explainLeaderElection(ctx context.Context, app *AppContext) (ExplainOutput,
 		return ExplainOutput{}, err
 	}
 
-	leaderChanges, _ := fetchHistory(ctx, app, "event", []string{"leader_changed"}, 50)
+	// pg-manager declares but never emits `leader_changed` (zombie type
+	// in observability/events.go). The cluster handler synthesizes
+	// `proxy.leader_changed` from state_transition reasons, so we query
+	// BOTH names — `leader_changed` for the day pg-manager wires
+	// the real event, `proxy.leader_changed` for today.
+	leaderChanges, _ := fetchHistory(ctx, app, "event", []string{"leader_changed", "proxy.leader_changed"}, 50)
 	transitions, _ := fetchHistory(ctx, app, "event", []string{"state_transition"}, 50)
 	boots, _ := fetchHistory(ctx, app, "event", []string{"proxy.history_stream_ready"}, 50)
 
