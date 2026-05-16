@@ -628,6 +628,246 @@ wired into CI — those are listed as **feasible but not implemented**.
 
 ---
 
+### CR-016 — SIGKILL primary under load: cluster wedges 3-of-3 StateFailed
+
+**Initial verdict: FAIL (CRITICAL). After Fix B1: PARTIAL — Bug B fixed
+(no destructive wipe), Bug A and Bug C still open (cluster outage on
+the unlucky timing path, but data integrity preserved).**
+
+| Stage   | Result                                                                                                                                                              |
+| ---     | ---                                                                                                                                                                  |
+| CR-016a | First repro: 3-of-3 StateFailed, two standbys with **wiped PGDATA**, cluster wedged 10+ min until manual restart. `data_loss_total=0` but availability=0.            |
+| CR-016b | After Fix B1 (source-primary liveness gate). 3 repros: 2× clean failover (~7s), 1× **half-wedge** — B1 refused dispatches with `source_primary_unreachable`, both standbys intact, but no new primary elected. `data_loss_total=0` in all 3 runs.|
+
+The remainder of this entry describes the original CR-016a repro
+(the wedge). Fix B1 details are in the "Fix follow-up" section below.
+
+This experiment was scoped to confirm the original CR-016 hypothesis
+(failed ex-primary stranded in `StateFailed/RolePrimary`). It instead
+surfaced a **much more severe** failure mode in the same path: under
+sustained write load, SIGKILL of the primary postmaster can leave the
+entire 3-node cluster wedged in `StateFailed`, all PG instances down,
+with no automated recovery. The original CR-016 (stranded ex-primary)
+is one of three failures; the new ones are healthy standbys
+*self-destroying* on a stale snapshot.
+
+The CR-009c "failover in ~2s" verification did not reproduce this
+wedge — the failover-vs-rebootstrap race is timing-sensitive and
+CR-009c happened to land on the favorable side. The unfavorable side
+is what every operator will eventually hit in production.
+
+- **Scenario:** Rig at steady state (8/8 doctor PASS, node-a primary).
+  `chaos-workload` driving 20 writes/sec through the multi-host libpq
+  DSN. `docker exec pgman-pc-node-a kill -9 <postmaster_pid>` at
+  T0=20:58:34.869Z.
+
+- **What we expected (going in):**
+  1. node-a state_transition Running→Failed, role stays Primary, PG
+     down — same as CR-009c.
+  2. Standby (node-b or node-c) takes the leadership lease via
+     pg-manager's KV-lease race and promotes — same as CR-009c.
+  3. node-a strands at `StateFailed/RolePrimary` (the original CR-016
+     hypothesis) and we observe how long it takes the fast-fail
+     rebootstrap to *not* kick in.
+
+- **What actually happened:**
+
+  | T+ (s) | Node   | Event                                                                                                   |
+  | ---    | ---    | ---                                                                                                     |
+  | +1.2   | node-a | `resigned leadership: local postgres unreachable`; state_transition `Running→Failed`, role `Primary`    |
+  | +1.4   | node-b | `auto_rebootstrap.detected consecutive_ticks=1 detection_source=local_lag_persisted`                    |
+  | +1.5   | node-c | `auto_rebootstrap.detected consecutive_ticks=1 detection_source=local_lag_persisted`                   |
+  | +3..+11| node-b | detected ticks 2..6 (every 2 s)                                                                         |
+  | +13.4  | node-b | state_transition `Running→Bootstrapping`, `auto_rebootstrap.decided source_primary_id="node-a"` ⚠️       |
+  | +13.5  | node-b | `auto_rebootstrap.wipe.completed duration=38.9ms` — **PGDATA wiped**                                    |
+  | +13.5  | node-b | `auto_rebootstrap.basebackup.started source_primary_id="node-a"` — connection refused × 11 attempts     |
+  | +33.5  | node-c | `auto_rebootstrap.decided source_primary_id="node-a"`; wipe + basebackup against dead node-a (× 12)     |
+  | +9 min | all    | `pgmctl get peers`: node-a primary/failed/down, node-b standby/failed/down, node-c standby/failed/down. **No recovery.** |
+
+  Workload final tally on shutdown 10 min after T0:
+  `writes_ok=532, writes_failed=12054, data_loss_total=0, extra_rows=0`.
+  All 532 successful writes were the pre-T0 baseline; the cluster
+  served zero writes for ten minutes and remained wedged.
+
+- **Root causes (interacting).** Three separate code-path bugs amplify
+  into a wedge.
+
+  1. **No new leader is elected during the 10-second
+     `AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW`.** node-a explicitly resigns
+     leadership at T+1.2s, but the standbys do not race to claim the
+     vacated lease aggressively enough — at T+13s neither has been
+     elected, and both `o.LeaderNodeID` snapshots still resolve to
+     `node-a`. (The KV-lease release vs. the standbys' next observation
+     tick is the race.)
+  2. **Slow-degradation rebootstrap dispatches with a stale
+     source-primary.** `maybeAutoRebootstrap` (lag-persisted regime,
+     milestone 004) reads `o.LeaderNodeID` at decision time without a
+     liveness probe against the chosen source. node-a is `StateFailed`
+     and unreachable on TCP/5432, yet the decided event captures
+     `source_primary_id="node-a"`. node-b wipes its own PGDATA before
+     even attempting the first basebackup TCP connection — i.e. the
+     destructive step happens before evidence of source liveness. node-c
+     does the same thing 20 s later against the same dead source.
+  3. **Failed ex-primary stays operator-sticky** (the original
+     CR-016 hypothesis, confirmed). `reconciler/reconciler.go:872`
+     admits `maybeAutoRebootstrapFromFailed` only when
+     `curRole ∈ {Standby, Unknown}`. A failed ex-primary keeps
+     `curRole == Primary` until rebootstrap drives it back through
+     `Standby`, so the fast-fail recovery path is permanently gated
+     out. Today only `process-compose process restart` recovers it.
+
+  The wedge requires only #1 + #2: even without #3, two
+  freshly-wiped standbys cannot basebackup from each other (neither is
+  a primary), and the dead ex-primary cannot serve them either.
+
+- **Impact:** A single SIGKILL (or postmaster crash / OOM / SIGSEGV)
+  of the primary under load can take the entire active-active cluster
+  offline indefinitely, with one of the standbys having destroyed its
+  own PGDATA and another mid-flight on the same destruction. This is
+  a **data-availability FAIL**. The data-safety verdict is technically
+  PASS (`data_loss_total=0`, since the standbys never got ACKs they
+  could lose) but the user-visible behavior is "primary died, cluster
+  is gone." It bypasses the entire active-active value proposition.
+
+- **Fix sketch (NOT YET IMPLEMENTED — design discussion needed).**
+  Two complementary changes:
+
+  - **Source-primary liveness gate.** Before dispatching
+    auto-rebootstrap in *either* regime (slow-degradation or fast-fail),
+    require `o.LeaderNodeID`'s peer-state row to report
+    `State == Running && PostgresUp` (same predicate as the doctor
+    `cluster.has-primary` fix). Refuse with a new
+    `ReasonAwaitingPrimaryReady` (or reuse `ReasonAwaitingClusterLease`)
+    otherwise. This makes #2 impossible: a healthy standby cannot
+    wipe itself based on a dead source.
+  - **Demote-on-resign-for-PG-death.** Extend the CR-009 fix-1A path
+    in `reconciler.go:842-844` so the `EventPostgresCrashed`-while-
+    Primary transition produces `RolePrimary→RoleStandby` alongside
+    the lease resignation. The next reconciler tick then sees a
+    failed *standby* and the fast-fail gate at line 872 admits it.
+    Requires a state-machine transition addition
+    (`EventPostgresCrashed` from `Running/Primary` → `Failed/Standby`).
+
+  Both changes are upstream in `../pg-manager`. Neither alone is
+  sufficient: source-primary liveness gate fixes the wedge but leaves
+  CR-016a (the stranded ex-primary) intact; demote-on-resign fixes the
+  stranded ex-primary but leaves a race window where standbys still
+  pick the not-yet-failed ex-primary as a basebackup source.
+
+- **Workload invariant outcome:** `data_loss_total=0` (PASS),
+  `writes_ok=532 / writes_failed=12054` over the experiment window
+  (cluster was unavailable for 10 minutes — FAIL on the implicit
+  availability invariant; the workload doesn't have a separate
+  metric for this but the throughput collapse is unambiguous).
+
+- **Test exists:** None. The current tests cover individual gates
+  (fast-fail eligibility, slow-degradation persistence-window,
+  state-transition guards) but no test exercises the
+  "primary SIGKILL'd; standbys race auto-rebootstrap vs. promotion"
+  scenario. A reproduction needs: real KV substrate (race timing
+  matters), a sigkill on a running postmaster (not a graceful stop),
+  and the slow-degradation timer set short enough to fire (real-rig
+  `PERSISTENCE_WINDOW=10s` does it). This is testcontainer territory.
+
+- **Auto-test feasibility:** Feasible with the existing
+  `chaos-workload` + `pgman-pc` rig harness; a CI driver would need
+  to (a) bring the rig up, (b) wait for steady state, (c)
+  SIGKILL primary postmaster under load, (d) wait 30 s,
+  (e) assert at least one peer is `StateRunning/RolePrimary` and
+  `data_loss_total==0`. Currently a manual operation.
+
+- **Reproduction artifacts** (this run): full per-node docker logs +
+  workload log captured under `/tmp/cr016/` while the wedge was live;
+  the rig was left in the wedged state at the end of the session for
+  forensic inspection.
+
+#### CR-016b — Fix B1 follow-up: source-primary liveness gate landed
+
+After CR-016a, Fix B1 from `docs/cr-016-rca.md` was implemented in
+`../pg-manager`:
+
+- New refusal reason `ReasonSourcePrimaryUnreachable`
+  (`interfaces.go:583`).
+- New helper `sourcePrimaryReachable(ctx, o)` in
+  `reconciler/rebootstrap.go` — bounded `SELECT 1` probe against
+  the leader's peer DSN, returns false on any error / missing DSN /
+  self-as-leader.
+- Slow-degradation gate (`maybeAutoRebootstrap`) — refuses dispatch
+  with the new reason before taking the rebootstrap lease.
+- Fast-fail-from-failed gate (`maybeAutoRebootstrapFromFailed`) —
+  same gate as Gate (c'), refuses before lease acquisition.
+- 5 regression tests in `reconciler/rebootstrap_b1_test.go` lock the
+  contract: slow-degradation refuse, fast-fail refuse, plus three
+  helper-level sanity tests.
+
+Re-tested CR-016 against `pgman-proxy:dev` rebuilt from the patched
+pg-manager. Three repro runs:
+
+| Run | Failover outcome | writes_ok / writes_failed / data_loss | Recovery |
+| --- | ---              | ---                                   | ---      |
+| 1   | node-a→node-b in ~6.5s | 3013 / 132 / 0                       | auto, ~7s |
+| 2   | node-b→node-a in ~6.7s | 1337 / 119 / 0                       | auto, ~7s |
+| 3   | **No new primary elected; B1 refused 2 dispatches with `source_primary_unreachable` (T+10.3s node-b, T+13.2s node-c)** | 202 / 4493 / 0                       | manual: required `process-compose restart node-a` |
+
+**Run 3 is the load-bearing one.** In the original CR-016a wedge, this
+same race produced 2 standbys with wiped PGDATA and an unrecoverable
+3-of-3 StateFailed. With B1 in place, both standbys' refused dispatches
+are visible on the bus (`reason: source_primary_unreachable`), no
+`wipe.started`/`basebackup.started` events fired, and both standbys
+stayed `StateRunning/RoleStandby/postgres_up`. The cluster ended in a
+*reversible* outage — node-a stranded `StateFailed/RolePrimary` (Bug C
+unchanged), no new primary elected (Bug A unchanged), but **data
+integrity preserved**. A single `process-compose restart node-a`
+restored 3-of-3 healthy in ~25s.
+
+Differences vs. CR-016a:
+
+| Symptom                                    | CR-016a (no fix)              | CR-016b (B1)                    |
+| ---                                        | ---                           | ---                             |
+| `data_loss_total`                          | 0                             | 0                               |
+| Standby PGDATA preserved?                  | NO (both wiped)               | YES                             |
+| Cluster recoverable without operator?      | NO (PGDATA-destroying restart needed) | YES (any node restart) |
+| Time to manual recovery                    | Multi-step (volume wipe + restart) | One `process-compose restart` |
+| Failover-success rate (lucky path)         | ~50%                          | ~67% (2 of 3 in this session)   |
+
+**Verdict on Fix B1: PARTIAL but VALUABLE.** B1 closes the
+destructive-wipe door (Bug B) — the most severe of the three CR-016
+sub-bugs. Bug A (no spontaneous leader re-election after primary
+resign) and Bug C (stranded ex-primary) remain open and will need
+follow-up fixes:
+
+- **Fix A1 (TODO)** — accelerate leadership re-election after a
+  primary resigns. Currently the standbys' cached `o.LeaderNodeID`
+  lags the KV-delete fan-out, and there's no explicit "leader vacant"
+  signal that triggers an immediate CAS race. Without A1, every
+  unlucky-timing primary failure produces an outage even though
+  data is safe.
+- **Fix C1 (TODO)** — demote the failed ex-primary's `Role` to
+  Standby on the `EventPostgresCrashed` transition so the milestone-011
+  fast-fail-from-failed gate (which requires `Role ∈ {Standby,
+  Unknown}` per `reconciler.go:872`) admits it. With C1 + A1, an
+  ex-primary auto-rebootstraps into the cluster as a standby once a
+  new primary is elected.
+
+- **Test exists:** Three new regression tests in
+  `reconciler/rebootstrap_b1_test.go`:
+  1. `TestB1_SlowDegradation_RefusesWhenSourceUnreachable` — locks
+     the slow-degradation gate behavior.
+  2. `TestB1_FastFail_RefusesWhenSourceUnreachable` — locks the
+     fast-fail gate behavior.
+  3. Three helper sanity tests for `sourcePrimaryReachable`
+     (happy path, empty leader, self as leader).
+
+  All 5 pass; existing 200+ reconciler tests still pass.
+
+- **Reproduction artifacts** (Fix B1 retest): per-run captures at
+  `/tmp/cr016b1/{,run2/,run3/}*.log`. Run 3's `node-b.full.log` shows
+  the two `auto_rebootstrap.refused` events with
+  `reason: source_primary_unreachable` — the most concrete proof B1
+  is doing its job.
+
+---
+
 ## Candidate experiments (planning backlog)
 
 Surfaced during chaos sessions; not yet executed. Append as we run them.
@@ -654,17 +894,4 @@ Surfaced during chaos sessions; not yet executed. Append as we run them.
   *graceful* CR-001 case under load (CR-001 has only been verified
   in steady state). Tests whether in-flight transactions on the
   outgoing primary terminate cleanly vs. orphaning.
-- **CR-016 — Failed primary does not auto-rebootstrap.** Spotted
-  during CR-009c follow-up. After a SIGKILL-postmaster + successful
-  failover, the killed node lands in `StateFailed/RolePrimary` with
-  `postmaster.pid` still present and the postmaster process still a
-  zombie. Peers (node-a, node-c) publish
-  `auto_rebootstrap.detected condition=1` events on its behalf, but
-  the failed node's own reconciler does not transition out of
-  StateFailed within at least 7 minutes — the milestone-011
-  "fast-fail auto-rebootstrap from StateFailed" path appears to not
-  trigger here. Today only `process-compose process restart` restores
-  the node. Worth tracing whether the gate is the
-  AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW timer, the cooldown, or a
-  precondition (e.g. PG-already-stopped check) that a failed-primary
-  with a zombie postmaster fails to satisfy.
+_(CR-016 promoted out of backlog — see Experiments section above.)_
