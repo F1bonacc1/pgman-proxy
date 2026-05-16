@@ -379,14 +379,17 @@ wired into CI — those are listed as **feasible but not implemented**.
      not (or did not in this run) require the new primary's WAL
      to dominate every other reachable standby's WAL — leading
      to silent data loss.
-- **Fix:** NOT YET IMPLEMENTED. Investigation pending.
-- **Test exists:** No. Neither bug has regression coverage yet.
-- **Auto-test feasibility:** Both bugs are testable.
-  - Bug #1: kill the postmaster inside a testcontainers rig, assert
-    a peer takes over within N seconds. Requires container access.
-  - Bug #2: an integration test that wedges replication on one
-    standby (e.g. SIGSTOP) then kills the primary; assert promotion
-    refuses or picks the freshest standby. Doable in CI with care.
+- **Fix (first attempt):** Milestone-012 in `../pg-manager` on branch
+  `012-cr009-failover-safety`. Adds: `LeadershipProvider.Resign(ctx)`
+  + `Reconciler.resignOnPostgresCrash` called from the
+  `EventPostgresCrashed` arm (`reconciler/reconciler.go:842-844`);
+  `WithHealthCheck` callback on the NATS leadership adapter
+  (`adapters/nats/leadership.go:319`); sync-aware
+  `pgmanager.ResolveTolerance` replaces the `0 → 16 MiB` silent
+  override.
+- **Re-test verdict (CR-009b below): NOT CLEARED.**
+  Bug #1 still occurs; Bug #2 untestable because failover still
+  doesn't fire. See CR-009b for the next-layer root cause.
 - **Notes / open items:**
   - The 51 rows of data_loss already present at baseline must
     have leaked in during the CR-004..CR-008 partition cycles
@@ -400,6 +403,119 @@ wired into CI — those are listed as **feasible but not implemented**.
   - This experiment is conclusive enough to halt further chaos until
     Bug #1 and Bug #2 are root-caused. Adding new fault surfaces on
     top of a known-corrupt rig produces noise, not signal.
+
+### CR-009b — Re-test under milestone-012 (`012-cr009-failover-safety`)
+
+- **Date:** 2026-05-16 (T0 = `19:37:43+03:00`)
+- **Description:** Identical procedure to CR-009 against the rig
+  rebuilt against pg-manager branch `012-cr009-failover-safety`. The
+  Docker image `pgman-proxy:dev` was rebuilt at `19:35:06+03:00`
+  (mtime of `/usr/local/bin/pgman-proxy` inside the image:
+  `2026-05-16 16:34 UTC`), which is *after* the resign / health-gate /
+  ResolveTolerance file modifications (`reconciler/resign.go` 17:51,
+  `adapters/nats/leadership.go` 17:52, `reconciler/reconciler.go`
+  19:03). chaos-workload was restarted fresh — baseline
+  `writes_ok=2899, writes_failed=0, data_loss_total=0, extra_rows=0`.
+
+- **Expected:** Bug #1 cleared — failover triggers within a few
+  ticks (10 s budget) after the postmaster dies. Bug #2 cleared —
+  `data_loss_total` stays at 0 through the failover. The reconciler
+  emits `resigned leadership: local postgres unreachable` on the
+  isolated primary.
+
+- **Actual — Bug #1 NOT CLEARED, Bug #2 UNTESTABLE in this run:**
+
+  - **At T+0 through T+121 s**, all three nodes' `/v1/status`
+    reported `LeaderNodeID=node-b PrimaryNodeID=node-b` with node-b's
+    own row showing `State=running, PostgresUp=true`.
+  - **Container logs** (`docker logs pgman-pc-node-b`) show node-b
+    continuing to publish `failover_quorum_published` events with
+    itself as primary for the entire window, e.g. at T+4 min:
+    ```
+    {"subject":"pgmanager.pgman-pc.failover_quorum_published",
+     "snapshot":{"method":"ANY","primary":"node-b",
+                 "standby_names":["node-a","node-c"]}}
+    ```
+  - **No `resigned leadership` log line ever appears** — the resign
+    code path at `reconciler/reconciler.go:842-844` is never reached.
+  - chaos-workload starts failing the same way as in CR-009: all
+    three proxy ports return `unexpected EOF` because every proxy
+    routes writes to the (dead) primary's PG.
+  - Recovery required the same `process-compose process restart
+    node-b` intervention as CR-009.
+
+  **Mechanism (verified):** the zombie postmaster process survives
+  in the kernel process table because pgman-proxy (PID 1, its
+  parent) has not reaped it. Probing inside the container at T+5 min:
+
+  ```
+  postmaster.pid: 32
+  PID 32 is ALIVE          ← kill -0 32 returned nil
+  /proc/32/comm: postgres  ← still readable on a zombie
+  ```
+
+  Yet `ps -ef` shows `postgres   32   1   [postgres] <defunct>` —
+  classic zombie. The `IsRunning` probe at
+  `../pg-manager/internal/pgproto/pgexec.go:366-394` uses signal-0
+  liveness + `/proc/<pid>/comm` content; **both succeed on a
+  zombie**, so `IsRunning` returns `(true, nil)`,
+  `obs.PostgresUp = true`, the
+  `if !o.PostgresUp` block at `reconciler/reconciler.go:814` is never
+  entered, and `resignOnPostgresCrash` is never called.
+
+  Bug #2 (data loss on promotion) cannot be tested here because
+  failover never fires.
+
+- **Verdict:** Bug #1 NOT CLEARED. Bug #2 untestable. The
+  milestone-012 fix in pg-manager (resign-on-PG-crash + health-gated
+  renewal + sync-aware tolerance) is *correct in design* but
+  *unreachable in practice*: the precondition (`o.PostgresUp == false`)
+  is never observed when the parent of the dying postmaster is the
+  pgman-proxy process itself, because the parent does not reap the
+  child.
+
+- **New root cause:** `IsRunning` is zombie-blind. Detection needs
+  one of:
+
+  1. **Read `/proc/<pid>/stat` field 3** — a `Z` character means
+     zombie. Cheap, Linux-only, and would cleanly handle the
+     pgman-proxy-as-postmaster-parent case without any process-tree
+     changes. Suggested fix:
+
+     ```go
+     // pgproto/pgexec.go::IsRunning, after the kill(pid,0) check
+     if stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+         // /proc/<pid>/stat fields: 1=pid 2=comm(in-parens) 3=state
+         // 'Z' = zombie. Comm may contain spaces inside the parens
+         // so split on the LAST ')' before parsing.
+         if i := bytes.LastIndexByte(stat, ')'); i >= 0 && len(stat) > i+2 {
+             if stat[i+2] == 'Z' { return false, nil }
+         }
+     }
+     ```
+
+  2. **Have pgman-proxy reap its children** — call `wait4(WNOHANG)`
+     periodically on a SIGCHLD-aware handler, so the dead postmaster
+     leaves the process table and the next `kill(pid, 0)` returns
+     ESRCH. More invasive but a general hygiene improvement (PID 1
+     in container/init contexts should always reap).
+
+  Option 1 is the minimal fix and lives in the pgproto package.
+
+- **Test exists:** No. CR-009b confirms there's a missing unit test
+  for `IsRunning` against a zombie process — straightforward to
+  construct on Linux via a fork+exit+pause-parent harness.
+
+- **Auto-test feasibility:** Yes. A unit test in
+  `internal/pgproto/pgexec_test.go` that:
+  1. Forks a child that `exit(0)`s immediately.
+  2. Does NOT call `wait4` on the parent side (so the child is a
+     zombie).
+  3. Writes the child PID to a fake `postmaster.pid` in a temp data
+     dir.
+  4. Calls `IsRunning(ctx)` and asserts it returns `false`.
+  This is portable to Linux CI; macOS has a different `/proc`
+  semantics but the production target is Linux.
 
 ---
 

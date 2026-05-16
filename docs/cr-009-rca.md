@@ -8,6 +8,17 @@ All file paths in this document are relative to the `pg-manager` repo
 (`../pg-manager` from pgman-proxy). Line numbers are from the commit
 present at the time of the chaos run (2026-05-16).
 
+> **2026-05-16 update — re-test result (CR-009b):** The
+> milestone-012 fix (resign-on-PG-crash + health-gated renewal +
+> sync-aware tolerance) is correct in design but **fails to clear
+> Bug #1** because of a deeper layer: the killed postmaster is a
+> *zombie* (still in the kernel process table because its parent
+> pgman-proxy is PID 1 and has not reaped it). `IsRunning`'s
+> `kill(pid,0)` + `/proc/<pid>/comm` checks both succeed on zombies,
+> so `o.PostgresUp` never goes false and the resign code path is
+> never reached. See the **"Verified root cause (CR-009b)"** section
+> at the bottom of this doc for the additional fix required.
+
 ---
 
 ## Bug #1 — Zombie primary: failover does not fire when postmaster dies
@@ -459,3 +470,145 @@ the CR-009 outcome:
 
 Both are mechanically simple. The hard part is regression coverage —
 neither bug has a test today.
+
+---
+
+## Verified root cause (CR-009b)
+
+After the milestone-012 fixes landed and the rig was rebuilt, CR-009b
+re-ran the same SIGKILL-postmaster scenario. **The Bug #1 fix does not
+clear the failure** because the precondition (`o.PostgresUp == false`)
+is never observed.
+
+### What actually happens inside the container
+
+After `kill -9` of the postmaster (PID 32 in the re-test), the proxy
+remains as PID 1 and is the postmaster's *parent*. Linux does not
+free a child's process table entry until the parent calls `wait4()`
+on it. pgman-proxy never does. The dead postmaster therefore lingers
+as a **zombie**:
+
+```
+$ docker exec pgman-pc-node-b ps -ef
+postgres     1     0  /usr/local/bin/pgman-proxy
+postgres    32     1  [postgres] <defunct>           ← zombie
+postgres    33     1  [postgres] <defunct>
+…
+```
+
+Probing it from the container:
+
+```
+$ cat /var/lib/postgresql/data/postmaster.pid | head -1
+32
+$ kill -0 32 ; echo $?
+0                                                    ← signal 0 succeeds
+$ cat /proc/32/comm
+postgres                                             ← still readable
+```
+
+Both probes `IsRunning` uses succeed on zombies. The full check at
+`../pg-manager/internal/pgproto/pgexec.go:366-394` is:
+
+```go
+if err := proc.Signal(syscall.Signal(0)); err != nil {
+    return false, nil  // dead PID → stale pid file.
+}
+if comm, rerr := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)); rerr == nil {
+    if strings.TrimSpace(string(comm)) != "postgres" {
+        return false, nil
+    }
+}
+return true, nil
+```
+
+A zombie passes **both** liveness branches: signal 0 succeeds because
+the entry is still in the kernel's process table, and `/proc/<pid>/comm`
+is preserved verbatim through the zombie state. So `IsRunning` returns
+`(true, nil)`, `obs.PostgresUp` is set to `true` in
+`reconciler/observe.go:265-266`, and the `if !o.PostgresUp` arm in
+`reconciler/reconciler.go:814` is never entered. The newly-added
+`resignOnPostgresCrash` call at `:843` is never reached.
+
+### Why the previous RCA missed this
+
+The original analysis (`1c`) noted that `IsRunning` "does the right
+thing (signal-0 liveness + `/proc/<pid>/comm` verification)" and
+attributed the failure to an unspecified hang in the observe loop.
+That was wrong: the observe loop is not hung, it just keeps getting
+`(true, nil)` from `IsRunning` and faithfully propagating that. The
+real bug is one layer down — the liveness probe itself does not
+recognize the zombie state.
+
+### Proposed fix (additive to 1A/1B/1C)
+
+**Fix 1D — Recognize zombie processes in `IsRunning`.**
+
+After the existing `kill(pid, 0)` and `/proc/<pid>/comm` checks, read
+`/proc/<pid>/stat` and return `false` when field 3 (process state) is
+`'Z'`. Cheap, Linux-only, and exactly the case
+`pgman-proxy-parents-postmaster` exhibits.
+
+```go
+// In internal/pgproto/pgexec.go::IsRunning, after the comm check:
+if stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+    // /proc/<pid>/stat field 2 is "(comm)" — may contain spaces and
+    // even ')' characters in the postmaster's name on some setups,
+    // so split on the LAST ')'. Field 3 (state) immediately follows.
+    if i := bytes.LastIndexByte(stat, ')'); i >= 0 && i+2 < len(stat) {
+        if stat[i+2] == 'Z' {
+            return false, nil // zombie ≠ running
+        }
+    }
+}
+return true, nil
+```
+
+Regression coverage is a tight unit test in
+`internal/pgproto/pgexec_test.go`:
+
+1. `os.StartProcess` a child that `os.Exit(0)`s.
+2. Do NOT `wait4` it on the parent — the child becomes a zombie.
+3. Write the child PID into a fake `postmaster.pid` inside a temp
+   `dataDir`.
+4. Construct an `Executor` pointing at that dataDir.
+5. Assert `IsRunning(ctx) == (false, nil)`.
+6. Finally call `wait4` to reap the test zombie so the test process
+   exits cleanly.
+
+This is a Linux-only test (use a `//go:build linux` constraint).
+That's fine — pgman-proxy's deployment target is Linux containers.
+
+**Optional Fix 1E — Reap children in pgman-proxy.** Install a
+`SIGCHLD` handler in the runtime that calls `unix.Wait4(-1, …,
+unix.WNOHANG, nil)` in a loop. Removes the zombie from the process
+table entirely, which has the side effect that **the next** `kill -0`
+returns `ESRCH` and `IsRunning` returns false even without Fix 1D.
+
+Fix 1E is a general hygiene improvement for any process running as
+PID 1 (init-style); Fix 1D is the minimum that closes the bug. Land
+1D as the must-have; 1E is desirable on its own merits.
+
+### Updated fix priority
+
+| Priority | Fix | Closes |
+| --- | --- | --- |
+| **0** | **1D** — `IsRunning` returns false for zombie PIDs | **Bug #1 root cause — must land for 1A/1B to take effect** |
+| 1 | 2A — Tolerance=0 for sync policies | Bug #2 (data loss) |
+| 1 | 2C — StandbyNames cross-check at promote | Bug #2 (data loss) |
+| 1 | 1A — Reconciler resigns leadership on PG crash | Bug #1 (already landed, gated on 1D) |
+| 2 | 1B — Health-gated leadership renewal | Bug #1 (defense in depth, already landed, gated on 1D) |
+| 2 | 1E — Reap children via SIGCHLD in runtime | Bug #1 (alt cure for the same root cause) |
+| 2 | 1C — Hard timeouts on observe SQL probes | Hardening, not strictly required after 1D |
+| 2 | chaos-workload log retention | Investigability |
+| 3 | 2B — Explicit zero-tolerance sentinel | UX |
+| 3 | 2D — Pre-promote rewind for behind peers | Availability |
+
+CR-009b also confirms a meta-lesson worth recording: **the milestone
+spec for 012 should have caught zombie semantics** in its risk
+analysis. The phrase "the postmaster has died" is ambiguous in a
+container where the proxy is PID 1, because "dead" in the application
+sense (no SQL, no WAL) is not the same as "dead" in the kernel sense
+(out of the process table). Future fixes that hinge on
+`PostgresUp == false` should explicitly test against a zombie, not
+just an `exec.LookPath` failure or a missing pid file.
