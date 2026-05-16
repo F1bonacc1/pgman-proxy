@@ -154,6 +154,42 @@ func TestStatus_SubstrateQuorumLost_JSON(t *testing.T) {
 	if got := sub["total"]; got != float64(3) {
 		t.Errorf("substrate.total = %v, want 3", got)
 	}
+	// leader_belief_stale / primary_belief_stale flag that the connected
+	// node's snapshot was frozen when substrate failed. Chaos-rig
+	// observation 2026-05-16: querying an isolated former-leader, the
+	// engine returned LeaderNodeID == LocalNodeID with no warning;
+	// automation consuming raw JSON had no derivable signal. These
+	// fields surface it explicitly.
+	if got := doc.Payload["leader_belief_stale"]; got != true {
+		t.Errorf("payload.leader_belief_stale = %v, want true", got)
+	}
+	if got := doc.Payload["primary_belief_stale"]; got != true {
+		t.Errorf("payload.primary_belief_stale = %v, want true", got)
+	}
+}
+
+// TestStatus_HealthyCluster_NoStaleFlags is the negative case: a
+// quorate cluster MUST NOT carry leader_belief_stale / primary_belief_stale
+// — omitempty leaves them off the JSON entirely. Prevents a regression
+// where the stale heuristic over-triggers on healthy snapshots.
+func TestStatus_HealthyCluster_NoStaleFlags(t *testing.T) {
+	srv := startFakeServer(t, statusHealthy())
+	defer srv.Close()
+
+	out := runRoot(t, srv.URL, "status", "-o", "json")
+
+	var doc struct {
+		Payload map[string]interface{} `json:"payload"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("decode: %v\nout=%s", err, out)
+	}
+	if _, present := doc.Payload["leader_belief_stale"]; present {
+		t.Errorf("healthy snapshot leaked leader_belief_stale into JSON: %v", doc.Payload)
+	}
+	if _, present := doc.Payload["primary_belief_stale"]; present {
+		t.Errorf("healthy snapshot leaked primary_belief_stale into JSON: %v", doc.Payload)
+	}
 }
 
 // TestStatus_SubstrateQuorumLost_Text asserts the human-readable
@@ -187,6 +223,11 @@ func TestStatus_SubstrateQuorumLost_Text(t *testing.T) {
 		"1/3 responding",
 		"need 2",
 		"sync_commit",
+		// Headline segments must carry "(stale)" so the green-on-isolated-
+		// node failure mode discovered 2026-05-16 cannot recur: the QUORUM
+		// LOST line was already printing, but Leader/Primary still rendered
+		// the cached pre-partition identity in PASS color.
+		"node-c (stale)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status text missing %q\nfull output:\n%s", want, out)

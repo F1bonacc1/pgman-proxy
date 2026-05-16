@@ -217,11 +217,21 @@ func decodeStatusEngine(raw json.RawMessage) (*pgmanagerStatus, *embeddedNATSSna
 
 // statusJSON is the pgmctl/v1-versioned shape for -o json / -o yaml.
 // Stable per FR-038.
+//
+// LeaderBeliefStale / PrimaryBeliefStale (omitempty when false) flag
+// the case where the connected node's substrate is non-quorate: any
+// leader / primary identity it returns was frozen at the moment it
+// lost contact and cannot be trusted. The flags are derivable from
+// Substrate.Quorate + Cluster.LeaderNodeID/PrimaryNodeID, but pgmctl
+// exposes them as first-class fields so automation does not have to
+// reimplement the inference.
 type statusJSONShape struct {
-	CapturedAt   time.Time             `json:"captured_at" yaml:"captured_at"`
-	Cluster      *pgmanagerStatus      `json:"cluster" yaml:"cluster"`
-	EmbeddedNATS *embeddedNATSSnapshot `json:"embedded_nats,omitempty" yaml:"embedded_nats,omitempty"`
-	Substrate    substrateQuorum       `json:"substrate" yaml:"substrate"`
+	CapturedAt         time.Time             `json:"captured_at" yaml:"captured_at"`
+	Cluster            *pgmanagerStatus      `json:"cluster" yaml:"cluster"`
+	EmbeddedNATS       *embeddedNATSSnapshot `json:"embedded_nats,omitempty" yaml:"embedded_nats,omitempty"`
+	Substrate          substrateQuorum       `json:"substrate" yaml:"substrate"`
+	LeaderBeliefStale  bool                  `json:"leader_belief_stale,omitempty" yaml:"leader_belief_stale,omitempty"`
+	PrimaryBeliefStale bool                  `json:"primary_belief_stale,omitempty" yaml:"primary_belief_stale,omitempty"`
 }
 
 // substrateQuorum surfaces whether the connecting peer can reach a
@@ -243,12 +253,37 @@ type substrateQuorum struct {
 
 func statusJSON(engine *pgmanagerStatus, embedded *embeddedNATSSnapshot) statusJSONShape {
 	responding, _, total := peerCounts(engine)
+	sub := computeSubstrateQuorum(responding, total)
+	leaderStale, primaryStale := beliefsStale(engine, sub)
 	return statusJSONShape{
-		CapturedAt:   time.Now().UTC(),
-		Cluster:      engine,
-		EmbeddedNATS: embedded,
-		Substrate:    computeSubstrateQuorum(responding, total),
+		CapturedAt:         time.Now().UTC(),
+		Cluster:            engine,
+		EmbeddedNATS:       embedded,
+		Substrate:          sub,
+		LeaderBeliefStale:  leaderStale,
+		PrimaryBeliefStale: primaryStale,
 	}
+}
+
+// beliefsStale returns whether the connected node's leader / primary
+// fields are unverifiable. The local snapshot retains whatever was
+// true when substrate connectivity was last good; once the fan-out
+// fails to reach a majority, those fields are frozen — they no longer
+// reflect cluster reality and may name a node that has already lost
+// the leader-key race or been demoted. The condition does not
+// require LeaderNodeID == LocalNodeID: even a standby that named
+// some other primary pre-partition is reporting a stale belief
+// (it cannot have observed any state change since the partition).
+//
+// Returns (false, false) when no peers are present or when LeaderNodeID /
+// PrimaryNodeID are empty — there is no claim to label stale.
+func beliefsStale(e *pgmanagerStatus, sub substrateQuorum) (leader, primary bool) {
+	if sub.Total == 0 || sub.Quorate {
+		return false, false
+	}
+	leader = e.LeaderNodeID != ""
+	primary = e.PrimaryNodeID != ""
+	return
 }
 
 // computeSubstrateQuorum derives the majority-quorum verdict from the
@@ -284,10 +319,24 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 
 	primarySev, primaryStr := primaryHealth(engine)
 	leaderSev, leaderStr := leaderHealth(engine)
-	worst = worse(worst, primarySev, leaderSev)
 
 	responding, healthy, total := peerCounts(engine)
 	substrate := computeSubstrateQuorum(responding, total)
+	leaderStale, primaryStale := beliefsStale(engine, substrate)
+	if leaderStale {
+		// Belief-stale: the local snapshot was frozen at the moment
+		// substrate went away. Whatever leader it names cannot have
+		// been re-confirmed since. Mark FAIL so the headline matches
+		// the QUORUM LOST verdict on the line below.
+		leaderSev = output.SevFail
+		leaderStr = engine.LeaderNodeID + " (stale)"
+	}
+	if primaryStale {
+		primarySev = output.SevFail
+		primaryStr = engine.PrimaryNodeID + " (stale)"
+	}
+	worst = worse(worst, primarySev, leaderSev)
+
 	peersSev := output.SevPass
 	switch {
 	case healthy == 0:
@@ -320,9 +369,10 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 	fmt.Fprintln(w, meshStr)
 	if total > 0 && !substrate.Quorate {
 		// One extra line — only emitted on quorum loss — so a paged
-		// operator can't miss it. The "Primary:" segment above may still
-		// name a believed-primary; this line clarifies that
-		// synchronous_commit will block its writes regardless.
+		// operator can't miss it. The "Leader:" / "Primary:" segments
+		// above now carry the "(stale)" suffix, but this line is the
+		// causal explanation: synchronous_commit will block writes on
+		// whichever node still believes it is primary.
 		quorumLine := fmt.Sprintf(
 			"Substrate: QUORUM LOST  ·  %d/%d responding (need %d)  ·  writes will block on sync_commit",
 			substrate.Responding, substrate.Total, substrate.Required,
