@@ -367,8 +367,8 @@ wired into CI — those are listed as **feasible but not implemented**.
   view was ahead of the new primary), confirming the "promoted the
   wrong replica" hypothesis.
 
-- **Verdict:** FAIL (data safety) — **STOP-THE-WORLD CLASS.** Two
-  distinct bugs:
+- **Verdict (original CR-009 run):** FAIL (data safety) —
+  **STOP-THE-WORLD CLASS.** Two distinct bugs:
 
   1. **Failover does not trigger on PG-only failure.** Leader-key
      renewal must be gated on local-PG health; today it is not.
@@ -379,17 +379,30 @@ wired into CI — those are listed as **feasible but not implemented**.
      not (or did not in this run) require the new primary's WAL
      to dominate every other reachable standby's WAL — leading
      to silent data loss.
-- **Fix (first attempt):** Milestone-012 in `../pg-manager` on branch
-  `012-cr009-failover-safety`. Adds: `LeadershipProvider.Resign(ctx)`
-  + `Reconciler.resignOnPostgresCrash` called from the
-  `EventPostgresCrashed` arm (`reconciler/reconciler.go:842-844`);
-  `WithHealthCheck` callback on the NATS leadership adapter
-  (`adapters/nats/leadership.go:319`); sync-aware
-  `pgmanager.ResolveTolerance` replaces the `0 → 16 MiB` silent
-  override.
-- **Re-test verdict (CR-009b below): NOT CLEARED.**
-  Bug #1 still occurs; Bug #2 untestable because failover still
-  doesn't fire. See CR-009b for the next-layer root cause.
+
+- **CURRENT STATUS: CLEARED** (as of CR-009c, 2026-05-16). The
+  combined fix (milestone-012 in `../pg-manager` + fix 1D in
+  `internal/pgproto/pgexec.go`) closes both bugs. The fix landed in
+  three stages:
+
+  | Stage | Run | Outcome |
+  | --- | --- | --- |
+  | Original | CR-009 | FAIL — two bugs surfaced, 65k-row data loss |
+  | First attempt | CR-009b | NOT CLEARED — milestone-012 unreachable because of zombie-blind `IsRunning` |
+  | After 1D | **CR-009c** | **CLEARED** — failover in 2–5 s, `data_loss_total = 0` |
+
+- **Fix:** milestone-012 (`../pg-manager` branch
+  `012-cr009-failover-safety`) provides
+  `LeadershipProvider.Resign(ctx)` + `Reconciler.resignOnPostgresCrash`
+  called from the `EventPostgresCrashed` arm
+  (`reconciler/reconciler.go:842-844`); `WithHealthCheck` callback on
+  the NATS leadership adapter (`adapters/nats/leadership.go:319`);
+  sync-aware `pgmanager.ResolveTolerance` replaces the `0 → 16 MiB`
+  silent override. The additional **fix 1D**
+  (`internal/pgproto/pgexec.go:394-407`) reads `/proc/<pid>/stat`
+  field 3 and returns `false` from `IsRunning` when the postmaster
+  PID is a zombie — closing the precondition gap that made
+  milestone-012 unreachable in CR-009b.
 - **Notes / open items:**
   - The 51 rows of data_loss already present at baseline must
     have leaked in during the CR-004..CR-008 partition cycles
@@ -517,6 +530,102 @@ wired into CI — those are listed as **feasible but not implemented**.
   This is portable to Linux CI; macOS has a different `/proc`
   semantics but the production target is Linux.
 
+### CR-009c — Re-test with fix 1D added (zombie-aware `IsRunning`)
+
+- **Date:** 2026-05-16 (T0 = `23:34:44+03:00`)
+- **Description:** Same procedure as CR-009 / CR-009b. Image rebuilt
+  at `23:32:33+03:00` (binary mtime `20:32 UTC`) against pg-manager
+  with fix 1D applied at `internal/pgproto/pgexec.go:394-407` —
+  `IsRunning` now reads `/proc/<pid>/stat` field 3 after the existing
+  `kill(pid,0)` and `/proc/<pid>/comm` checks and returns
+  `(false, nil)` when the state byte is `'Z'`.
+
+  Fresh chaos-workload baseline at injection time:
+  `writes_ok=1899  writes_failed=0  data_loss_total=0  extra_rows=0`.
+
+- **Expected:** Bug #1 — failover triggers within a couple of ticks
+  (≤10 s budget); `resigned leadership: local postgres unreachable`
+  appears in the killed primary's log. Bug #2 —
+  `data_loss_total` stays at 0 through the failover; the new
+  primary's `synchronous_standby_names` reconfigures to include only
+  reachable peers without losing acked WAL.
+
+- **Actual — BOTH BUGS CLEARED.**
+
+  **Failover timeline (observed in the docker logs of node-b, the
+  former primary):**
+
+  | Δt from kill | Event |
+  | --- | --- |
+  | ~2 s | `resigned leadership: local postgres unreachable` |
+  | ~2 s | `state transition: running → failed  role=primary  reason=postgres_crashed` |
+  | ~5 s | `state_transition` event from node-a: `from=3 to=4 reason=became_leader` |
+  | ~6 s | `peer_slots_ensured` on new primary: slots created for `pgmgr_node_b`, `pgmgr_node_c` |
+  | ~7 s | `pg_config_change` on new primary: `synchronous_standby_names = ANY 1 ("node-b","node-c")` (and shortly after `ANY 1 ("node-c")` once node-b's failed state propagated) |
+
+  All-node `/v1/status` snapshot at T+3 s:
+  ```
+  :19191 [node-a] L=node-b P=node-b   node-b: state=8 up=False
+  :19192 [node-b] L=-      P=node-b   node-b: state=8 up=False
+  :19193 [node-c] L=node-b P=node-b   node-b: state=8 up=False
+  ```
+  Within four more seconds the leader/primary fields had converged
+  on node-a across all three peers.
+
+  **Workload numbers (final, ~7 min after kill):**
+
+  | Metric | Baseline | After |
+  | --- | --- | --- |
+  | writes_ok | 1,899 | 10,850 (+8,951 during the chaos run) |
+  | writes_failed | 0 | **143** (in-flight during the ~5 s failover window) |
+  | **data_loss_total** | 0 | **0** ✓ |
+  | **extra_rows** | 0 | **0** ✓ |
+  | rows_in_db | 1,899 | 10,850 (matches writes_ok) |
+
+- **Verdict:** **CLEARED.** Both CR-009 bugs are now closed.
+  - Bug #1 fixed: ~2 s detection vs. the original 97+ s zombie
+    window. The `resigned leadership: local postgres unreachable`
+    log line is the smoking-gun confirmation that the
+    milestone-012 path (`resignOnPostgresCrash`) is actually
+    reached now that fix 1D unblocks the precondition.
+  - Bug #2 fixed: `data_loss_total = 0` and `extra_rows = 0`
+    across the entire failover. The new primary's
+    `synchronous_standby_names` was reconfigured cleanly to the
+    reachable sync-eligible peers without acked writes being
+    lost. The sync-aware tolerance (`pgmanager.ResolveTolerance`
+    returning 0 for `QuorumSync` policies) and the existing LSN
+    gate together ensured the right standby was promoted.
+
+- **Test exists:** Two regression-test surfaces now apply.
+
+  1. Unit test for fix 1D belongs in
+     `internal/pgproto/pgexec_test.go` — see CR-009b's auto-test
+     description (fork-exit-don't-wait, build a zombie, assert
+     `IsRunning == false`). This is the highest-signal test and
+     should be required for the fix to land.
+  2. End-to-end chaos coverage (kill postmaster, assert failover +
+     no data loss) remains a candidate for testcontainers — same
+     constraints as CR-001/CR-002.
+
+- **Auto-test feasibility:** The unit test in (1) above is portable
+  Linux CI. The full chaos scenario requires container test harness
+  with CAP_NET_ADMIN, same constraints as the rest of the
+  network-partition family.
+
+- **Follow-up observation (not a CR-009 regression):** Seven minutes
+  after CR-009c, node-b is still in `state=failed role=primary` and
+  has not auto-rebootstrapped back into the cluster as a standby.
+  Peers (node-a, node-c) are *publishing* `auto_rebootstrap.detected`
+  events identifying node-b as needing recovery, but node-b's own
+  reconciler has not transitioned out of `StateFailed`. This is the
+  inverse of the milestone-011 "fast-fail auto-rebootstrap from
+  StateFailed" path. Recorded as **CR-016** in the planning backlog
+  below for separate investigation — it does not affect CR-009's
+  data-safety verdict (no data loss occurred and the cluster has a
+  healthy primary), but it does mean operators must manually
+  `process-compose restart` a node whose PG was SIGKILLed in order
+  to fully restore 3/3 capacity.
+
 ---
 
 ## Candidate experiments (planning backlog)
@@ -545,3 +654,17 @@ Surfaced during chaos sessions; not yet executed. Append as we run them.
   *graceful* CR-001 case under load (CR-001 has only been verified
   in steady state). Tests whether in-flight transactions on the
   outgoing primary terminate cleanly vs. orphaning.
+- **CR-016 — Failed primary does not auto-rebootstrap.** Spotted
+  during CR-009c follow-up. After a SIGKILL-postmaster + successful
+  failover, the killed node lands in `StateFailed/RolePrimary` with
+  `postmaster.pid` still present and the postmaster process still a
+  zombie. Peers (node-a, node-c) publish
+  `auto_rebootstrap.detected condition=1` events on its behalf, but
+  the failed node's own reconciler does not transition out of
+  StateFailed within at least 7 minutes — the milestone-011
+  "fast-fail auto-rebootstrap from StateFailed" path appears to not
+  trigger here. Today only `process-compose process restart` restores
+  the node. Worth tracing whether the gate is the
+  AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW timer, the cooldown, or a
+  precondition (e.g. PG-already-stopped check) that a failed-primary
+  with a zombie postmaster fails to satisfy.

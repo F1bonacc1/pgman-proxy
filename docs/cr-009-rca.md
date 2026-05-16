@@ -8,16 +8,36 @@ All file paths in this document are relative to the `pg-manager` repo
 (`../pg-manager` from pgman-proxy). Line numbers are from the commit
 present at the time of the chaos run (2026-05-16).
 
-> **2026-05-16 update — re-test result (CR-009b):** The
-> milestone-012 fix (resign-on-PG-crash + health-gated renewal +
-> sync-aware tolerance) is correct in design but **fails to clear
-> Bug #1** because of a deeper layer: the killed postmaster is a
-> *zombie* (still in the kernel process table because its parent
-> pgman-proxy is PID 1 and has not reaped it). `IsRunning`'s
-> `kill(pid,0)` + `/proc/<pid>/comm` checks both succeed on zombies,
-> so `o.PostgresUp` never goes false and the resign code path is
-> never reached. See the **"Verified root cause (CR-009b)"** section
-> at the bottom of this doc for the additional fix required.
+> **STATUS: CLEARED** (CR-009c, 2026-05-16). Both bugs are now
+> closed in the running rig. The fix landed in two stages:
+>
+> 1. **Milestone-012** in `../pg-manager` —
+>    `LeadershipProvider.Resign` + `Reconciler.resignOnPostgresCrash`
+>    on the `EventPostgresCrashed` arm, the `WithHealthCheck`
+>    callback on the NATS leadership adapter, and sync-aware
+>    `pgmanager.ResolveTolerance` replacing the 16 MiB silent
+>    default. CR-009b proved the design correct but the precondition
+>    (`o.PostgresUp == false`) unreachable in the
+>    pgman-proxy-as-PID-1 deployment because the killed postmaster
+>    is a *zombie*.
+> 2. **Fix 1D** in `internal/pgproto/pgexec.go:394-407` — reads
+>    `/proc/<pid>/stat` field 3 after the existing `kill(pid,0)` +
+>    `/proc/<pid>/comm` checks and returns `(false, nil)` when the
+>    state byte is `'Z'`. Closes the gap that made milestone-012
+>    unreachable.
+>
+> With both stages in place, CR-009c measured:
+> - Failover within ~2 s (vs. 97+ s original zombie window)
+> - `resigned leadership: local postgres unreachable` log line
+>   visible at +2 s on the killed primary
+> - `data_loss_total = 0` and `extra_rows = 0` through the failover
+> - 143 in-flight writes failed (5 s window); cluster wrote ~9k
+>   subsequent rows on the new primary without further loss
+>
+> The detailed CR-009 / CR-009b / CR-009c trail lives in
+> `docs/chaos-experiments.md`. This RCA stays as the canonical
+> "why" record. The original Priority-0 finding (1D) is at the
+> bottom of this doc.
 
 ---
 
