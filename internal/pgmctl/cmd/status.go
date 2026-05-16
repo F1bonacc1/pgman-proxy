@@ -221,13 +221,51 @@ type statusJSONShape struct {
 	CapturedAt   time.Time             `json:"captured_at" yaml:"captured_at"`
 	Cluster      *pgmanagerStatus      `json:"cluster" yaml:"cluster"`
 	EmbeddedNATS *embeddedNATSSnapshot `json:"embedded_nats,omitempty" yaml:"embedded_nats,omitempty"`
+	Substrate    substrateQuorum       `json:"substrate" yaml:"substrate"`
+}
+
+// substrateQuorum surfaces whether the connecting peer can reach a
+// majority of the cluster via NATS fan-out. Derived from the per-peer
+// Instances response shape (peers that don't reply are marked
+// unreachable by the fan-out aggregator). When Quorate is false the
+// JetStream KV bucket — which backs pg-manager's leadership lease and
+// state store — is not writable; the cluster is operating beyond
+// FTT=(DeclaredSize-1)/2 and the lone-side primary (if any) will
+// block writes at COMMIT via synchronous_commit. Surfaced so
+// operators can distinguish "single node hiccup" from "cluster
+// unavailable for writes" at a glance.
+type substrateQuorum struct {
+	Required   int  `json:"required" yaml:"required"`
+	Responding int  `json:"responding" yaml:"responding"`
+	Total      int  `json:"total" yaml:"total"`
+	Quorate    bool `json:"quorate" yaml:"quorate"`
 }
 
 func statusJSON(engine *pgmanagerStatus, embedded *embeddedNATSSnapshot) statusJSONShape {
+	responding, _, total := peerCounts(engine)
 	return statusJSONShape{
 		CapturedAt:   time.Now().UTC(),
 		Cluster:      engine,
 		EmbeddedNATS: embedded,
+		Substrate:    computeSubstrateQuorum(responding, total),
+	}
+}
+
+// computeSubstrateQuorum derives the majority-quorum verdict from the
+// fan-out responding count. A single-node cluster has Required=1 and
+// is always Quorate when self is up. Empty Instances (total=0) is
+// treated as a structural failure rather than "quorate by vacuity" —
+// the caller produces a non-zero exit code.
+func computeSubstrateQuorum(responding, total int) substrateQuorum {
+	required := 0
+	if total > 0 {
+		required = total/2 + 1
+	}
+	return substrateQuorum{
+		Required:   required,
+		Responding: responding,
+		Total:      total,
+		Quorate:    total > 0 && responding >= required,
 	}
 }
 
@@ -249,12 +287,20 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 	worst = worse(worst, primarySev, leaderSev)
 
 	responding, healthy, total := peerCounts(engine)
+	substrate := computeSubstrateQuorum(responding, total)
 	peersSev := output.SevPass
 	switch {
 	case healthy == 0:
 		peersSev = output.SevFail
 	case healthy < total, responding < total:
 		peersSev = output.SevWarn
+	}
+	if total > 0 && !substrate.Quorate {
+		// Quorum loss is strictly more severe than a slow / unhealthy
+		// peer — KV writes are refused, so the cluster cannot persist
+		// leadership transitions or state-store mutations. Force FAIL
+		// on the Peers segment even if `healthy >= 1`.
+		peersSev = output.SevFail
 	}
 	worst = worse(worst, peersSev)
 	peersMsg := fmt.Sprintf("%d/%d healthy", healthy, total)
@@ -272,6 +318,17 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 		peersStr,
 	)
 	fmt.Fprintln(w, meshStr)
+	if total > 0 && !substrate.Quorate {
+		// One extra line — only emitted on quorum loss — so a paged
+		// operator can't miss it. The "Primary:" segment above may still
+		// name a believed-primary; this line clarifies that
+		// synchronous_commit will block its writes regardless.
+		quorumLine := fmt.Sprintf(
+			"Substrate: QUORUM LOST  ·  %d/%d responding (need %d)  ·  writes will block on sync_commit",
+			substrate.Responding, substrate.Total, substrate.Required,
+		)
+		fmt.Fprintln(w, output.SevFail.Color(col, quorumLine))
+	}
 	fmt.Fprintln(w)
 
 	t := output.NewTable("NODE", "ROLE", "STATE", "FENCE", "LAG", "LAST TRANSITION")
