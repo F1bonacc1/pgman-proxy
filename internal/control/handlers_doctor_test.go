@@ -236,6 +236,74 @@ func TestDoctorRun_UsesPeerAggregator(t *testing.T) {
 	}
 }
 
+// TestCheckClusterHasPrimary_IgnoresFailedExPrimary is the regression
+// test for the doctor false-positive observed in the chaos rig after
+// CR-009c (2026-05-16): once a SIGKILLed primary lands in StateFailed
+// with PG down, its Role label stays "primary" until rebootstrap
+// drives it back through Standby. The check used to count
+// Role==Primary regardless of state, so a healthy failover (one new
+// active primary + one ex-primary in Failed/StateFailed) was
+// reported as a 2-primary split-brain. The active-primary count must
+// require State==Running AND PostgresUp.
+func TestCheckClusterHasPrimary_IgnoresFailedExPrimary(t *testing.T) {
+	engine := &fakeEngine{
+		statusFn: func(_ context.Context) (pgmanager.Status, error) {
+			return pgmanager.Status{
+				ClusterID:    "test-cluster",
+				LeaderNodeID: "node-a",
+				Instances: []pgmanager.InstanceStatus{
+					// Newly-elected active primary.
+					{NodeID: "node-a", Role: pgmanager.RolePrimary, State: pgmanager.StateRunning, PostgresUp: true},
+					// Ex-primary: PG SIGKILLed, role label persists, state
+					// is Failed, PostgresUp=false. Must NOT count as a
+					// second primary.
+					{NodeID: "node-b", Role: pgmanager.RolePrimary, State: pgmanager.StateFailed, PostgresUp: false},
+					// Healthy standby.
+					{NodeID: "node-c", Role: pgmanager.RoleStandby, State: pgmanager.StateRunning, PostgresUp: true},
+				},
+			}, nil
+		},
+	}
+	sev, msg, ev := checkClusterHasPrimary(context.Background(), engine)
+	if sev != SeverityPass {
+		t.Errorf("severity = %s, want PASS; msg=%q", sev, msg)
+	}
+	if got := ev["primary_count"]; got != 1 {
+		t.Errorf("primary_count = %v, want 1", got)
+	}
+	if got := ev["primary_node_id"]; got != "node-a" {
+		t.Errorf("primary_node_id = %v, want node-a", got)
+	}
+	if got := ev["stale_primary_role_ct"]; got != 1 {
+		t.Errorf("stale_primary_role_ct = %v, want 1 (node-b's stale role label)", got)
+	}
+}
+
+// TestCheckClusterHasPrimary_RealSplitBrain confirms a true
+// split-brain (two peers both running + PG up + role=primary) still
+// FAILs. Guards the regression test above against being so permissive
+// that it masks a real two-primary condition.
+func TestCheckClusterHasPrimary_RealSplitBrain(t *testing.T) {
+	engine := &fakeEngine{
+		statusFn: func(_ context.Context) (pgmanager.Status, error) {
+			return pgmanager.Status{
+				ClusterID: "test-cluster",
+				Instances: []pgmanager.InstanceStatus{
+					{NodeID: "node-a", Role: pgmanager.RolePrimary, State: pgmanager.StateRunning, PostgresUp: true},
+					{NodeID: "node-b", Role: pgmanager.RolePrimary, State: pgmanager.StateRunning, PostgresUp: true},
+				},
+			}, nil
+		},
+	}
+	sev, msg, _ := checkClusterHasPrimary(context.Background(), engine)
+	if sev != SeverityFail {
+		t.Errorf("severity = %s, want FAIL; msg=%q", sev, msg)
+	}
+	if msg != "2 primaries observed (split-brain)" {
+		t.Errorf("msg = %q, want %q", msg, "2 primaries observed (split-brain)")
+	}
+}
+
 func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	baseline := pgmanager.Status{
 		ClusterID:    "test-cluster",

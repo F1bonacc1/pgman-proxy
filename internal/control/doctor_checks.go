@@ -129,17 +129,32 @@ func checkClusterHasPrimary(ctx context.Context, e Engine) (Severity, string, ma
 	if err != nil {
 		return SeverityUnknown, "Status: " + err.Error(), nil
 	}
+	// Count only *active* primaries. A peer's Role label persists across
+	// state transitions: after EventPostgresCrashed, a primary becomes
+	// State=Failed but its Role stays Primary until rebootstrap drives
+	// it back through Standby. Counting role alone produces a false
+	// split-brain alarm in exactly the recovery window where the
+	// cluster has correctly failed over (CR-009c follow-up,
+	// 2026-05-16). Require Running + PostgresUp so a quiescent
+	// ex-primary is not double-counted with the newly-elected one.
 	primaries := 0
 	primaryID := ""
+	staleCount := 0
 	for _, inst := range st.Instances {
-		if inst.Role == pgmanager.RolePrimary {
-			primaries++
-			primaryID = string(inst.NodeID)
+		if inst.Role != pgmanager.RolePrimary {
+			continue
 		}
+		if inst.State != pgmanager.StateRunning || !inst.PostgresUp {
+			staleCount++
+			continue
+		}
+		primaries++
+		primaryID = string(inst.NodeID)
 	}
 	ev := map[string]any{
-		"primary_count":   primaries,
-		"primary_node_id": primaryID,
+		"primary_count":         primaries,
+		"primary_node_id":       primaryID,
+		"stale_primary_role_ct": staleCount,
 	}
 	switch {
 	case primaries == 1:
