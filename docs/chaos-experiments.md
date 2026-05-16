@@ -297,17 +297,116 @@ wired into CI — those are listed as **feasible but not implemented**.
   rig validation in this entry is a manual smoke-test; not run by
   CI.
 
+### CR-009 — SIGKILL the postmaster only (proxy stays up)
+
+- **Date:** 2026-05-16 (T0 = `16:43:40+03:00`)
+- **Description:** Inside the primary container (node-b at injection
+  time), find the postmaster PID and SIGKILL it. pgman-proxy is PID 1
+  and remains the postmaster's parent — killing only the postmaster
+  takes PostgreSQL down while leaving the proxy / NATS / leader-key
+  lease all alive.
+
+  Command:
+  ```
+  PM=$(docker exec pgman-pc-node-b sh -c "pgrep -f 'postgres -D /var/lib/postgresql/data' | head -1")
+  docker exec pgman-pc-node-b kill -9 $PM
+  ```
+- **Expected:** pg-manager's local-PG health observer detects the
+  dead postmaster within a few seconds. Either:
+  (a) the proxy stops renewing its leader-key (since it knows its own
+  PG is down) and a peer takes over, OR
+  (b) the proxy restarts PG locally and reconfirms its leadership.
+  Workload should see a brief gap, then resume on a new (or
+  recovered) primary.
+- **Actual — TWO CRITICAL BUGS:**
+
+  **Bug #1 — Zombie primary (no failover for 97+ seconds).** For
+  the full duration of the observation loop (97 seconds), the
+  cluster's `/v1/status` from every node continued to report
+  `LeaderNodeID=node-b PrimaryNodeID=node-b`. The proxy on node-b
+  was PID 1 (alive); the leader-key lease was still being renewed
+  in JetStream. No peer attempted to take over.
+
+  - node-b's own `/v1/status`: `b: role=1 state=3 up=True` — the
+    local instance row still claimed PostgresUp=true even though
+    the postmaster process was gone.
+  - node-c's view: `b: role=0 state=0 up=False` — node-c DID
+    observe via fan-out that node-b's PG was down. But this did
+    not trigger any cluster-level action.
+  - node-a's view: `b: role=1 state=3 up=True` — node-a's view of
+    node-b stayed stale even at T+97s.
+  - **chaos-workload was blocked on EVERY proxy port** because all
+    three proxies route writes to the primary's PG, which was
+    dead. Error: `failed to receive message: unexpected EOF` on
+    16432, 16433, AND 16434 simultaneously.
+
+  **Bug #2 — 65,519-row data-loss event during recovery.** I forced
+  recovery by `process-compose process restart node-b`. Within ~30 s
+  the cluster converged on node-c as new primary, node-b rejoined
+  as standby, but:
+
+  - Pre-CR-009 baseline: `writes_ok=267,255  data_loss_total=51
+    extra_rows=56`. (The 51 is itself a finding — see Notes
+    below.)
+  - Post-recovery: `writes_ok=267,538  writes_failed=4,175
+    data_loss_total=65,574  rows_in_db=202,019  max_seq=271,510`.
+  - Delta: **+65,523 rows of data loss**. The workload had
+    acknowledged ~267,500 writes; only ~202,000 of those rows
+    survived in the new primary's database. 65k acknowledged
+    writes vanished.
+  - This is a CP-system invariant violation. With `synchronous_commit=on`
+    and `synchronous_standby_names="ANY 1 (node-a, node-c)"` at
+    node-b, every acked write must have been durable on at least
+    one of node-a or node-c. Yet node-c — the promoted survivor —
+    is missing 65k of those rows.
+
+  Plausible chain: node-a was the sync ACKer for many writes,
+  node-c was lagging; on promotion the selector promoted node-c
+  (perhaps because it had a successful probe) without checking WAL
+  recency vs. peers. node-a then ended up in state=failed (its
+  view was ahead of the new primary), confirming the "promoted the
+  wrong replica" hypothesis.
+
+- **Verdict:** FAIL (data safety) — **STOP-THE-WORLD CLASS.** Two
+  distinct bugs:
+
+  1. **Failover does not trigger on PG-only failure.** Leader-key
+     renewal must be gated on local-PG health; today it is not.
+     A primary whose PG has crashed (OOM, SEGV, operator
+     mistake) holds the leader-key indefinitely.
+  2. **Promotion may select a replica behind the freshest peer.**
+     The selector that picks who promotes during failover does
+     not (or did not in this run) require the new primary's WAL
+     to dominate every other reachable standby's WAL — leading
+     to silent data loss.
+- **Fix:** NOT YET IMPLEMENTED. Investigation pending.
+- **Test exists:** No. Neither bug has regression coverage yet.
+- **Auto-test feasibility:** Both bugs are testable.
+  - Bug #1: kill the postmaster inside a testcontainers rig, assert
+    a peer takes over within N seconds. Requires container access.
+  - Bug #2: an integration test that wedges replication on one
+    standby (e.g. SIGSTOP) then kills the primary; assert promotion
+    refuses or picks the freshest standby. Doable in CI with care.
+- **Notes / open items:**
+  - The 51 rows of data_loss already present at baseline must
+    have leaked in during the CR-004..CR-008 partition cycles
+    despite each of those runs verifying `data_loss_total=0` at
+    the end. The chaos-workload's log buffer rolled (1000-line
+    cap; this is a logging issue worth fixing as well) so we
+    cannot timestamp those 51 rows precisely.
+  - After recovery, node-a remained in `state=failed`; pg-manager's
+    failover_quorum snapshot showed `standby_names=["node-b"]` only,
+    excluding node-a. Reattaching node-a is its own work.
+  - This experiment is conclusive enough to halt further chaos until
+    Bug #1 and Bug #2 are root-caused. Adding new fault surfaces on
+    top of a known-corrupt rig produces noise, not signal.
+
 ---
 
 ## Candidate experiments (planning backlog)
 
 Surfaced during chaos sessions; not yet executed. Append as we run them.
 
-- **CR-009 — PG-only kill on primary (proxy stays up).** `kill -9 postgres`
-  inside the primary container without killing pgman-proxy. Tests
-  whether the proxy detects PG down and demotes / triggers failover,
-  vs. hanging on its local PG connection. Auto-test feasibility: same
-  as CR-001 — needs container access.
 - **CR-010 — Asymmetric partition.** One-direction iptables DROP
   (e.g., primary sends to standby but never receives ACKs). Tests
   whether NATS / pg-manager heartbeats correctly fail closed in the
