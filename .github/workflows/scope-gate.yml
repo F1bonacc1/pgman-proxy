@@ -7,10 +7,12 @@
 #
 # A real reference to one of the forbidden tokens — say, calling out
 # in a comment that a particular feature is "out of scope vs. a future
-# k8s sidecar" — is allowed by adding the line to .github/scope-allow.txt
-# (one literal grep match per line, no regex). The workflow excludes
-# both .github/ and the spec/ tree from the grep so this YAML and the
-# spec text don't trip the gate themselves.
+# k8s sidecar" — is allowed by adding the matched line to
+# .github/scope-allow.txt. The allow file uses `file:matched-line`
+# format (no line numbers — so drift in surrounding code does not
+# invalidate an entry). The workflow excludes both .github/ and the
+# spec/ tree from the grep so this YAML and the spec text don't trip
+# the gate themselves.
 
 name: scope-gate
 on:
@@ -35,7 +37,7 @@ jobs:
           # Search the source tree, excluding spec docs (which legitimately
           # name what's out of scope), .git, generated dirs, and this
           # workflow file.
-          hits=$(grep -RInE "($tokens)" \
+          hits=$(grep -RIE "($tokens)" \
               --include='*.go' --include='*.md' --include='*.yaml' \
               --include='*.yml' --include='*.toml' --include='Makefile' \
               --include='Dockerfile*' \

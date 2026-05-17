@@ -1,2 +1,6 @@
-CHANGELOG.md:96:- Kubernetes / Helm / CRD / controller-runtime / admission-webhook
-internal/config/config_test.go:300:	cfg.DeploymentMode = "kubernetes-operator"
+Makefile:	@! grep -rE 'apiVersion: (apps|batch|networking)|kind: (Deployment|StatefulSet|DaemonSet|Service|ConfigMap|Secret|Ingress|Pod|CronJob|Job|HorizontalPodAutoscaler|RoleBinding|ClusterRole)|helm-chart|chart\.yaml|Chart\.yaml|kustomization\.ya?ml|operator-bundle' \
+CHANGELOG.md:- Kubernetes / Helm / CRD / controller-runtime / admission-webhook
+README.md:  CRD / controller-runtime / admission-webhook tokens (FR-015).
+internal/control/handlers_restart.go:	// ("none", "tini", "systemd", "process-compose", "kubernetes",
+internal/config/config_test.go:	cfg.DeploymentMode = "kubernetes-operator"
+internal/runtime/supervisor.go:	SupervisorKubernetes SupervisorPresence = "kubernetes"
