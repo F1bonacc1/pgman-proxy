@@ -1,0 +1,78 @@
+# Production bundled image: pgman-proxy + PostgreSQL 18 in one container.
+#
+# Each peer in the active/active topology runs this image. pgman-proxy
+# is PID 1; the wrapped pg-manager library drives initdb /
+# pg_basebackup / pg_ctl against the local PGDATA at
+# /var/lib/postgresql/data, so a separate "postgres" container is
+# structurally wrong (see CLAUDE.md / specs/001-active-active-pg-proxy/).
+#
+# Distinct from `deploy/docker/Dockerfile`, which is a distroless static
+# image holding only the pgman-proxy binary — appropriate for sidecar
+# topologies where Postgres runs in a separate container or on the host.
+#
+# Build context MUST contain both `pgman-proxy/` and `pg-manager/` at
+# the top level (the `replace github.com/f1bonacc1/pg-manager =>
+# ../pg-manager` directive in pgman-proxy/go.mod). The matching CI
+# workflow (.github/workflows/release-image.yml) lays them out that
+# way before invoking `docker build`.
+
+# --- stage 1: build pgman-proxy ---------------------------------------
+# Go toolchain pinned to match pgman-proxy/go.mod's `go 1.26.3` line.
+FROM golang:1.26.3-bookworm AS build
+WORKDIR /src
+
+# Pull both modules into the build context. The replace directive in
+# pgman-proxy/go.mod points at ../pg-manager, so both must be present.
+COPY pg-manager /src/pg-manager
+COPY pgman-proxy /src/pgman-proxy
+
+WORKDIR /src/pgman-proxy
+RUN go mod download
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+RUN CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -o /out/pgman-proxy ./cmd/pgman-proxy
+
+# --- stage 2: runtime — postgres:18-bookworm + pgman-proxy ------------
+FROM postgres:18-bookworm
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+LABEL org.opencontainers.image.source="https://github.com/f1bonacc1/pgman-proxy"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.description="Active/active PostgreSQL HA proxy + lifecycle manager bundled with PostgreSQL 18"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${COMMIT}"
+
+COPY --from=build /out/pgman-proxy /usr/local/bin/pgman-proxy
+
+# tini reaps the postgres process group when pgman-proxy exits, so a
+# fast peer restart doesn't leave a dangling postmaster.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         tini \
+         ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PGDATA=/var/lib/postgresql/data \
+    PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
+    PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin
+
+# The postgres base image declares VOLUME /var/lib/postgresql/data and
+# its default entrypoint expects an empty dir on first boot. We bypass
+# that entrypoint, so we must guarantee an empty + correctly-owned
+# PGDATA ourselves before dropping privileges.
+RUN install -d -o postgres -g postgres -m 0700 "$PGDATA"
+
+# FR-013: image runs unprivileged. Orchestrators that try `--user 0:0`
+# are rejected by the operator's deployment layer.
+USER postgres
+
+# Data-plane (PostgreSQL wire), observability, control plane, embedded
+# NATS client, and embedded NATS cluster routes (TCP only).
+EXPOSE 6432 9090 9091 4222 6222
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/pgman-proxy"]

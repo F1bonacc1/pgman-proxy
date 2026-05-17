@@ -79,13 +79,17 @@ GitHub Actions workflows in `.github/workflows/`:
   mechanic references (`initdb`, `pg_basebackup`, `pg_rewind`,
   `pg_upgrade`, `pg_ctl promote`, replication-slot DDL) in non-test
   production source (Constitution IV).
+- `release-image.yml` — builds and pushes the bundled
+  pgman-proxy+pg18 image to `ghcr.io/f1bonacc1/pgman-proxy` on tags
+  matching `v*` and on `workflow_dispatch`. Multi-arch
+  (linux/amd64, linux/arm64); see "Container images" below.
 
 **Required repo secret**: `PG_MANAGER_TOKEN` — a PAT (or fine-grained
-token) with `contents:read` on `f1bonacc1/pg-manager`. The `ci` and
-`govulncheck` jobs check out the sibling `pg-manager` repo to satisfy
-the `replace github.com/f1bonacc1/pg-manager => ../pg-manager`
-directive in `go.mod`; the default `GITHUB_TOKEN` cannot read other
-private repos.
+token) with `contents:read` on `f1bonacc1/pg-manager`. The `ci`,
+`govulncheck`, and `release-image` jobs check out the sibling
+`pg-manager` repo to satisfy the `replace github.com/f1bonacc1/pg-manager
+=> ../pg-manager` directive in `go.mod`; the default `GITHUB_TOKEN`
+cannot read other private repos.
 
 ## Performance baseline (SC-003)
 
@@ -137,13 +141,48 @@ connection, never opens cluster routes. It consumes only the
 documented `/v1/*` control-plane and the embedded-NATS observability
 surface.
 
-## Container image
+## Container images
 
-`deploy/docker/Dockerfile` is a distroless static base running as
-non-root (`USER nonroot:nonroot`). Goreleaser (`.goreleaser.yaml`)
-publishes the OCI image on tag — `make release` does a snapshot build.
-The image MUST run unprivileged; `--user 0:0` is rejected at orchestrator
-level (FR-013).
+Two production-shape Dockerfiles, addressing two deployment topologies:
+
+| File | Purpose | Base | Tag (ghcr.io/f1bonacc1/pgman-proxy) |
+|------|---------|------|--------------------------------------|
+| `deploy/docker/Dockerfile` | distroless static — pgman-proxy binary only. Use as a sidecar to an externally-managed Postgres. | `gcr.io/distroless/static:nonroot` | published by goreleaser on tag |
+| `deploy/docker/Dockerfile.bundle` | bundled — pgman-proxy + PostgreSQL 18 in one container. Each peer in the active/active topology runs this. | `postgres:18-bookworm` | `:vX.Y.Z`, `:vX.Y`, `:latest` on tag; `:edge` on `workflow_dispatch` |
+
+The bundled image is built by `.github/workflows/release-image.yml`
+(triggers: tag `v*` and manual `workflow_dispatch`). Multi-arch
+(linux/amd64, linux/arm64) via QEMU + buildx. Provenance + SBOM
+attached.
+
+```bash
+# Pull the latest tagged release:
+docker pull ghcr.io/f1bonacc1/pgman-proxy:latest
+
+# Run one peer with PG18 colocated. pgman-proxy is PID 1; pg-manager
+# (wrapped by pgman-proxy) drives initdb / pg_basebackup / pg_ctl
+# against the local PGDATA. See process-compose.yaml for a working
+# 3-peer reference.
+docker run --rm \
+    -e PGMAN_PROXY_CLUSTER_ID=prod-cluster \
+    -e PGMAN_PROXY_NODE_ID=node-a \
+    -e PGMAN_PROXY_PEERS=node-a,node-b,node-c \
+    -e PGMAN_PROXY_CLUSTER_PASSWORD_ENV=PGMAN_CLUSTER_PASSWORD \
+    -e PGMAN_CLUSTER_PASSWORD="$(pgman-proxy cluster-secret-gen)" \
+    -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
+    -e PGMAN_PROXY_CONTROL_TOKEN=<bearer-token> \
+    # …+ the rest of the config (see process-compose.yaml for the full env)
+    -p 6432:6432 -p 9090:9090 -p 9091:9091 \
+    -v node-a-data:/var/lib/postgresql/data \
+    ghcr.io/f1bonacc1/pgman-proxy:latest
+```
+
+Both images **MUST run unprivileged**; `--user 0:0` is rejected at
+the orchestrator level (FR-013). The bundled image's default user is
+`postgres`.
+
+Goreleaser (`.goreleaser.yaml`) publishes the distroless image on tag;
+`make release` does a snapshot build.
 
 ## License
 
