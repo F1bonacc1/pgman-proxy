@@ -66,6 +66,27 @@ make integration   # docker-compose-driven integration tests
 make smoke         # one smoke test per deployment topology
 ```
 
+## Continuous integration
+
+GitHub Actions workflows in `.github/workflows/`:
+
+- `ci.yml` — `go build / vet / test -race / smoke / golangci-lint`.
+- `govulncheck.yml` — Go vulnerability DB scan; runs per PR and on a
+  weekly cron.
+- `scope-gate.yml` — SC-006 grep-gate; rejects Kubernetes / Helm /
+  CRD / controller-runtime / admission-webhook tokens (FR-015).
+- `lcm-discipline-gate.yml` — SC-013 grep-gate; rejects engine-
+  mechanic references (`initdb`, `pg_basebackup`, `pg_rewind`,
+  `pg_upgrade`, `pg_ctl promote`, replication-slot DDL) in non-test
+  production source (Constitution IV).
+
+**Required repo secret**: `PG_MANAGER_TOKEN` — a PAT (or fine-grained
+token) with `contents:read` on `f1bonacc1/pg-manager`. The `ci` and
+`govulncheck` jobs check out the sibling `pg-manager` repo to satisfy
+the `replace github.com/f1bonacc1/pg-manager => ../pg-manager`
+directive in `go.mod`; the default `GITHUB_TOKEN` cannot read other
+private repos.
+
 ## Performance baseline (SC-003)
 
 The proxy hop adds <1 ms p99 to a `SELECT 1` round-trip vs. direct PG

@@ -27,11 +27,16 @@ jobs:
       # CI clones the sibling repo so the module graph resolves the way
       # local development does. Tagged releases pin pg-manager via the
       # release-build replacement (constitution).
+      #
+      # pg-manager is private; the default GITHUB_TOKEN cannot read other
+      # private repos. Set a repository secret PG_MANAGER_TOKEN to a PAT
+      # (or fine-grained token) with `contents:read` on f1bonacc1/pg-manager.
       - uses: actions/checkout@v4
         with:
           repository: f1bonacc1/pg-manager
           path: pg-manager
           fetch-depth: 1
+          token: ${{ secrets.PG_MANAGER_TOKEN || github.token }}
 
       - uses: actions/setup-go@v5
         with:

@@ -1,0 +1,51 @@
+# govulncheck — scans the module graph against the Go vulnerability
+# database and fails when a known-vulnerable symbol is reachable from
+# this codebase. Runs on every PR/push to main and on a weekly cron so
+# newly-disclosed CVEs in pinned dependencies are surfaced even when
+# the tree is idle.
+#
+# The pg-manager replace directive means we need the sibling checked
+# out the same way ci.yml does it. PG_MANAGER_TOKEN is a repository
+# secret holding a PAT with contents:read on f1bonacc1/pg-manager.
+
+name: govulncheck
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "0 6 * * 1"  # Mon 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck ./...
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: pgman-proxy
+
+      - uses: actions/checkout@v4
+        with:
+          repository: f1bonacc1/pg-manager
+          path: pg-manager
+          fetch-depth: 1
+          token: ${{ secrets.PG_MANAGER_TOKEN || github.token }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: pgman-proxy/go.mod
+          cache-dependency-path: pgman-proxy/go.sum
+
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck
+        working-directory: pgman-proxy
+        run: govulncheck ./...

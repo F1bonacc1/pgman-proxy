@@ -6,6 +6,11 @@ dist/
 *.out
 coverage.out
 coverage.html
+# Ad-hoc chaos workload binary built at the repo root (`go build ./cmd/chaos-workload`).
+/chaos-workload
+
+# Claude Code harness state
+.claude/scheduled_tasks.lock
 
 # Go module cache outputs are global; vendor/ only when explicitly populated.
 vendor/
