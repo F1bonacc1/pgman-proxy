@@ -31,29 +31,41 @@ services:
       dockerfile: pgman-proxy/tests/integration/Dockerfile
     image: pgman-proxy-it:latest
     environment:
-      PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
+      <<: &cluster_common
+        # Feature 002 / FR-011a: declared_size >= 1 is required; >1
+        # triggers the cluster-coordination contract (route_peers,
+        # jetstream_dir, routes_listen). The credential + plaintext-
+        # explicit-ack pair is needed because the routes mesh binds
+        # on a non-loopback interface inside the container.
+        PGMAN_PROXY_CLUSTER_DECLARED_SIZE: "3"
+        PGMAN_PROXY_CLUSTER_USERNAME: pgman-proxy-it
+        PGMAN_PROXY_CLUSTER_PASSWORD_ENV: PGMAN_CLUSTER_PASSWORD
+        PGMAN_CLUSTER_PASSWORD: integration-test-cluster-secret-32b
+        PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK: "true"
+        PGMAN_PROXY_CLUSTER_CLIENT_LISTEN_PORT: "4222"
+        PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT: "6222"
+        PGMAN_PROXY_CLUSTER_JETSTREAM_DIR: /var/lib/postgresql/jetstream
+        PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
+        PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
+        PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
+        PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
+        PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
+        LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
+        PGMAN_PROXY_OBS_LOG_LEVEL: info
+        # Validation requires a control-plane token source even when the
+        # control-plane HTTP server is not yet built (Phase 5). The
+        # placeholder value is harmless until US4 wires the listener.
+        PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN
+        PGMAN_PROXY_CONTROL_TOKEN: integration-test-token
+        # Test-only HBA / postgresql.conf scaffolding so peers can stream
+        # replication on the compose network (DEMO ONLY — never use trust
+        # auth in production). The leader's PostInitDB hook applies these.
+        PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
+        PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
+        PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
+        PGMAN_PROXY_PEERS: node-a,node-b,node-c
       PGMAN_PROXY_NODE_ID: node-a
-      PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      # Feature 002: PGMAN_PROXY_NATS_URL removed (embedded NATS).
-      # Cluster credential and route_peers are configured via
-      # cluster.* keys; integration tests will wire them per scenario.
-      PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
-      PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
-      PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
-      PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
-      PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
-      LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
-      PGMAN_PROXY_OBS_LOG_LEVEL: info
-      # Validation requires a control-plane token source even when the
-      # control-plane HTTP server is not yet built (Phase 5). The
-      # placeholder value is harmless until US4 wires the listener.
-      PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN
-      PGMAN_PROXY_CONTROL_TOKEN: integration-test-token
-      # Test-only HBA / postgresql.conf scaffolding so peers can stream
-      # replication on the compose network (DEMO ONLY — never use trust
-      # auth in production). The leader's PostInitDB hook applies these.
-      PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
-      PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
+      PGMAN_PROXY_CLUSTER_ROUTE_PEERS: node-b:6222,node-c:6222
     ports:
       - "16432:6432"
       - "19090:9090"
@@ -61,29 +73,9 @@ services:
   node-b:
     image: pgman-proxy-it:latest
     environment:
-      PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
+      <<: *cluster_common
       PGMAN_PROXY_NODE_ID: node-b
-      PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      # Feature 002: PGMAN_PROXY_NATS_URL removed (embedded NATS).
-      # Cluster credential and route_peers are configured via
-      # cluster.* keys; integration tests will wire them per scenario.
-      PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
-      PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
-      PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
-      PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
-      PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
-      LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
-      PGMAN_PROXY_OBS_LOG_LEVEL: info
-      # Validation requires a control-plane token source even when the
-      # control-plane HTTP server is not yet built (Phase 5). The
-      # placeholder value is harmless until US4 wires the listener.
-      PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN
-      PGMAN_PROXY_CONTROL_TOKEN: integration-test-token
-      # Test-only HBA / postgresql.conf scaffolding so peers can stream
-      # replication on the compose network (DEMO ONLY — never use trust
-      # auth in production). The leader's PostInitDB hook applies these.
-      PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
-      PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
+      PGMAN_PROXY_CLUSTER_ROUTE_PEERS: node-a:6222,node-c:6222
     depends_on:
       node-a:
         condition: service_started
@@ -94,29 +86,9 @@ services:
   node-c:
     image: pgman-proxy-it:latest
     environment:
-      PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
+      <<: *cluster_common
       PGMAN_PROXY_NODE_ID: node-c
-      PGMAN_PROXY_PEERS: node-a,node-b,node-c
-      # Feature 002: PGMAN_PROXY_NATS_URL removed (embedded NATS).
-      # Cluster credential and route_peers are configured via
-      # cluster.* keys; integration tests will wire them per scenario.
-      PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
-      PGMAN_PROXY_OBS_HEALTH_ADDR: 0.0.0.0:9090
-      PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
-      PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
-      PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
-      LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
-      PGMAN_PROXY_OBS_LOG_LEVEL: info
-      # Validation requires a control-plane token source even when the
-      # control-plane HTTP server is not yet built (Phase 5). The
-      # placeholder value is harmless until US4 wires the listener.
-      PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN
-      PGMAN_PROXY_CONTROL_TOKEN: integration-test-token
-      # Test-only HBA / postgresql.conf scaffolding so peers can stream
-      # replication on the compose network (DEMO ONLY — never use trust
-      # auth in production). The leader's PostInitDB hook applies these.
-      PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
-      PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
+      PGMAN_PROXY_CLUSTER_ROUTE_PEERS: node-a:6222,node-b:6222
     depends_on:
       node-a:
         condition: service_started
