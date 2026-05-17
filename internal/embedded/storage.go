@@ -133,8 +133,10 @@ func (m *StorageMonitor) check() (StorageDegradedKind, uint64, error) {
 	if err := syscall.Statfs(m.opts.Path, &statfs); err != nil {
 		return StoragePathUnwritable, 0, err
 	}
-	// Bsize is signed on some platforms; cast safely.
-	free := uint64(statfs.Bavail) * uint64(statfs.Bsize)
+	// Bsize is signed on linux/amd64 (int64); cast to uint64 to align
+	// with the unsigned Bavail. Both are filesystem-reported byte
+	// counts — never negative in practice, so the conversion is sound.
+	free := statfs.Bavail * uint64(statfs.Bsize) //nolint:gosec // G115: filesystem byte counts are non-negative
 	if free < m.opts.MinFreeBytes {
 		return StorageDiskFull, free, fmt.Errorf("free bytes %d below threshold %d", free, m.opts.MinFreeBytes)
 	}

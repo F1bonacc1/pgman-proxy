@@ -28,17 +28,17 @@ import (
 // fakeEngine implements Engine with overridable hooks. Lets tests
 // drive every documented response shape without booting pg-manager.
 type fakeEngine struct {
-	statusFn         func(context.Context) (pgmanager.Status, error)
-	diagnoseFn       func(context.Context) (pgmanager.Diagnosis, error)
-	switchoverFn     func(context.Context, pgmanager.NodeID) error
-	failoverFn       func(context.Context) error
-	fenceFn          func(context.Context, pgmanager.NodeID) error
-	unfenceFn        func(context.Context, pgmanager.NodeID) error
-	promoteFn        func(context.Context) error
-	updateTopologyFn func(context.Context, pgmanager.Topology, pgmanager.Policy) error
-	triggerBackupFn  func(context.Context) (pgmanager.BackupID, error)
-	prepareUpgradeFn func(context.Context, pgmanager.UpgradePlan) error
-	executeUpgradeFn func(context.Context, pgmanager.UpgradePlan, upgrade.PreSwap) error
+	statusFn          func(context.Context) (pgmanager.Status, error)
+	diagnoseFn        func(context.Context) (pgmanager.Diagnosis, error)
+	switchoverFn      func(context.Context, pgmanager.NodeID) error
+	failoverFn        func(context.Context) error
+	fenceFn           func(context.Context, pgmanager.NodeID) error
+	unfenceFn         func(context.Context, pgmanager.NodeID) error
+	promoteFn         func(context.Context) error
+	updateTopologyFn  func(context.Context, pgmanager.Topology, pgmanager.Policy) error
+	triggerBackupFn   func(context.Context) (pgmanager.BackupID, error)
+	prepareUpgradeFn  func(context.Context, pgmanager.UpgradePlan) error
+	executeUpgradeFn  func(context.Context, pgmanager.UpgradePlan, upgrade.PreSwap) error
 	restartPostgresFn func(context.Context) error
 }
 

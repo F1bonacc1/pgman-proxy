@@ -9,8 +9,9 @@
 // invariants and per-peer reachability that are derivable from the
 // existing Status / Diagnose API surface. Checks needing data the
 // proxy can't yet retrieve (disk metrics, clock skew, TLS expiry,
-// backup recency) are scheduled for follow-up phases; their absence
-// here is documented in MISSING_CHECKS.
+// backup recency) are scheduled for follow-up phases; the deferred
+// set is enumerated in the in-file comment above the v1 check
+// registrations.
 
 package control
 
@@ -106,21 +107,21 @@ func DefaultDoctorChecks() []NamedCheck {
 	}
 }
 
-// MISSING_CHECKS documents the 10 v1-target checks not yet implemented.
-// Each entry names the data path that needs to exist before the check
-// can return anything but UNKNOWN.
-var MISSING_CHECKS = []string{
-	"replication.all-streaming     // needs per-standby pg_stat_replication.state on the primary",
-	"replication.no-wal-gaps       // needs primary LSN + per-standby restart_lsn",
-	"slots.no-orphans              // needs primary's pg_replication_slots vs cluster peers",
-	"slots.not-bloated             // needs slot retained_bytes",
-	"disk.has-space                // needs node-side disk usage probe",
-	"disk.wal-not-filling          // needs PG WAL dir growth rate",
-	"clock.skew-acceptable         // needs per-peer NTP-like skew probe",
-	"postgres.version-consistent   // needs per-peer SELECT version()",
-	"tls.certs-valid               // needs per-peer cert expiry inspection",
-	"backups.recent                // needs backup catalog visibility",
-}
+// The 10 v1-target checks not yet implemented (each entry names the
+// data path that needs to exist before the check can return anything
+// but UNKNOWN). Kept as a comment rather than a package-level slice
+// because nothing in the runtime reads it.
+//
+//   replication.all-streaming     — per-standby pg_stat_replication.state on the primary
+//   replication.no-wal-gaps       — primary LSN + per-standby restart_lsn
+//   slots.no-orphans              — primary's pg_replication_slots vs cluster peers
+//   slots.not-bloated             — slot retained_bytes
+//   disk.has-space                — node-side disk usage probe
+//   disk.wal-not-filling          — PG WAL dir growth rate
+//   clock.skew-acceptable         — per-peer NTP-like skew probe
+//   postgres.version-consistent   — per-peer SELECT version()
+//   tls.certs-valid               — per-peer cert expiry inspection
+//   backups.recent                — backup catalog visibility
 
 // --- check implementations ---
 
@@ -192,9 +193,9 @@ func checkClusterQuorum(ctx context.Context, e Engine) (Severity, string, map[st
 	}
 	quorum := total/2 + 1
 	ev := map[string]any{
-		"reachable_count":  reachable,
-		"total_count":      total,
-		"required_quorum":  quorum,
+		"reachable_count": reachable,
+		"total_count":     total,
+		"required_quorum": quorum,
 	}
 	if total == 0 {
 		return SeverityUnknown, "no peer information in Status (aggregator unwired?)", ev
@@ -290,10 +291,10 @@ func checkReplicationLag(ctx context.Context, e Engine) (Severity, string, map[s
 		}
 	}
 	ev := map[string]any{
-		"warn":        warn,
-		"fail":        fail,
-		"warn_bytes":  replicationLagWarnBytes,
-		"fail_bytes":  replicationLagFailBytes,
+		"warn":       warn,
+		"fail":       fail,
+		"warn_bytes": replicationLagWarnBytes,
+		"fail_bytes": replicationLagFailBytes,
 	}
 	switch {
 	case len(fail) > 0:

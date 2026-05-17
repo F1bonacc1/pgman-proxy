@@ -43,12 +43,12 @@ func realisticStatusPayload() map[string]any {
 			},
 		},
 		"embedded_nats": map[string]any{
-			"up":               true,
-			"server_name":      "pgman-proxy-node-a",
-			"listen_addr":      "127.0.0.1:14222",
+			"up":                 true,
+			"server_name":        "pgman-proxy-node-a",
+			"listen_addr":        "127.0.0.1:14222",
 			"client_listen_addr": "127.0.0.1:14111",
 			"routes_listen_addr": "0.0.0.0:14122",
-			"routes_meshed":    2,
+			"routes_meshed":      2,
 		},
 		"sync_standbys": "node-b",
 		// Free-text log field — strict mode does NOT scrub IPs hiding
@@ -93,17 +93,17 @@ func TestStrictRedact_RemovesIPsHostsNodeIDsFromKnownKeys(t *testing.T) {
 	// originally present so the operator can reverse-map offline.
 	table := r.CorrelationTable()
 	wantReverse := map[string]bool{
-		"prod-east-1":           true,
-		"node-a":                true,
-		"node-b":                true,
-		"10.0.0.5":              true,
-		"10.0.0.6":              true,
-		"pgman-proxy-node-a":    true,
-		"127.0.0.1:14222":       true,
-		"127.0.0.1:14111":       true,
-		"0.0.0.0:14122":         true,
-		"10.0.0.5:5432":         true,
-		"10.0.0.6:5432":         true,
+		"prod-east-1":        true,
+		"node-a":             true,
+		"node-b":             true,
+		"10.0.0.5":           true,
+		"10.0.0.6":           true,
+		"pgman-proxy-node-a": true,
+		"127.0.0.1:14222":    true,
+		"127.0.0.1:14111":    true,
+		"0.0.0.0:14122":      true,
+		"10.0.0.5:5432":      true,
+		"10.0.0.6:5432":      true,
 	}
 	have := map[string]bool{}
 	for _, original := range table {

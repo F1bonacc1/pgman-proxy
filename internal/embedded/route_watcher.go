@@ -23,7 +23,7 @@ type RouteWatcher struct {
 	srv      *Server
 	interval time.Duration
 
-	mu      sync.Mutex
+	mu sync.Mutex
 	// known is keyed by peer node id (RouteInfo.RemoteName). NATS gives
 	// every TCP-level reconnect a fresh Rid, so dedup-by-Rid spammed
 	// the history stream with one route_up per reconnect during mesh

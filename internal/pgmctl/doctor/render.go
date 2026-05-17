@@ -78,15 +78,15 @@ func RenderTable(w io.Writer, c *output.Color, rep Report) error {
 		if chk.SuggestedFix == nil {
 			continue
 		}
-		fmt.Fprintf(w, "\n  ↳ %s: %s\n",
+		_, _ = fmt.Fprintf(w, "\n  ↳ %s: %s\n",
 			c.Yellow("suggested fix"),
 			chk.SuggestedFix.Description)
-		fmt.Fprintf(w, "    (name=%s, blast_radius=%s, applies_to=%s)\n",
+		_, _ = fmt.Fprintf(w, "    (name=%s, blast_radius=%s, applies_to=%s)\n",
 			chk.SuggestedFix.Name,
 			chk.SuggestedFix.BlastRadius,
 			chk.SuggestedFix.AppliesToCheck)
 	}
-	fmt.Fprintf(w, "\n%s\n", summaryLine(c, rep.Summary))
+	_, _ = fmt.Fprintf(w, "\n%s\n", summaryLine(c, rep.Summary))
 	return nil
 }
 

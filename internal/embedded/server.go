@@ -16,8 +16,8 @@ import (
 type LifecycleEventKind string
 
 const (
-	EventServerStarted   LifecycleEventKind = "embedded_nats.server_started"
-	EventServerReady     LifecycleEventKind = "embedded_nats.server_ready"
+	EventServerStarted LifecycleEventKind = "embedded_nats.server_started"
+	EventServerReady   LifecycleEventKind = "embedded_nats.server_ready"
 	// EventServerStopping is the durable boundary marker emitted while
 	// the embedded NATS server is still alive — the *last* lifecycle
 	// event that can be persisted to the JetStream history stream

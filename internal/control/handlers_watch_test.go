@@ -147,7 +147,7 @@ func TestWatchEvents_StreamsFramesWithIDAndData(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/v1/watch/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	resp := doStreamingRequest(t, req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
 		t.Fatalf("Content-Type=%q, want text/event-stream", got)
@@ -180,7 +180,7 @@ func TestWatchTransitions_FiltersToStateTransitionsOnly(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/v1/watch/transitions", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	resp := doStreamingRequest(t, req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Block until the handler has subscribed (i.e. lastOpts is set).
 	waitFor(t, func() bool {
@@ -199,7 +199,7 @@ func TestWatchEvents_LastEventIDPropagatesAsCursor(t *testing.T) {
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Last-Event-ID", "01H-RESUME")
 	resp := doStreamingRequest(t, req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	waitFor(t, func() bool {
 		return watch.getLastOpts().Cursor == "01H-RESUME"
@@ -214,7 +214,7 @@ func TestWatch_AcceptHeaderEnforced_406(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/v1/watch/events", nil)
 	req.Header.Set("Accept", "application/json")
 	resp := doStreamingRequest(t, req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotAcceptable {
 		t.Fatalf("status=%d, want 406", resp.StatusCode)
@@ -230,7 +230,7 @@ func TestWatch_GapMarker_OnSubscriptionClosed(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/v1/watch/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	resp := doStreamingRequest(t, req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Wait for the subscription to be wired before closing it.
 	select {
@@ -270,7 +270,7 @@ func TestWatch_KeepaliveCadence_FastTuned(t *testing.T) {
 	req, _ := http.NewRequest("GET", ts.URL+"/v1/watch/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	resp := doStreamingRequest(t, req)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	br := bufio.NewReader(resp.Body)
 	deadline := time.Now().Add(1 * time.Second)

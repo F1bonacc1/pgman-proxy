@@ -205,11 +205,11 @@ func peersHealth(engine *pgmanagerStatus) (output.Severity, string) {
 			}
 			failed = append(failed, fmt.Sprintf("%s(pg-down)", inst.NodeID))
 		case "failed":
-			failed = append(failed, string(inst.NodeID))
+			failed = append(failed, inst.NodeID)
 		case "fenced":
-			fenced = append(fenced, string(inst.NodeID))
+			fenced = append(fenced, inst.NodeID)
 		case "unknown", "":
-			unknown = append(unknown, string(inst.NodeID))
+			unknown = append(unknown, inst.NodeID)
 		default:
 			unknown = append(unknown, fmt.Sprintf("%s(%s)", inst.NodeID, state))
 		}
@@ -318,7 +318,7 @@ func rank(s output.Severity) int {
 
 func renderHealth(w io.Writer, c *output.Color, p healthPayload) {
 	for _, l := range p.Lines {
-		fmt.Fprintf(w, "%s: %s\n", l.Component, l.Status.Color(c, fmt.Sprintf("%s — %s", l.Status, l.Message)))
+		_, _ = fmt.Fprintf(w, "%s: %s\n", l.Component, l.Status.Color(c, fmt.Sprintf("%s — %s", l.Status, l.Message)))
 	}
-	fmt.Fprintf(w, "overall: %s\n", p.Overall.Color(c, string(p.Overall)))
+	_, _ = fmt.Fprintf(w, "overall: %s\n", p.Overall.Color(c, string(p.Overall)))
 }

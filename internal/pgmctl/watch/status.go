@@ -12,13 +12,13 @@ import (
 // frames. Mirrors pg-manager Status enough for the table view; the
 // raw payload is preserved for `-o wide`.
 type StatusFrame struct {
-	LocalRole      string                  `json:"local_role"`
-	LocalState     string                  `json:"local_state"`
-	LeaderNodeID   string                  `json:"leader_node_id"`
-	PrimaryNodeID  string                  `json:"primary_node_id"`
-	Instances      []StatusInstance        `json:"instances"`
-	EmbeddedNATS   *StatusEmbeddedNATS     `json:"embedded_nats,omitempty"`
-	Raw            json.RawMessage         `json:"-"`
+	LocalRole     string              `json:"local_role"`
+	LocalState    string              `json:"local_state"`
+	LeaderNodeID  string              `json:"leader_node_id"`
+	PrimaryNodeID string              `json:"primary_node_id"`
+	Instances     []StatusInstance    `json:"instances"`
+	EmbeddedNATS  *StatusEmbeddedNATS `json:"embedded_nats,omitempty"`
+	Raw           json.RawMessage     `json:"-"`
 }
 
 type StatusInstance struct {
@@ -42,12 +42,12 @@ type StatusEmbeddedNATS struct {
 // reconnect or gap marker forces a full repaint (caller must call
 // Reset before the next Render).
 type StatusRenderer struct {
-	W            io.Writer
-	GreenFn      func(string) string
-	YellowFn     func(string) string
-	RedFn        func(string) string
-	lastLines    int
-	firstRender  bool
+	W           io.Writer
+	GreenFn     func(string) string
+	YellowFn    func(string) string
+	RedFn       func(string) string
+	lastLines   int
+	firstRender bool
 }
 
 // Reset forces the next Render to write the full layout (no cursor
@@ -64,7 +64,7 @@ func (r *StatusRenderer) Render(s StatusFrame) error {
 		// Move cursor up `lastLines` lines, then clear from cursor down.
 		// Pure-ANSI; no termios dependency. Skips when stdout isn't a
 		// terminal (Cells would be no-ops there anyway).
-		fmt.Fprintf(r.W, "\033[%dA\033[J", r.lastLines)
+		_, _ = fmt.Fprintf(r.W, "\033[%dA\033[J", r.lastLines)
 	}
 	lines := r.emit(s)
 	r.lastLines = lines
@@ -82,13 +82,13 @@ func (r *StatusRenderer) emit(s StatusFrame) int {
 		primaryColor = r.RedFn
 	}
 	lines := 0
-	fmt.Fprintf(r.W, "Cluster snapshot @ %s\n", time.Now().UTC().Format(time.RFC3339))
+	_, _ = fmt.Fprintf(r.W, "Cluster snapshot @ %s\n", time.Now().UTC().Format(time.RFC3339))
 	lines++
-	fmt.Fprintf(r.W, "  Leader   : %s\n", colorize(leaderColor, displayOrNone(s.LeaderNodeID)))
+	_, _ = fmt.Fprintf(r.W, "  Leader   : %s\n", colorize(leaderColor, displayOrNone(s.LeaderNodeID)))
 	lines++
-	fmt.Fprintf(r.W, "  Primary  : %s\n", colorize(primaryColor, displayOrNone(s.PrimaryNodeID)))
+	_, _ = fmt.Fprintf(r.W, "  Primary  : %s\n", colorize(primaryColor, displayOrNone(s.PrimaryNodeID)))
 	lines++
-	fmt.Fprintf(r.W, "  Local    : role=%s state=%s\n", s.LocalRole, s.LocalState)
+	_, _ = fmt.Fprintf(r.W, "  Local    : role=%s state=%s\n", s.LocalRole, s.LocalState)
 	lines++
 	if s.EmbeddedNATS != nil {
 		emb := fmt.Sprintf("up=%v routes_meshed=%d", s.EmbeddedNATS.Up, s.EmbeddedNATS.RoutesMeshed)
@@ -97,19 +97,19 @@ func (r *StatusRenderer) emit(s StatusFrame) int {
 		} else {
 			emb = colorize(r.RedFn, emb)
 		}
-		fmt.Fprintf(r.W, "  NATS     : %s\n", emb)
+		_, _ = fmt.Fprintf(r.W, "  NATS     : %s\n", emb)
 		lines++
 	}
 	if len(s.Instances) > 0 {
-		fmt.Fprintln(r.W, "")
+		_, _ = fmt.Fprintln(r.W, "")
 		lines++
-		fmt.Fprintln(r.W, "NODE          ROLE       STATE")
+		_, _ = fmt.Fprintln(r.W, "NODE          ROLE       STATE")
 		lines++
 		instances := make([]StatusInstance, len(s.Instances))
 		copy(instances, s.Instances)
 		sort.SliceStable(instances, func(i, j int) bool { return instances[i].NodeID < instances[j].NodeID })
 		for _, inst := range instances {
-			fmt.Fprintf(r.W, "%-12s  %-9s  %s\n", inst.NodeID, inst.Role, peerStateColored(inst.State, r))
+			_, _ = fmt.Fprintf(r.W, "%-12s  %-9s  %s\n", inst.NodeID, inst.Role, peerStateColored(inst.State, r))
 			lines++
 		}
 	}

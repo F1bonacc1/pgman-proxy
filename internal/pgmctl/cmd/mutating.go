@@ -28,10 +28,10 @@ import (
 func printRequestID(cmd *cobra.Command, env *client.Envelope) {
 	w := cmd.OutOrStdout()
 	if env == nil || env.RequestID == "" {
-		fmt.Fprintln(w, "warning: server did not return a request_id; audit correlation will be impossible")
+		_, _ = fmt.Fprintln(w, "warning: server did not return a request_id; audit correlation will be impossible")
 		return
 	}
-	fmt.Fprintf(w, "request_id=%s\n", env.RequestID)
+	_, _ = fmt.Fprintf(w, "request_id=%s\n", env.RequestID)
 }
 
 // singleResourcePrompt wraps confirm.Prompt with the global --yes

@@ -123,7 +123,7 @@ func runDump(cmd *cobra.Command, app *AppContext, f dumpFlags) error {
 	// streaming. Suppressed when --quiet.
 	if !app.Flags.Quiet {
 		dur := time.Since(started)
-		fmt.Fprintf(cmd.ErrOrStderr(),
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 			"dump complete: %d slices captured, outcome=%s, %s elapsed\n",
 			len(manifest.Slices), manifest.Outcome(), dur.Round(time.Millisecond))
 	}

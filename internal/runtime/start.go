@@ -38,8 +38,8 @@ type StartupResult struct {
 	Conn     *nats.Conn
 	EventSub []*nats.Subscription
 	Control  *control.Server
-	Fanout   *fanout.Server      // feature 003: per-peer SliceStatus responder
-	History  *history.Publisher  // feature 003: cluster-wide event + audit history sink
+	Fanout   *fanout.Server     // feature 003: per-peer SliceStatus responder
+	History  *history.Publisher // feature 003: cluster-wide event + audit history sink
 }
 
 // StartupError carries the documented exit code so the caller can map
@@ -132,16 +132,16 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	//       absorbed by the upstream SingletonClaimRetryPolicy which
 	//       classifies context.DeadlineExceeded as retryable.
 	meshCtx, meshCancel := context.WithTimeout(ctx, 2*time.Minute)
-	if err := embSrv.WaitForRouteMesh(meshCtx, cfg.Cluster.DeclaredSize, 200*time.Millisecond); err != nil {
+	if meshErr := embSrv.WaitForRouteMesh(meshCtx, cfg.Cluster.DeclaredSize, 200*time.Millisecond); meshErr != nil {
 		meshCancel()
-		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: route mesh: %w", err)}
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: route mesh: %w", meshErr)}
 	}
 	meshCancel()
 
 	jsProbeCtx, jsProbeCancel := context.WithTimeout(ctx, 2*time.Minute)
-	if err := embedded.WaitForJetStreamResponsive(jsProbeCtx, conn, 500*time.Millisecond); err != nil {
+	if jsErr := embedded.WaitForJetStreamResponsive(jsProbeCtx, conn, 500*time.Millisecond); jsErr != nil {
 		jsProbeCancel()
-		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: jetstream not responsive: %w", err)}
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: jetstream not responsive: %w", jsErr)}
 	}
 	jsProbeCancel()
 
@@ -153,8 +153,8 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			pgmanager.Field{Key: "overridden", Value: replicaDecision.Overridden()},
 			pgmanager.Field{Key: "warning", Value: replicaDecision.Warning})
 	}
-	if err := embedded.PreCreateClusterKV(ctx, conn, cfg.Cluster.ID, replicaDecision.Effective()); err != nil {
-		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: pre-create cluster KV: %w", err)}
+	if kvErr := embedded.PreCreateClusterKV(ctx, conn, cfg.Cluster.ID, replicaDecision.Effective()); kvErr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: pre-create cluster KV: %w", kvErr)}
 	}
 
 	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger)
@@ -189,12 +189,12 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// static PeerDSNs map and the KV is not touched.
 	var peerDSNResolver func(context.Context, pgmanager.NodeID) (string, error)
 	if cfg.Postgres.ReplicationAddr != "" {
-		clusterKV, err := embedded.OpenClusterKV(ctx, conn, cfg.Cluster.ID)
-		if err != nil {
-			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: open cluster KV: %w", err)}
+		clusterKV, kvOpenErr := embedded.OpenClusterKV(ctx, conn, cfg.Cluster.ID)
+		if kvOpenErr != nil {
+			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: open cluster KV: %w", kvOpenErr)}
 		}
-		if err := cluster.PublishPeerAddress(ctx, clusterKV, cfg.Node.ID, cfg.Postgres.ReplicationAddr); err != nil {
-			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: publish peer address: %w", err)}
+		if pubErr := cluster.PublishPeerAddress(ctx, clusterKV, cfg.Node.ID, cfg.Postgres.ReplicationAddr); pubErr != nil {
+			return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: publish peer address: %w", pubErr)}
 		}
 		res.Logger.Info("published peer replication address",
 			pgmanager.Field{Key: "node_id", Value: cfg.Node.ID},
@@ -255,8 +255,8 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// rightful primary, pg-manager's became_leader → pg_promote path
 	// removes the signal during promotion (pg_ctl promote is idempotent
 	// against an already-primary backend per pgproto/pgexec.go).
-	if err := ensureStandbySignalIfInitialized(cfg.Postgres.DataDir, res.Logger); err != nil {
-		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("ensure standby.signal: %w", err)}
+	if signalErr := ensureStandbySignalIfInitialized(cfg.Postgres.DataDir, res.Logger); signalErr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("ensure standby.signal: %w", signalErr)}
 	}
 
 	// Gate #7: Manager constructed.
@@ -268,16 +268,16 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		Events:     handles.Bus,
 		FS:         osfs.New(),
 		Topology: pgmanager.Topology{
-			NodeID:           pgmanager.NodeID(cfg.Node.ID),
-			Peers:            nodeIDs(cfg.Peers),
-			DataDir:          cfg.Postgres.DataDir,
-			BinDir:           cfg.Postgres.BinDir,
-			Port:             cfg.Topology.Port,
-			PeerDSNs:         peerDSNsForConfig(cfg),
-			PeerDSNResolver:  peerDSNResolver,
-			LocalPGAddr:      cfg.Postgres.LocalPGAddr,
+			NodeID:          pgmanager.NodeID(cfg.Node.ID),
+			Peers:           nodeIDs(cfg.Peers),
+			DataDir:         cfg.Postgres.DataDir,
+			BinDir:          cfg.Postgres.BinDir,
+			Port:            cfg.Topology.Port,
+			PeerDSNs:        peerDSNsForConfig(cfg),
+			PeerDSNResolver: peerDSNResolver,
+			LocalPGAddr:     cfg.Postgres.LocalPGAddr,
 		},
-		Policy: policyFromConfig(cfg),
+		Policy:               policyFromConfig(cfg),
 		ClusterID:            cfg.Cluster.ID,
 		AutoApplyConfChanges: true,
 		PostInitDB:           postInitDBHook(cfg, res.Logger),
@@ -847,4 +847,3 @@ func appendLines(path, body string) error {
 	_, err = f.WriteString(body)
 	return err
 }
-

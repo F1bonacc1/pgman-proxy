@@ -71,14 +71,16 @@ Defaults: --since 30m, --limit 1000.`,
 			return runHistory(cmd, app, "event", f)
 		},
 	}
-	addEventsFlags(c, &f, false)
+	addEventsFlags(c, &f)
 	return c
 }
 
-// addEventsFlags wires the shared filter flag set onto a cobra command.
-// When `includeCategory` is true (the `get events`/`get audit` form
-// fixes the category), the --category flag is omitted.
-func addEventsFlags(c *cobra.Command, f *eventsFlags, includeCategory bool) {
+// addEventsFlags wires the shared filter flag set onto a cobra
+// command. The `--category` flag is intentionally NOT registered
+// here — both call sites (`pgmctl events` and `pgmctl get
+// events/audit`) fix the category at the command level, so a flag
+// would be confusing.
+func addEventsFlags(c *cobra.Command, f *eventsFlags) {
 	c.Flags().DurationVar(&f.since, "since", 30*time.Minute, "Only show events newer than this duration (e.g. 5m, 24h)")
 	c.Flags().StringVar(&f.until, "until", "", "Only show events older than this RFC3339 timestamp")
 	c.Flags().StringSliceVar(&f.types, "type", nil, "Filter to specific event types (repeatable)")
@@ -86,9 +88,6 @@ func addEventsFlags(c *cobra.Command, f *eventsFlags, includeCategory bool) {
 	c.Flags().IntVar(&f.limit, "limit", 1000, "Maximum number of events to return")
 	c.Flags().StringVar(&f.cursor, "cursor", "", "Resume from after this event id (ULID)")
 	c.Flags().BoolVar(&f.listTypes, "list-types", false, "Show the distinct event types observed in the window (with counts + last-seen)")
-	if includeCategory {
-		c.Flags().StringVar(&f.category, "category", "", "Filter to one category: event|audit; empty = both")
-	}
 }
 
 // runHistory dispatches a single GET /v1/history call with the given
@@ -222,10 +221,10 @@ func renderTypeRollup(w io.Writer, app *AppContext, r historyResult) error {
 	if err := t.Render(w); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\n%d total event(s) over window; %d distinct type(s).\n",
+	_, _ = fmt.Fprintf(w, "\n%d total event(s) over window; %d distinct type(s).\n",
 		result.Total, len(rows))
 	if r.Truncated {
-		fmt.Fprintln(w, "(result was truncated by --limit; counts cover only the returned slice)")
+		_, _ = fmt.Fprintln(w, "(result was truncated by --limit; counts cover only the returned slice)")
 	}
 	return nil
 }

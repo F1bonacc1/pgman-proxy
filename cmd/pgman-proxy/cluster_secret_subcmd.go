@@ -21,12 +21,12 @@ import (
 // Exits 0 on success, runtime.ExitInternal on entropy failure.
 func runClusterSecretGen(args []string) int {
 	if len(args) > 0 {
-		fmt.Fprintf(os.Stderr, "pgman-proxy cluster-secret-gen: unexpected arguments: %v\n", args)
+		_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy cluster-secret-gen: unexpected arguments: %v\n", args)
 		return runtime.ExitConfig
 	}
 	pw, err := embedded.GenerateClusterPassword()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "pgman-proxy cluster-secret-gen: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy cluster-secret-gen: %v\n", err)
 		return runtime.ExitInternal
 	}
 	fmt.Printf("password: %s\n", pw)

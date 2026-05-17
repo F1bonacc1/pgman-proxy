@@ -52,7 +52,7 @@ func (s *Streamer) Stream(ctx context.Context, lastEventID string) (<-chan Frame
 			errs <- err
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		parseSSE(ctx, resp.Body, frames, errs)
 	}()
 
@@ -181,7 +181,7 @@ func Tail(ctx context.Context, s *Streamer, opts TailOptions) (<-chan Frame, <-c
 			}
 			in, ierr := s.Stream(ctx, lastID)
 			handler := newGapInterceptor(opts.OnGap)
-			ok := pipeFrames(ctx, frames, in, &lastID, handler)
+			_ = pipeFrames(ctx, frames, in, &lastID, handler)
 			// Drain the (now-closed) err channel.
 			var connErr error
 			for e := range ierr {
@@ -190,10 +190,9 @@ func Tail(ctx context.Context, s *Streamer, opts TailOptions) (<-chan Frame, <-c
 			if ctx.Err() != nil {
 				return
 			}
-			if ok && connErr == nil {
-				// Stream ended cleanly (server-side close). Treat as a
-				// reconnect — caller can decide what to do.
-			}
+			// A clean server-side close (`ok && connErr == nil`) is
+			// treated the same as a faulted close: fall through to the
+			// reconnect cadence below so the caller can decide what to do.
 			attempt++
 			if rp.MaxAttempts > 0 && attempt > rp.MaxAttempts {
 				errs <- fmt.Errorf("reconnect ceiling exceeded after %d attempts: %w", attempt-1, connErr)

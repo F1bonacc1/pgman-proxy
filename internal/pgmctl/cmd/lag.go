@@ -14,11 +14,11 @@ import (
 
 // lagRow is one entry in the lag table.
 type lagRow struct {
-	NodeID    string `json:"node_id" yaml:"node_id"`
-	Role      string `json:"role" yaml:"role"`
-	LagBytes  int64  `json:"lag_bytes" yaml:"lag_bytes"`
-	ReplayLSN uint64 `json:"replay_lsn" yaml:"replay_lsn"`
-	WriteLSN  uint64 `json:"write_lsn" yaml:"write_lsn"`
+	NodeID    string          `json:"node_id" yaml:"node_id"`
+	Role      string          `json:"role" yaml:"role"`
+	LagBytes  int64           `json:"lag_bytes" yaml:"lag_bytes"`
+	ReplayLSN uint64          `json:"replay_lsn" yaml:"replay_lsn"`
+	WriteLSN  uint64          `json:"write_lsn" yaml:"write_lsn"`
 	Status    output.Severity `json:"status" yaml:"status"`
 }
 
@@ -47,8 +47,8 @@ Defaults: --warn 64MB, --fail 1GB.`,
 			if err != nil {
 				return WithExitCode(ExitUsage, fmt.Errorf("--fail: %w", err))
 			}
-			if err := app.Setup(); err != nil {
-				return err
+			if setupErr := app.Setup(); setupErr != nil {
+				return setupErr
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), commandTimeout(app))
 			defer cancel()

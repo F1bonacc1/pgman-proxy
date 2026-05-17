@@ -67,7 +67,7 @@ func (h *ReloadHandler) Wait(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ch:
-			if err := h.applyOnce(ctx); err != nil {
+			if err := h.applyOnce(); err != nil {
 				h.Logger.Warn("embedded_nats.reload_failed",
 					pgmanager.Field{Key: "error", Value: err.Error()})
 				h.bumpOutcome("error")
@@ -78,7 +78,7 @@ func (h *ReloadHandler) Wait(ctx context.Context) {
 }
 
 // applyOnce performs a single reload pass. Exposed for tests.
-func (h *ReloadHandler) applyOnce(ctx context.Context) error {
+func (h *ReloadHandler) applyOnce() error {
 	// Re-read configuration via the same loader the host originally
 	// used. Reusing LoadOpts ensures we read the YAML / env in the
 	// same order and respect the same flag overrides.
@@ -86,8 +86,8 @@ func (h *ReloadHandler) applyOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("config re-read: %w", err)
 	}
-	if err := config.Validate(newCfg); err != nil {
-		return fmt.Errorf("config re-validate: %w", err)
+	if vErr := config.Validate(newCfg); vErr != nil {
+		return fmt.Errorf("config re-validate: %w", vErr)
 	}
 
 	// Resolve the cluster password from the (possibly rotated) source.

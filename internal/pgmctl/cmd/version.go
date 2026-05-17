@@ -74,7 +74,7 @@ client version only and exits 0.`,
 						return WithExitCode(ExitVersionSkew, fmt.Errorf("client/server major version skew: client=%s server=%s (pass --insecure-skip-version-check to override)", app.Build.Version, sv.Version))
 					}
 					if skew == client.SkewMinor && !app.Flags.Quiet {
-						fmt.Fprintln(os.Stderr, app.Color.Yellow(fmt.Sprintf("warning: minor version skew (client=%s server=%s)", app.Build.Version, sv.Version)))
+						_, _ = fmt.Fprintln(os.Stderr, app.Color.Yellow(fmt.Sprintf("warning: minor version skew (client=%s server=%s)", app.Build.Version, sv.Version)))
 					}
 				}
 			}

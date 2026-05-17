@@ -35,14 +35,14 @@ func TestCollector_RunCapturesOutcomes(t *testing.T) {
 			"/v1/status": json.RawMessage(`{"cluster_id":"c","leader_node_id":"a"}`),
 		},
 		err: map[string]error{
-			"/v1/history?category=event":  errors.New("history unreachable"),
+			"/v1/history?category=event": errors.New("history unreachable"),
 		},
 	}
 	specs := []SliceSpec{
 		{Name: "status", Fetch: HTTPSliceFetcher(f, "/v1/status")},
 		{Name: "history-events", Fetch: HTTPSliceFetcher(f, "/v1/history?category=event")},
 	}
-	results := NewCollector(2 * time.Second).Run(context.Background(), specs)
+	results := NewCollector(2*time.Second).Run(context.Background(), specs)
 	if len(results) != 2 {
 		t.Fatalf("len(results) = %d, want 2", len(results))
 	}
@@ -63,10 +63,10 @@ func TestCollector_PerSliceTimeoutFiresWithoutFailingTheWhole(t *testing.T) {
 		},
 	}
 	fast := SliceSpec{
-		Name: "fast",
+		Name:  "fast",
 		Fetch: func(_ context.Context) (any, error) { return map[string]any{"ok": true}, nil },
 	}
-	results := NewCollector(50 * time.Millisecond).Run(context.Background(), []SliceSpec{stalled, fast})
+	results := NewCollector(50*time.Millisecond).Run(context.Background(), []SliceSpec{stalled, fast})
 	if results[0].Outcome != OutcomeFailed {
 		t.Errorf("stalled slice should fail: %+v", results[0])
 	}
@@ -101,11 +101,11 @@ func TestRedactor_NormalScrubsBearerTokensAndPasswords(t *testing.T) {
 func TestRedactor_StrictReplacesIdentitiesWithStablePlaceholders(t *testing.T) {
 	r := NewRedactor(RedactStrict)
 	in := map[string]any{
-		"cluster_id": "prod-east",
-		"node_id":    "node-a",
-		"peer_node_id": "node-a",
+		"cluster_id":      "prod-east",
+		"node_id":         "node-a",
+		"peer_node_id":    "node-a",
 		"primary_node_id": "node-b",
-		"host":       "10.0.0.5",
+		"host":            "10.0.0.5",
 	}
 	got := r.Apply(in).(map[string]any)
 	for k, v := range got {

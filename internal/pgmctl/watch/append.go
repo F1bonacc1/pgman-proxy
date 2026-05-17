@@ -13,9 +13,9 @@ import (
 // / events / node). One line per SSE frame; gap markers print a
 // highlighted divider; reconnect attempts print a status-bar line.
 type AppendRenderer struct {
-	W           io.Writer
-	YellowFn    func(string) string // optional ANSI yellow for divider
-	RedFn       func(string) string // optional ANSI red for terminal errors
+	W        io.Writer
+	YellowFn func(string) string // optional ANSI yellow for divider
+	RedFn    func(string) string // optional ANSI red for terminal errors
 }
 
 // Render writes one line for the given frame. Returns the error from
@@ -59,7 +59,7 @@ func (r *AppendRenderer) RenderReconnectAttempt(attempt int, delay time.Duration
 	if r.YellowFn != nil {
 		line = r.YellowFn(line)
 	}
-	fmt.Fprintln(r.W, line)
+	_, _ = fmt.Fprintln(r.W, line)
 }
 
 func parseReason(raw string) string {

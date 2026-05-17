@@ -57,7 +57,7 @@ func EmitYAML(w io.Writer, kind string, payload any) error {
 	doc := versionedYAML{APIVersion: "pgmctl/v1", Kind: kind, Payload: payload}
 	enc := yaml.NewEncoder(w)
 	enc.SetIndent(2)
-	defer enc.Close()
+	defer func() { _ = enc.Close() }()
 	return enc.Encode(doc)
 }
 

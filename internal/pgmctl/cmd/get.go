@@ -56,7 +56,7 @@ func newGetCmd(app *AppContext) *cobra.Command {
 	// isn't events or audit; cobra surfaces them on `pgmctl get --help`
 	// so operators discover them without having to know they only
 	// apply to two of the resources.
-	addEventsFlags(c, &f, false)
+	addEventsFlags(c, &f)
 	return c
 }
 
@@ -73,7 +73,7 @@ collection or a singleton.`,
 			return runGet(cmd, app, args, false, f)
 		},
 	}
-	addEventsFlags(c, &f, false)
+	addEventsFlags(c, &f)
 	return c
 }
 
@@ -90,7 +90,7 @@ narrow column set.`,
 			return runGet(cmd, app, args, true, f)
 		},
 	}
-	addEventsFlags(c, &f, false)
+	addEventsFlags(c, &f)
 	return c
 }
 
@@ -298,4 +298,3 @@ func lastSeen(t time.Time) string {
 	}
 	return t.UTC().Format("15:04:05Z")
 }
-

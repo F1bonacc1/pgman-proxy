@@ -14,15 +14,15 @@ import (
 // inside the dump tar/tar.gz. Schema is `pgmctl/v1`; renames are
 // MINOR-version events per Constitution V.
 type Manifest struct {
-	APIVersion   string         `json:"apiVersion"`
-	Kind         string         `json:"kind"`
-	Pgmctl       BuildInfo      `json:"pgmctl"`
-	PgmanProxy   ProxyBuildInfo `json:"pgman_proxy"`
-	CapturedAt   Window         `json:"captured_at"`
-	RedactLevel  string         `json:"redact_level"`
-	ClusterID    string         `json:"cluster_id"`
-	Endpoint     string         `json:"endpoint,omitempty"`
-	Slices       []SliceEntry   `json:"slices"`
+	APIVersion  string         `json:"apiVersion"`
+	Kind        string         `json:"kind"`
+	Pgmctl      BuildInfo      `json:"pgmctl"`
+	PgmanProxy  ProxyBuildInfo `json:"pgman_proxy"`
+	CapturedAt  Window         `json:"captured_at"`
+	RedactLevel string         `json:"redact_level"`
+	ClusterID   string         `json:"cluster_id"`
+	Endpoint    string         `json:"endpoint,omitempty"`
+	Slices      []SliceEntry   `json:"slices"`
 }
 
 // BuildInfo records the dump-time pgmctl binary identity.

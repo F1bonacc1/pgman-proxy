@@ -45,11 +45,20 @@ func NewColor(forceNoColor bool, out io.Writer) *Color {
 // Disabled reports whether ANSI emission is suppressed.
 func (c *Color) Disabled() bool { return c.disabled }
 
-// Green/Yellow/Red emit colorized strings; in --no-color mode they
-// return the input verbatim so callers can compose without branching.
-func (c *Color) Green(s string) string  { return color.GreenString("%s", s) }
+// Green emits a green-colorized string; in --no-color mode it returns
+// the input verbatim so callers can compose without branching.
+func (c *Color) Green(s string) string { return color.GreenString("%s", s) }
+
+// Yellow emits a yellow-colorized string; in --no-color mode it
+// returns the input verbatim.
 func (c *Color) Yellow(s string) string { return color.YellowString("%s", s) }
-func (c *Color) Red(s string) string    { return color.RedString("%s", s) }
+
+// Red emits a red-colorized string; in --no-color mode it returns
+// the input verbatim.
+func (c *Color) Red(s string) string { return color.RedString("%s", s) }
+
+// Bold emits a bold-styled string; in --no-color mode it returns
+// the input verbatim.
 func (c *Color) Bold(s string) string {
 	if c.disabled {
 		return s

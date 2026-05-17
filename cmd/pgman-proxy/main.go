@@ -84,11 +84,11 @@ func run(args []string) int {
 		return runtime.ExitConfig
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(os.Stderr, "pgman-proxy: unexpected positional arguments: %v\n", fs.Args())
+		_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy: unexpected positional arguments: %v\n", fs.Args())
 		return runtime.ExitConfig
 	}
 	if showVersion && printConfig {
-		fmt.Fprintln(os.Stderr, "pgman-proxy: --version and --print-config are mutually exclusive")
+		_, _ = fmt.Fprintln(os.Stderr, "pgman-proxy: --version and --print-config are mutually exclusive")
 		return runtime.ExitConfig
 	}
 
@@ -129,11 +129,11 @@ func run(args []string) int {
 		Flags:    flagOverrides,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "pgman-proxy: config error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy: config error: %v\n", err)
 		return runtime.ExitConfig
 	}
 	if err := config.Validate(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "pgman-proxy: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy: %v\n", err)
 		return runtime.ExitConfig
 	}
 
@@ -146,7 +146,7 @@ func run(args []string) int {
 	// the documented EX_INTERNAL code instead of a Go runtime trace.
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "pgman-proxy: internal panic: %v\n%s\n", r, debug.Stack())
+			_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy: internal panic: %v\n%s\n", r, debug.Stack())
 			os.Exit(runtime.ExitInternal)
 		}
 	}()

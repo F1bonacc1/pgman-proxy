@@ -26,9 +26,9 @@ type BlastRadius string
 
 // BlastRadius enumeration.
 const (
-	BlastSingleResource    BlastRadius = "single-resource"
-	BlastClusterAffecting  BlastRadius = "cluster-affecting"
-	BlastAdvisory          BlastRadius = "advisory"
+	BlastSingleResource   BlastRadius = "single-resource"
+	BlastClusterAffecting BlastRadius = "cluster-affecting"
+	BlastAdvisory         BlastRadius = "advisory"
 )
 
 // SuggestedFix is the server-published shape served on
@@ -70,11 +70,11 @@ type DoctorChecksResponse struct {
 
 // DoctorReport is the wire shape of POST /v1/doctor/run.
 type DoctorReport struct {
-	APIVersion string         `json:"apiVersion"`
-	Kind       string         `json:"kind"`
-	CapturedAt time.Time      `json:"captured_at"`
-	Summary    DoctorSummary  `json:"summary"`
-	Checks     []CheckResult  `json:"checks"`
+	APIVersion string        `json:"apiVersion"`
+	Kind       string        `json:"kind"`
+	CapturedAt time.Time     `json:"captured_at"`
+	Summary    DoctorSummary `json:"summary"`
+	Checks     []CheckResult `json:"checks"`
 }
 
 // DoctorSummary is the count-per-severity rollup carried by DoctorReport.

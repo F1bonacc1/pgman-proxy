@@ -130,13 +130,13 @@ func decodeEnumWire(b []byte, names map[int]string) (string, error) {
 // but tolerate missing fields (single-peer test paths leave the
 // snapshot off entirely).
 type embeddedNATSSnapshot struct {
-	ServerName        string `json:"server_name"`
-	Ready             bool   `json:"ready"`
-	ClientListenAddr  string `json:"client_listen_addr"`
-	RoutesListenAddr  string `json:"routes_listen_addr"`
-	TLSEnabled        bool   `json:"tls_enabled"`
-	RoutesMeshed      int    `json:"routes_meshed"`
-	ReplicasFactor    int    `json:"replicas_factor"`
+	ServerName       string `json:"server_name"`
+	Ready            bool   `json:"ready"`
+	ClientListenAddr string `json:"client_listen_addr"`
+	RoutesListenAddr string `json:"routes_listen_addr"`
+	TLSEnabled       bool   `json:"tls_enabled"`
+	RoutesMeshed     int    `json:"routes_meshed"`
+	ReplicasFactor   int    `json:"replicas_factor"`
 }
 
 func newStatusCmd(app *AppContext) *cobra.Command {
@@ -360,13 +360,13 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 
 	meshStr := meshLine(col, embedded, total)
 
-	fmt.Fprintf(w, "Cluster: %s\tSnapshot: %s\n", cluster, now)
-	fmt.Fprintf(w, "Leader:  %s   Primary: %s   Peers: %s\n",
+	_, _ = fmt.Fprintf(w, "Cluster: %s\tSnapshot: %s\n", cluster, now)
+	_, _ = fmt.Fprintf(w, "Leader:  %s   Primary: %s   Peers: %s\n",
 		leaderSev.Color(col, leaderStr),
 		primarySev.Color(col, primaryStr),
 		peersStr,
 	)
-	fmt.Fprintln(w, meshStr)
+	_, _ = fmt.Fprintln(w, meshStr)
 	if total > 0 && !substrate.Quorate {
 		// One extra line — only emitted on quorum loss — so a paged
 		// operator can't miss it. The "Leader:" / "Primary:" segments
@@ -377,9 +377,9 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 			"Substrate: QUORUM LOST  ·  %d/%d responding (need %d)  ·  writes will block on sync_commit",
 			substrate.Responding, substrate.Total, substrate.Required,
 		)
-		fmt.Fprintln(w, output.SevFail.Color(col, quorumLine))
+		_, _ = fmt.Fprintln(w, output.SevFail.Color(col, quorumLine))
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	t := output.NewTable("NODE", "ROLE", "STATE", "FENCE", "LAG", "LAST TRANSITION")
 	instances := append([]instanceStatus(nil), engine.Instances...)
@@ -416,7 +416,7 @@ func renderStatus(w io.Writer, app *AppContext, engine *pgmanagerStatus, embedde
 	_ = t.Render(w)
 
 	if app.Color.Disabled() {
-		fmt.Fprintf(w, "\nOverall: %s %s\n", worst.Marker(), worst)
+		_, _ = fmt.Fprintf(w, "\nOverall: %s %s\n", worst.Marker(), worst)
 	}
 
 	switch worst {
@@ -512,13 +512,17 @@ func nodeSeverity(inst instanceStatus, _ *pgmanagerStatus) output.Severity {
 }
 
 const (
-	warnLagBytes = int64(64 * 1024 * 1024)   // 64 MiB
-	failLagBytes = int64(1 << 30)            // 1 GiB
+	warnLagBytes = int64(64 * 1024 * 1024) // 64 MiB
+	failLagBytes = int64(1 << 30)          // 1 GiB
 )
 
 func isFenced(state string) bool { return strings.EqualFold(state, "fenced") }
-func isFailed(state string) bool { return strings.EqualFold(state, "failed") || strings.EqualFold(state, "down") }
-func isStandby(role string) bool { return strings.EqualFold(role, "standby") || strings.EqualFold(role, "replica") }
+func isFailed(state string) bool {
+	return strings.EqualFold(state, "failed") || strings.EqualFold(state, "down")
+}
+func isStandby(role string) bool {
+	return strings.EqualFold(role, "standby") || strings.EqualFold(role, "replica")
+}
 
 func lagText(i instanceStatus, _ *pgmanagerStatus) string {
 	if !isStandby(string(i.Role)) {

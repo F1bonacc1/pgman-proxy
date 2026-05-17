@@ -29,9 +29,9 @@ func Prompt(in io.Reader, out io.Writer, op, target, cluster string, yesFlag boo
 		return fmt.Errorf("%w: pass --yes to confirm %s on %s in cluster %s", ErrNotTTY, op, target, cluster)
 	}
 	if target == "" {
-		fmt.Fprintf(out, "About to %s in cluster %s. Continue? [y/N]: ", op, cluster)
+		_, _ = fmt.Fprintf(out, "About to %s in cluster %s. Continue? [y/N]: ", op, cluster)
 	} else {
-		fmt.Fprintf(out, "About to %s %s in cluster %s. Continue? [y/N]: ", op, target, cluster)
+		_, _ = fmt.Fprintf(out, "About to %s %s in cluster %s. Continue? [y/N]: ", op, target, cluster)
 	}
 	r := bufio.NewReader(in)
 	line, _ := r.ReadString('\n')
@@ -62,11 +62,11 @@ func ConfirmClusterName(in io.Reader, out io.Writer, op, target, expected string
 		return fmt.Errorf("%w: pass --force --cluster %s to confirm %s on %s", ErrNotTTY, expected, op, target)
 	}
 	if target == "" {
-		fmt.Fprintf(out, "About to %s cluster %s.\n", op, expected)
+		_, _ = fmt.Fprintf(out, "About to %s cluster %s.\n", op, expected)
 	} else {
-		fmt.Fprintf(out, "About to %s cluster %s on %s.\n", op, expected, target)
+		_, _ = fmt.Fprintf(out, "About to %s cluster %s on %s.\n", op, expected, target)
 	}
-	fmt.Fprintf(out, "Type the cluster name to confirm: ")
+	_, _ = fmt.Fprintf(out, "Type the cluster name to confirm: ")
 	r := bufio.NewReader(in)
 	line, _ := r.ReadString('\n')
 	if strings.TrimSpace(line) == expected {

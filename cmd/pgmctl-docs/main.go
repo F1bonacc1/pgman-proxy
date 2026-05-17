@@ -43,7 +43,7 @@ func main() {
 	if err := doc.GenMarkdownTree(root, refDir); err != nil {
 		fail("generate markdown: %v", err)
 	}
-	fmt.Fprintf(os.Stdout, "wrote per-command markdown to %s\n", refDir)
+	_, _ = fmt.Fprintf(os.Stdout, "wrote per-command markdown to %s\n", refDir)
 
 	header := &doc.GenManHeader{
 		Title:   "PGMCTL",
@@ -54,7 +54,7 @@ func main() {
 	if err := doc.GenManTree(root, header, manDir); err != nil {
 		fail("generate man pages: %v", err)
 	}
-	fmt.Fprintf(os.Stdout, "wrote groff man pages to %s\n", manDir)
+	_, _ = fmt.Fprintf(os.Stdout, "wrote groff man pages to %s\n", manDir)
 
 	// Suppress the unused-import lint when cobra cleans up its tree
 	// state under -trimpath builds.
@@ -63,6 +63,6 @@ func main() {
 }
 
 func fail(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "pgmctl-docs: "+format+"\n", args...)
+	_, _ = fmt.Fprintf(os.Stderr, "pgmctl-docs: "+format+"\n", args...)
 	os.Exit(1)
 }

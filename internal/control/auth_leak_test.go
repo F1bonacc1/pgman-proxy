@@ -198,7 +198,7 @@ func newCapturingResponseWriter() *capturingResponseWriter {
 	return &capturingResponseWriter{header: http.Header{}}
 }
 
-func (c *capturingResponseWriter) Header() http.Header        { return c.header }
+func (c *capturingResponseWriter) Header() http.Header         { return c.header }
 func (c *capturingResponseWriter) Write(b []byte) (int, error) { return c.body.Write(b) }
 func (c *capturingResponseWriter) WriteHeader(code int) {
 	c.once.Do(func() { c.code = code })

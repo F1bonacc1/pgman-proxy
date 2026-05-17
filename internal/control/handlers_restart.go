@@ -133,15 +133,17 @@ func (s *Server) handleRestartProxy(w http.ResponseWriter, r *http.Request, env 
 	// drain begins. The operator's last contact with the doomed
 	// peer is the success envelope.
 	result := map[string]any{
-		"target":               "proxy",
-		"target_node":          localID,
-		"supervisor_presence":  presence,
+		"target":              "proxy",
+		"target_node":         localID,
+		"supervisor_presence": presence,
 	}
 	s.completeOK(r.Context(), w, r, env, localID, result, 0)
 	// Drain + exit on a separate goroutine so the response writer's
 	// Close has time to flush. The context here is detached from
 	// r.Context() because r.Context() will be cancelled the moment
-	// the handler returns.
+	// the handler returns — gosec G118 would prefer the request
+	// context, but that would interrupt the drain mid-flight.
+	//nolint:gosec // G118: intentionally detached from request context.
 	go func() {
 		// Tiny pause to let the kernel write out the response
 		// buffer before the listener socket closes.

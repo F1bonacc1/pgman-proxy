@@ -23,20 +23,20 @@ type BuildInfo struct {
 // contracts/cli-commands.md § Global flags. One instance is created
 // in NewRoot and shared via cobra's persistent flags.
 type GlobalFlags struct {
-	OutputFormat              string
-	NoColor                   bool
-	Quiet                     bool
-	Verbose                   int
-	Timeout                   time.Duration
-	Yes                       bool
-	Force                     bool
-	Endpoint                  string
-	Context                   string
-	Cluster                   string
-	InsecureSkipTLSVerify     bool
-	InsecureSkipVersionCheck  bool
-	Strict                    bool
-	ConfigPath                string
+	OutputFormat             string
+	NoColor                  bool
+	Quiet                    bool
+	Verbose                  int
+	Timeout                  time.Duration
+	Yes                      bool
+	Force                    bool
+	Endpoint                 string
+	Context                  string
+	Cluster                  string
+	InsecureSkipTLSVerify    bool
+	InsecureSkipVersionCheck bool
+	Strict                   bool
+	ConfigPath               string
 }
 
 // AppContext is the per-invocation state every subcommand consumes:
@@ -44,10 +44,10 @@ type GlobalFlags struct {
 // constructed lazily by Setup() to keep `--help` cheap and to defer
 // auth / TLS errors until they actually matter.
 type AppContext struct {
-	Build       BuildInfo
-	Flags       *GlobalFlags
-	Format      output.Format
-	Color       *output.Color
+	Build  BuildInfo
+	Flags  *GlobalFlags
+	Format output.Format
+	Color  *output.Color
 
 	// Resolved is the active context. Nil until Setup() is called.
 	Resolved *config.Resolved
@@ -81,7 +81,7 @@ func (a *AppContext) Setup() error {
 		return WithExitCode(ExitConfig, err)
 	}
 	if a.Flags.InsecureSkipTLSVerify {
-		fmt.Fprintln(os.Stderr, a.Color.Yellow("warning: --insecure-skip-tls-verify is set; the server's TLS certificate will NOT be validated"))
+		_, _ = fmt.Fprintln(os.Stderr, a.Color.Yellow("warning: --insecure-skip-tls-verify is set; the server's TLS certificate will NOT be validated"))
 	}
 	a.Client = c
 	if a.Flags.Cluster != "" && c.ExpectedCluster() != "" && a.Flags.Cluster != c.ExpectedCluster() {

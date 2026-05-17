@@ -24,11 +24,11 @@ func TestPolicyFromConfig_AutoRecoveryWiredThrough(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name                string
-		demoteEnabled       bool
-		rebootstrapEnabled  bool
-		wantDemoteOn        bool
-		wantRebootstrapOn   bool
+		name               string
+		demoteEnabled      bool
+		rebootstrapEnabled bool
+		wantDemoteOn       bool
+		wantRebootstrapOn  bool
 	}{
 		{name: "both off (default)", demoteEnabled: false, rebootstrapEnabled: false, wantDemoteOn: false, wantRebootstrapOn: false},
 		{name: "demote on only", demoteEnabled: true, rebootstrapEnabled: false, wantDemoteOn: true, wantRebootstrapOn: false},

@@ -79,7 +79,11 @@ func (s commandSource) Token(ctx context.Context) (string, error) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, s.argv[0], s.argv[1:]...)
+	// G204: the command + argv come from the operator's pgmctl
+	// config (`token-command`) — same trust boundary as the binary
+	// itself. Exec'ing operator-configured argv is the documented
+	// behaviour of this token source.
+	cmd := exec.CommandContext(cctx, s.argv[0], s.argv[1:]...) //nolint:gosec // G204: operator-configured token command
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("token command %v failed: %w", s.argv, err)

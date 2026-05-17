@@ -10,17 +10,17 @@ import (
 
 // Stable exit codes per data-model.md § ExitCode.
 const (
-	ExitOK             = 0
-	ExitWarnStrict     = 1
-	ExitUnhealthy      = 2
-	ExitPartial        = 3
-	ExitSubjectNA      = 4
-	ExitUnknown        = 5
-	ExitUsage          = 64
-	ExitNetwork        = 65
-	ExitVersionSkew    = 67
-	ExitConfig         = 78
-	ExitTimeout        = 124
+	ExitOK          = 0
+	ExitWarnStrict  = 1
+	ExitUnhealthy   = 2
+	ExitPartial     = 3
+	ExitSubjectNA   = 4
+	ExitUnknown     = 5
+	ExitUsage       = 64
+	ExitNetwork     = 65
+	ExitVersionSkew = 67
+	ExitConfig      = 78
+	ExitTimeout     = 124
 )
 
 // codedError lets a subcommand mark its error with a documented exit

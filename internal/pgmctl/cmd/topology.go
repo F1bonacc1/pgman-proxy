@@ -14,12 +14,12 @@ import (
 
 // topologyPayload is the pgmctl/v1-versioned shape for -o json/yaml.
 type topologyPayload struct {
-	ClusterID     string                `json:"cluster_id" yaml:"cluster_id"`
-	Leader        string                `json:"leader_node_id" yaml:"leader_node_id"`
-	Primary       string                `json:"primary_node_id" yaml:"primary_node_id"`
-	SyncStandbys  []string              `json:"sync_standbys" yaml:"sync_standbys"`
-	Peers         []topologyPeer        `json:"peers" yaml:"peers"`
-	EmbeddedNATS  *embeddedNATSSnapshot `json:"embedded_nats,omitempty" yaml:"embedded_nats,omitempty"`
+	ClusterID    string                `json:"cluster_id" yaml:"cluster_id"`
+	Leader       string                `json:"leader_node_id" yaml:"leader_node_id"`
+	Primary      string                `json:"primary_node_id" yaml:"primary_node_id"`
+	SyncStandbys []string              `json:"sync_standbys" yaml:"sync_standbys"`
+	Peers        []topologyPeer        `json:"peers" yaml:"peers"`
+	EmbeddedNATS *embeddedNATSSnapshot `json:"embedded_nats,omitempty" yaml:"embedded_nats,omitempty"`
 }
 
 type topologyPeer struct {
@@ -100,22 +100,22 @@ func buildTopologyPayload(e *pgmanagerStatus, n *embeddedNATSSnapshot) topologyP
 }
 
 func renderTopologyTree(w io.Writer, c *output.Color, p topologyPayload) {
-	fmt.Fprintf(w, "%s\n", c.Bold(p.ClusterID))
-	fmt.Fprintf(w, "├── leader:  %s\n", leaderLabel(c, p.Leader))
-	fmt.Fprintf(w, "├── primary: %s\n", primaryLabel(c, p.Primary))
-	fmt.Fprintf(w, "├── sync_standbys: %s\n", syncListLabel(c, p.SyncStandbys))
+	_, _ = fmt.Fprintf(w, "%s\n", c.Bold(p.ClusterID))
+	_, _ = fmt.Fprintf(w, "├── leader:  %s\n", leaderLabel(c, p.Leader))
+	_, _ = fmt.Fprintf(w, "├── primary: %s\n", primaryLabel(c, p.Primary))
+	_, _ = fmt.Fprintf(w, "├── sync_standbys: %s\n", syncListLabel(c, p.SyncStandbys))
 	if p.EmbeddedNATS != nil {
-		fmt.Fprintf(w, "├── embedded_nats: %s (%d routes meshed)\n",
+		_, _ = fmt.Fprintf(w, "├── embedded_nats: %s (%d routes meshed)\n",
 			natsReadyLabel(c, p.EmbeddedNATS.Ready),
 			p.EmbeddedNATS.RoutesMeshed)
 	}
-	fmt.Fprintln(w, "└── peers")
+	_, _ = fmt.Fprintln(w, "└── peers")
 	for i, peer := range p.Peers {
 		prefix := "    ├── "
 		if i == len(p.Peers)-1 {
 			prefix = "    └── "
 		}
-		fmt.Fprintf(w, "%s%s\n", prefix, peerLabel(c, peer))
+		_, _ = fmt.Fprintf(w, "%s%s\n", prefix, peerLabel(c, peer))
 	}
 }
 

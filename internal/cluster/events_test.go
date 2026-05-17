@@ -182,8 +182,8 @@ func TestHandleCoordinationEvent_PublishesToHistorySink(t *testing.T) {
 	sink := &fakeHistorySink{}
 
 	payload, _ := json.Marshal(map[string]any{
-		"node_id":   "node-b",
-		"term":      42,
+		"node_id":    "node-b",
+		"term":       42,
 		"new_leader": "node-b",
 	})
 	handleCoordinationEvent(&nats.Msg{
@@ -322,10 +322,10 @@ func TestSynthesizeLeaderChange_IgnoresNonLeaderReasons(t *testing.T) {
 // pg-manager topic constant.
 func TestSubjectTail_RetainsMultiSegmentTopics(t *testing.T) {
 	cases := map[string]string{
-		"pgmanager.pgman-pc.leader_changed":              "leader_changed",
-		"pgmanager.pgman-pc.auto_rebootstrap.detected":   "auto_rebootstrap.detected",
-		"pgmanager.pgman-pc.divergence.flagged":          "divergence.flagged",
-		"pgmanager.pgman-pc.conninfo.reconciled":         "conninfo.reconciled",
+		"pgmanager.pgman-pc.leader_changed":            "leader_changed",
+		"pgmanager.pgman-pc.auto_rebootstrap.detected": "auto_rebootstrap.detected",
+		"pgmanager.pgman-pc.divergence.flagged":        "divergence.flagged",
+		"pgmanager.pgman-pc.conninfo.reconciled":       "conninfo.reconciled",
 	}
 	for subj, want := range cases {
 		if got := subjectTail(subj); got != want {

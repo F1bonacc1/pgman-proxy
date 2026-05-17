@@ -33,21 +33,47 @@ linters:
     gosec:
       excludes:
         - G104 # errcheck handles this with better context
+        - G301 # 0755 on operator-generated docs/man dirs is acceptable
+        - G304 # file inclusion via variable — codebase opens config /
+               # storage paths read from validated config; not a tainted-
+               # input surface and not worth a nolint on every site.
     revive:
       rules:
         - name: var-naming
         - name: package-comments
-        - name: exported
+        # `exported` is intentionally omitted: this codebase doesn't
+        # comprehensively comment every exported const block, and the
+        # constitutional doc surface (constitution.md, contracts/) is
+        # where the cross-cutting documentation lives instead.
+    staticcheck:
+      # Skip the QF* (quick-fix) advisory checks — they propose
+      # stylistic refactors (tagged switches, De Morgan), not
+      # correctness/security issues. Real staticcheck rules (SA*,
+      # ST*) stay enforced.
+      checks:
+        - all
+        - -QF1001
+        - -QF1002
   exclusions:
     rules:
       - path: _test\.go
         linters:
           - gosec
           - revive
+          - govet # `shadow` is noisy in tests with repeated `if err :=` patterns
       - path: examples/
         linters:
           - revive
           - gosec
+      # tests/contract/{pkg} and tests/integration/{pkg} use the
+      # `{pkg}_contract` / `{pkg}_integration` package naming convention
+      # to make the test target intent obvious to the test runner. The
+      # underscores are deliberate — exempt them from staticcheck
+      # ST1003 (no-underscores-in-package-names).
+      - path: tests/(contract|integration)/
+        text: "ST1003"
+        linters:
+          - staticcheck
 
 formatters:
   enable:

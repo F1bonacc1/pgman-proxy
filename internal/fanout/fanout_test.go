@@ -19,10 +19,10 @@ func startEmbeddedNATS(t *testing.T) *nats.Conn {
 	t.Helper()
 	dir := t.TempDir()
 	opts := &natsserver.Options{
-		Host:    "127.0.0.1",
-		Port:    -1,
-		NoLog:   true,
-		NoSigs:  true,
+		Host:     "127.0.0.1",
+		Port:     -1,
+		NoLog:    true,
+		NoSigs:   true,
 		StoreDir: dir,
 	}
 	srv, err := natsserver.NewServer(opts)

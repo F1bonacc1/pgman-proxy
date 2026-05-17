@@ -149,14 +149,14 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 		)
 	}
 	if current < replicas {
-		if _, err := js.UpdateKeyValue(callCtx, jetstream.KeyValueConfig{
+		if _, updErr := js.UpdateKeyValue(callCtx, jetstream.KeyValueConfig{
 			Bucket:   name,
 			History:  8,
 			Replicas: replicas,
-		}); err != nil {
+		}); updErr != nil {
 			return fmt.Errorf(
 				"upgrade cluster KV bucket %q Replicas %d -> %d: %w",
-				name, current, replicas, err,
+				name, current, replicas, updErr,
 			)
 		}
 	}

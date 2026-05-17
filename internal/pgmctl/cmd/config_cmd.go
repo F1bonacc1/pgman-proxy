@@ -86,7 +86,7 @@ func newConfigUseContext(app *AppContext) *cobra.Command {
 			if err := cfgpkg.Save(path, cfg); err != nil {
 				return WithExitCode(ExitConfig, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "current-context set to %q\n", args[0])
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "current-context set to %q\n", args[0])
 			return nil
 		},
 	}
@@ -170,7 +170,7 @@ that's a deliberate non-feature to keep secrets out of shell history.`,
 			if err := cfgpkg.Save(path, cfg); err != nil {
 				return WithExitCode(ExitConfig, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "context %q saved to %s\n", name, path)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "context %q saved to %s\n", name, path)
 			return nil
 		},
 	}
@@ -220,7 +220,7 @@ func newConfigDeleteContext(app *AppContext) *cobra.Command {
 			if err := cfgpkg.Save(path, cfg); err != nil {
 				return WithExitCode(ExitConfig, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "context %q removed from %s\n", name, path)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "context %q removed from %s\n", name, path)
 			return nil
 		},
 	}
@@ -248,9 +248,9 @@ func renderConfig(w io.Writer, cfg *cfgpkg.Config, path string, showSecrets bool
 			}
 		}
 	}
-	fmt.Fprintf(w, "# pgmctl configuration — %s\n", path)
+	_, _ = fmt.Fprintf(w, "# pgmctl configuration — %s\n", path)
 	enc := yaml.NewEncoder(w)
 	enc.SetIndent(2)
-	defer enc.Close()
+	defer func() { _ = enc.Close() }()
 	return enc.Encode(view)
 }

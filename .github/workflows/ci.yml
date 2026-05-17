@@ -62,5 +62,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.0.0
+          # Pin a recent v2.x release built with go1.26+; older releases
+          # (v2.0.0 was built with go1.24) refuse configs that target a
+          # higher language version than the linter itself was built
+          # with. Bump when the project's go directive moves.
+          version: latest
           working-directory: pgman-proxy

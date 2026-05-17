@@ -36,17 +36,17 @@ const (
 // ExplainOutput is the JSON / YAML wire shape. The table form is
 // rendered separately by emitNarrative.
 type ExplainOutput struct {
-	APIVersion         string             `json:"apiVersion" yaml:"apiVersion"`
-	Kind               string             `json:"kind" yaml:"kind"`
-	Subject            string             `json:"subject" yaml:"subject"`
-	Diagnosis          string             `json:"diagnosis" yaml:"diagnosis"`
-	Evidence           []ExplainEvidence  `json:"evidence" yaml:"evidence"`
-	SuggestedNextSteps []string           `json:"suggested_next_steps" yaml:"suggested_next_steps"`
+	APIVersion         string            `json:"apiVersion" yaml:"apiVersion"`
+	Kind               string            `json:"kind" yaml:"kind"`
+	Subject            string            `json:"subject" yaml:"subject"`
+	Diagnosis          string            `json:"diagnosis" yaml:"diagnosis"`
+	Evidence           []ExplainEvidence `json:"evidence" yaml:"evidence"`
+	SuggestedNextSteps []string          `json:"suggested_next_steps" yaml:"suggested_next_steps"`
 }
 
 // ExplainEvidence is one cited fact backing the diagnosis.
 type ExplainEvidence struct {
-	Source    string `json:"source" yaml:"source"`              // history | doctor | status
+	Source    string `json:"source" yaml:"source"` // history | doctor | status
 	Timestamp string `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
 	Detail    string `json:"detail" yaml:"detail"`
 	Reference string `json:"reference,omitempty" yaml:"reference,omitempty"` // history ULID / check name
@@ -107,7 +107,7 @@ func runExplain(ctx context.Context, cmd *cobra.Command, app *AppContext, sa Sub
 	out, err := evaluateSubject(ctx, app, sa)
 	if err != nil {
 		if errors.Is(err, ErrSubjectNotApplicable) {
-			fmt.Fprintf(cmd.ErrOrStderr(), "subject %q does not apply: %s\n", sa.Subject, err.Error())
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "subject %q does not apply: %s\n", sa.Subject, err.Error())
 			return WithExitCode(ExitSubjectNA, err)
 		}
 		return err
@@ -158,12 +158,12 @@ func evaluateSubject(ctx context.Context, app *AppContext, sa SubjectArg) (Expla
 // emitNarrative is the table-form renderer documented in
 // cli-commands.md § explain.
 func emitNarrative(w io.Writer, c *output.Color, out ExplainOutput) {
-	fmt.Fprintf(w, "%s\n", c.Bold("DIAGNOSIS"))
-	fmt.Fprintf(w, "  %s\n\n", out.Diagnosis)
+	_, _ = fmt.Fprintf(w, "%s\n", c.Bold("DIAGNOSIS"))
+	_, _ = fmt.Fprintf(w, "  %s\n\n", out.Diagnosis)
 
-	fmt.Fprintf(w, "%s\n", c.Bold("EVIDENCE"))
+	_, _ = fmt.Fprintf(w, "%s\n", c.Bold("EVIDENCE"))
 	if len(out.Evidence) == 0 {
-		fmt.Fprintln(w, "  (no supporting evidence cited)")
+		_, _ = fmt.Fprintln(w, "  (no supporting evidence cited)")
 	}
 	for _, ev := range out.Evidence {
 		ref := ""
@@ -174,13 +174,13 @@ func emitNarrative(w io.Writer, c *output.Color, out ExplainOutput) {
 		if ts == "" {
 			ts = "             "
 		}
-		fmt.Fprintf(w, "  %-20s  %s%s  [from: %s]\n", ts, ev.Detail, ref, ev.Source)
+		_, _ = fmt.Fprintf(w, "  %-20s  %s%s  [from: %s]\n", ts, ev.Detail, ref, ev.Source)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
-	fmt.Fprintf(w, "%s\n", c.Bold("SUGGESTED NEXT STEPS"))
+	_, _ = fmt.Fprintf(w, "%s\n", c.Bold("SUGGESTED NEXT STEPS"))
 	for i, step := range out.SuggestedNextSteps {
-		fmt.Fprintf(w, "  %d. %s\n", i+1, step)
+		_, _ = fmt.Fprintf(w, "  %d. %s\n", i+1, step)
 	}
 }
 

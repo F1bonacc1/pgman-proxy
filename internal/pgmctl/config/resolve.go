@@ -102,6 +102,7 @@ func Resolve(ov Overrides) (*Resolved, error) {
 		if os.Getenv("PGMCTL_TOKEN") == "" {
 			return nil, errors.New("PGMCTL_ENDPOINT is set but PGMCTL_TOKEN is not — set PGMCTL_TOKEN or configure a context in $XDG_CONFIG_HOME/pgmctl/config.yaml")
 		}
+		//nolint:gosec // G101: "PGMCTL_TOKEN" is the env var NAME, not a token value
 		return &Resolved{
 			Endpoint: ov.EndpointEnv,
 			Source:   "PGMCTL_ENDPOINT env",
@@ -113,10 +114,7 @@ func Resolve(ov Overrides) (*Resolved, error) {
 	if cfgErr != nil && !os.IsNotExist(cfgErr) {
 		return nil, fmt.Errorf("no endpoint configured and config file at %s could not be loaded: %w", cfgPath, cfgErr)
 	}
-	return nil, fmt.Errorf("no pgman-proxy endpoint configured. Try one of:\n"+
-		"  --endpoint https://<host>:9091   (plus PGMCTL_TOKEN env)\n"+
-		"  --context <name>                  (with %s populated)\n"+
-		"  export PGMCTL_ENDPOINT=https://... PGMCTL_TOKEN=...", cfgPath)
+	return nil, fmt.Errorf("no pgman-proxy endpoint configured — try --endpoint https://<host>:9091 (plus PGMCTL_TOKEN env), --context <name> (with %s populated), or PGMCTL_ENDPOINT=... PGMCTL_TOKEN=... in the environment", cfgPath)
 }
 
 func fromContext(c *Context, source string) *Resolved {

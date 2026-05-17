@@ -135,8 +135,8 @@ const (
 
 	// 003 / US6 — restart + setconfig codes
 	// (contracts/control-plane-extensions.md § Error codes added by 003).
-	CodeSupervisorNotDetected = "supervisor_not_detected"
-	CodeWrongPeer             = "wrong_peer"
+	CodeSupervisorNotDetected  = "supervisor_not_detected"
+	CodeWrongPeer              = "wrong_peer"
 	CodeSetConfigKeyDisallowed = "set_config_key_disallowed"
 )
 

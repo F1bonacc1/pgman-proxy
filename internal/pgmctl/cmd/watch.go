@@ -174,10 +174,10 @@ func runWatchStatus(ctx context.Context, cmd *cobra.Command, app *AppContext) er
 
 	tail := watch.TailOptions{
 		OnReconnect: func(attempt int, delay time.Duration) {
-			fmt.Fprintln(out, app.Color.Yellow(fmt.Sprintf("[reconnect attempt %d — sleeping %s]", attempt, delay)))
+			_, _ = fmt.Fprintln(out, app.Color.Yellow(fmt.Sprintf("[reconnect attempt %d — sleeping %s]", attempt, delay)))
 		},
 		OnGap: func(reason string) {
-			fmt.Fprintln(out, app.Color.Yellow(fmt.Sprintf("[gap_marker: %s — refreshing snapshot]", reason)))
+			_, _ = fmt.Fprintln(out, app.Color.Yellow(fmt.Sprintf("[gap_marker: %s — refreshing snapshot]", reason)))
 			renderer.Reset()
 		},
 	}

@@ -37,7 +37,7 @@ func main() {
 		// cobra already printed the usage/error message; we only
 		// need to exit non-zero. The actual exit code is set by the
 		// subcommand via cmd/exit.go.
-		fmt.Fprintln(os.Stderr)
+		_, _ = fmt.Fprintln(os.Stderr)
 		os.Exit(pgmctlcmd.ExitCodeFromError(err))
 	}
 }

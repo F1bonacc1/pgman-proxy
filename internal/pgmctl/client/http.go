@@ -203,15 +203,15 @@ func (c *Client) StreamSSE(ctx context.Context, path string, headers map[string]
 		return nil, &NetworkError{Cause: err, Endpoint: u.String()}
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, &APIError{HTTPStatus: resp.StatusCode, Code: "auth_invalid", Message: "authentication failed"}
 	}
 	if resp.StatusCode == http.StatusNotAcceptable {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, &APIError{HTTPStatus: resp.StatusCode, Code: "not_acceptable", Message: "server refused SSE — check that the endpoint supports /v1/watch/*"}
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, &APIError{HTTPStatus: resp.StatusCode, Code: "stream_open_failed", Message: fmt.Sprintf("HTTP %d", resp.StatusCode)}
 	}
 	return resp, nil
@@ -244,7 +244,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*
 		// unhealthy" so the caller can map to EX_NETWORK (65).
 		return nil, &NetworkError{Cause: err, Endpoint: u.String()}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {

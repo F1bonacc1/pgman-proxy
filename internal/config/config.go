@@ -118,10 +118,10 @@ type ProxyConfig struct {
 
 // PostgresConfig governs how this peer talks to its local PostgreSQL.
 type PostgresConfig struct {
-	BinDir                string            `yaml:"bin_dir"                  json:"bin_dir"`
-	DataDir               string            `yaml:"data_dir"                 json:"data_dir"`
-	Port                  int               `yaml:"port"                     json:"port"`
-	LocalDSNEnv           string            `yaml:"local_dsn_env"            json:"local_dsn_env"`
+	BinDir      string `yaml:"bin_dir"                  json:"bin_dir"`
+	DataDir     string `yaml:"data_dir"                 json:"data_dir"`
+	Port        int    `yaml:"port"                     json:"port"`
+	LocalDSNEnv string `yaml:"local_dsn_env"            json:"local_dsn_env"`
 	// ReplicationAddr is the host:port that OTHER peers use to reach
 	// this node's local Postgres for replication (pg_basebackup,
 	// walsender). Distinct from LocalDSNEnv: in K8s the local view
@@ -129,7 +129,7 @@ type PostgresConfig struct {
 	// one peer is configured. Published to the cluster KV at startup so
 	// pg-manager's PeerDSNResolver can hand it to followers seeding from
 	// this node.
-	ReplicationAddr       string            `yaml:"replication_addr"         json:"replication_addr"`
+	ReplicationAddr string `yaml:"replication_addr"         json:"replication_addr"`
 	// LocalPGAddr is the host:port the topology-aware proxy uses to
 	// reach this node's own Postgres when SELF is the elected leader.
 	// When empty, pg-manager defaults to "127.0.0.1:<Port>" — but in
@@ -283,9 +283,9 @@ func Defaults() Config {
 		},
 		Topology: TopologyConfig{Port: 5432},
 		Policy: PolicyConfig{
-			FailoverDelay:    30 * time.Second,
-			SwitchoverDelay:  30 * time.Second,
-			PromoteTimeout:   60 * time.Second,
+			FailoverDelay:   30 * time.Second,
+			SwitchoverDelay: 30 * time.Second,
+			PromoteTimeout:  60 * time.Second,
 			// LivenessInterval drives reconciler tick cadence + the
 			// liveness probe + (3 × interval) QuorumSnapshotStaleAfter.
 			// 2s gives ~6s quorum-snapshot staleness and matches the
