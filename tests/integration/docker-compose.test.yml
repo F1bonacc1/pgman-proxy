@@ -66,6 +66,15 @@ services:
         PGMAN_PROXY_PEERS: node-a,node-b,node-c
       PGMAN_PROXY_NODE_ID: node-a
       PGMAN_PROXY_CLUSTER_ROUTE_PEERS: node-b:6222,node-c:6222
+      # LOCAL_PG_ADDR overrides pg-manager's default of 127.0.0.1:5432
+      # for the proxy → local-PG dial. The stock postgres image's
+      # pg_hba.conf treats 127.0.0.1/32 as scram-sha-256 (matched
+      # BEFORE the trust extras we append), so leaving this unset
+      # makes the proxy demand a password that no client supplies.
+      # Using the docker-network alias makes the dial source-IP fall
+      # to the catch-all 0.0.0.0/0 trust line. See the doc comment on
+      # config.PostgresConfig.LocalPGAddr.
+      PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR: node-a:5432
     ports:
       - "16432:6432"
       - "19090:9090"
@@ -76,6 +85,7 @@ services:
       <<: *cluster_common
       PGMAN_PROXY_NODE_ID: node-b
       PGMAN_PROXY_CLUSTER_ROUTE_PEERS: node-a:6222,node-c:6222
+      PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR: node-b:5432
     depends_on:
       node-a:
         condition: service_started
@@ -89,6 +99,7 @@ services:
       <<: *cluster_common
       PGMAN_PROXY_NODE_ID: node-c
       PGMAN_PROXY_CLUSTER_ROUTE_PEERS: node-a:6222,node-b:6222
+      PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR: node-c:5432
     depends_on:
       node-a:
         condition: service_started
