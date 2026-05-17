@@ -2,6 +2,12 @@ module github.com/f1bonacc1/pgman-proxy
 
 go 1.25.0
 
+// Pin a toolchain new enough to ship the stdlib fixes for the
+// govulncheck findings in `.github/workflows/govulncheck.yml`:
+//   GO-2026-4971 (net) and GO-2026-4918 (net/http) — both fixed in go1.26.3.
+// Bump in lockstep with new govulncheck stdlib findings.
+toolchain go1.26.3
+
 // During development, the wrapped pg-manager engine is consumed via the
 // sibling worktree. Release builds MUST replace this with a tagged version
 // (see .specify/memory/constitution.md § Additional Constraints).

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,11 +22,17 @@ import (
 // `feed` channel; the subscriber forwards events to the handler.
 // closeAll closes all live subscriber channels so the handler's
 // gap_marker / drained-stream path fires.
+//
+// lastOpts is written by the server goroutine inside Watch() and read
+// by test goroutines via getLastOpts(); the mutex makes that ordering
+// safe under `go test -race`.
 type fakeWatch struct {
 	feed       chan history.HistoryEvent
 	stopCh     chan struct{}
-	lastOpts   history.WatchOptions
 	subscribed chan struct{}
+
+	mu       sync.Mutex
+	lastOpts history.WatchOptions
 }
 
 func newFakeWatch() *fakeWatch {
@@ -36,8 +43,16 @@ func newFakeWatch() *fakeWatch {
 	}
 }
 
+func (f *fakeWatch) getLastOpts() history.WatchOptions {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastOpts
+}
+
 func (f *fakeWatch) Watch(ctx context.Context, opts history.WatchOptions) (<-chan history.HistoryEvent, <-chan error) {
+	f.mu.Lock()
 	f.lastOpts = opts
+	f.mu.Unlock()
 	select {
 	case f.subscribed <- struct{}{}:
 	default:
@@ -169,7 +184,8 @@ func TestWatchTransitions_FiltersToStateTransitionsOnly(t *testing.T) {
 
 	// Block until the handler has subscribed (i.e. lastOpts is set).
 	waitFor(t, func() bool {
-		return len(watch.lastOpts.Types) == 1 && watch.lastOpts.Types[0] == "state_transition"
+		opts := watch.getLastOpts()
+		return len(opts.Types) == 1 && opts.Types[0] == "state_transition"
 	}, 2*time.Second, "watch subscriber never received state_transition type filter")
 }
 
@@ -186,7 +202,7 @@ func TestWatchEvents_LastEventIDPropagatesAsCursor(t *testing.T) {
 	defer resp.Body.Close()
 
 	waitFor(t, func() bool {
-		return watch.lastOpts.Cursor == "01H-RESUME"
+		return watch.getLastOpts().Cursor == "01H-RESUME"
 	}, 2*time.Second, "Last-Event-ID never propagated as Cursor")
 }
 

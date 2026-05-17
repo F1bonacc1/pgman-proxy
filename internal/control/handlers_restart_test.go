@@ -9,25 +9,38 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 // fakeProxy implements ProxySelfTerminator for the restart handler
 // tests. SelfTerminateCalled records the reason so tests can assert
-// the drain path was reached without actually calling os.Exit.
+// the drain path was reached without actually calling os.Exit. The
+// fields are written by the handler's background goroutine and read
+// from the test goroutine, so the mutex is required under -race.
 type fakeProxy struct {
-	nodeID                 string
-	presence               string
-	selfTerminateCalled    bool
-	selfTerminateReason    string
+	nodeID   string
+	presence string
+
+	mu                  sync.Mutex
+	selfTerminateCalled bool
+	selfTerminateReason string
 }
 
 func (f *fakeProxy) SupervisorPresence() string { return f.presence }
 func (f *fakeProxy) LocalNodeID() string        { return f.nodeID }
 func (f *fakeProxy) SelfTerminate(_ context.Context, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.selfTerminateCalled = true
 	f.selfTerminateReason = reason
+}
+
+func (f *fakeProxy) selfTerminateState() (bool, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.selfTerminateCalled, f.selfTerminateReason
 }
 
 func newRestartTestServer(t *testing.T, engine Engine, proxy ProxySelfTerminator) *Server {
@@ -56,7 +69,7 @@ func TestRestart_PostgresHappyPath(t *testing.T) {
 	if !called {
 		t.Fatal("Engine.RestartPostgres was never called")
 	}
-	if proxy.selfTerminateCalled {
+	if called, _ := proxy.selfTerminateState(); called {
 		t.Fatal("SelfTerminate fired on postgres target — should be local pg restart only")
 	}
 }
@@ -72,9 +85,12 @@ func TestRestart_ProxyHappyPathUnderSupervisor(t *testing.T) {
 	}
 	// SelfTerminate runs on a background goroutine after a 50ms
 	// delay; poll briefly.
-	waitFor(t, func() bool { return proxy.selfTerminateCalled }, 2*time.Second, "SelfTerminate never invoked")
-	if proxy.selfTerminateReason != "operator_restart" {
-		t.Errorf("reason=%q, want operator_restart", proxy.selfTerminateReason)
+	waitFor(t, func() bool {
+		called, _ := proxy.selfTerminateState()
+		return called
+	}, 2*time.Second, "SelfTerminate never invoked")
+	if _, reason := proxy.selfTerminateState(); reason != "operator_restart" {
+		t.Errorf("reason=%q, want operator_restart", reason)
 	}
 }
 
@@ -94,7 +110,7 @@ func TestRestart_ProxyRefusedWithoutSupervisor(t *testing.T) {
 	if env.Error == nil || env.Error.Code != CodeSupervisorNotDetected {
 		t.Errorf("error.code=%v, want %q", env.Error, CodeSupervisorNotDetected)
 	}
-	if proxy.selfTerminateCalled {
+	if called, _ := proxy.selfTerminateState(); called {
 		t.Fatal("SelfTerminate fired despite supervisor refusal")
 	}
 }
