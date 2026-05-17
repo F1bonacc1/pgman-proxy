@@ -60,7 +60,7 @@ jobs:
         run: go test -tags=smoke -count=1 -timeout=5m ./tests/smoke/...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.0.0
           working-directory: pgman-proxy
