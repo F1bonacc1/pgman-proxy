@@ -87,6 +87,11 @@ func WaitForJetStreamResponsive(ctx context.Context, conn *nats.Conn, interval t
 // `pgmgr_<sanitized-cluster-id>` with non-[A-Za-z0-9_-] runes mapped
 // to `_`. This coupling is the Constitution-IV exception logged in
 // plan.md.
+//
+// A single inner attempt is wrapped in a bounded retry loop so transient
+// JetStream placement / sync errors during cold-start (meta-cluster
+// leader still settling, KV stream RAFT not yet elected) don't fail the
+// boot — see tryPreCreateClusterKV for the per-attempt body.
 func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, replicas int) error {
 	if conn == nil {
 		return errors.New("PreCreateClusterKV: nats connection is nil")
@@ -113,6 +118,31 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
+	var lastErr error
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		err = tryPreCreateClusterKV(callCtx, js, name, replicas)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		if !time.Now().Before(deadline) {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	return fmt.Errorf("PreCreateClusterKV failed after retry: %w", lastErr)
+}
+
+// tryPreCreateClusterKV attempts a single execution of KV bucket pre-creation and configuration.
+func tryPreCreateClusterKV(callCtx context.Context, js jetstream.JetStream, name string, replicas int) error {
 	kv, err := js.KeyValue(callCtx, name)
 	if err != nil {
 		if !errors.Is(err, jetstream.ErrBucketNotFound) {

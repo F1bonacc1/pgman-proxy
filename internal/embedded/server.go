@@ -145,14 +145,42 @@ func (s *Server) ClientURL() string {
 	return s.srv.ClientURL()
 }
 
-// NumRoutes returns the count of currently-meshed sibling cluster
-// routes (excluding self). Powers the
-// `pgman_proxy_embedded_nats_routes_meshed` gauge.
+// NumRoutes returns the raw count of active route TCP connections
+// reported by nats-server, including duplicates: NATS opens two
+// connections per peer pair during mesh formation, so this overcounts
+// in steady state. Prefer NumUniqueRoutes for any check that must
+// reason about how many distinct remote peers are meshed; this raw
+// counter is retained only for legacy callers that compare against the
+// underlying nats-server figure.
 func (s *Server) NumRoutes() int {
 	if s == nil || s.srv == nil {
 		return 0
 	}
 	return s.srv.NumRoutes()
+}
+
+// NumUniqueRoutes returns the number of distinct remote peer servers
+// currently meshed via cluster routes (excluding self), deduplicated by
+// the remote server ID reported in Routez. This is the figure that
+// matches operator intent ("how many peers can I see?") and powers
+// both the WaitForRouteMesh gate and the
+// `pgman_proxy_embedded_nats_routes_meshed` gauge. Falls back to
+// NumRoutes if Routez fails so the caller still observes liveness.
+func (s *Server) NumUniqueRoutes() int {
+	if s == nil || s.srv == nil {
+		return 0
+	}
+	rz, err := s.srv.Routez(&server.RoutezOptions{})
+	if err != nil {
+		return s.srv.NumRoutes()
+	}
+	seen := make(map[string]bool)
+	for _, r := range rz.Routes {
+		if r.RemoteID != "" {
+			seen[r.RemoteID] = true
+		}
+	}
+	return len(seen)
 }
 
 // WaitForRouteMesh blocks until at least `expectedPeers - 1` sibling
@@ -171,7 +199,7 @@ func (s *Server) WaitForRouteMesh(ctx context.Context, expectedPeers int, interv
 	if expectedPeers > 1 {
 		required = expectedPeers - 1
 	}
-	if s.srv.NumRoutes() >= required {
+	if s.NumUniqueRoutes() >= required {
 		return nil
 	}
 	t := time.NewTicker(interval)
@@ -180,9 +208,9 @@ func (s *Server) WaitForRouteMesh(ctx context.Context, expectedPeers int, interv
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("wait for route mesh (have %d, need %d): %w",
-				s.srv.NumRoutes(), required, ctx.Err())
+				s.NumUniqueRoutes(), required, ctx.Err())
 		case <-t.C:
-			if s.srv.NumRoutes() >= required {
+			if s.NumUniqueRoutes() >= required {
 				return nil
 			}
 		}

@@ -191,6 +191,9 @@ func validateCluster(c *ClusterConfig, m *MultiError) {
 	if c.DeclaredSize < 1 {
 		m.Add(fmt.Errorf("cluster.declared_size must be >= 1, got %d (FR-011a)", c.DeclaredSize))
 	}
+	if c.ReadyTimeout <= 0 {
+		m.Add(errors.New("cluster.ready_timeout must be > 0 (bounds the embedded nats-server boot wait — distinct from nats.connect_timeout which bounds client dials)"))
+	}
 
 	// Multi-peer + empty route_peers → fail-closed (FR-008).
 	if c.DeclaredSize > 1 && len(c.RoutePeers) == 0 {

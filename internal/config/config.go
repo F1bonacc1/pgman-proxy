@@ -60,6 +60,14 @@ type ClusterConfig struct {
 	PasswordFile              string          `yaml:"password_file"               json:"password_file"`
 	JetStreamDir              string          `yaml:"jetstream_dir"               json:"jetstream_dir"`
 	ReplicationFactorOverride int             `yaml:"replication_factor_override" json:"replication_factor_override"`
+
+	// ReadyTimeout bounds how long Start waits for the in-process
+	// nats-server to reach ReadyForConnections. Distinct from
+	// NATS.ConnectTimeout, which bounds client-side loopback dials.
+	// Boot-side waits cover listener bind + JetStream store mount +
+	// route mesh bringup, which scale with disk I/O and cold-start
+	// contention rather than network RTT.
+	ReadyTimeout time.Duration `yaml:"ready_timeout" json:"ready_timeout"`
 }
 
 // EndpointConfig is a host/port pair used for the embedded-NATS
@@ -267,6 +275,13 @@ func Defaults() Config {
 				Port:    6222,
 				Enabled: true,
 			},
+			// ReadyTimeout default (45s) covers worst-case cold-start
+			// of the in-process nats-server: listener bind + JetStream
+			// store mount + initial route mesh bringup. Chaos-rig RCA
+			// (2026-05-16) showed the prior 10s budget — borrowed from
+			// NATS.ConnectTimeout, which bounds a TCP+INFO loopback
+			// dial — was too short under cold-cache contention.
+			ReadyTimeout: 45 * time.Second,
 		},
 		NATS: NATSConfig{
 			ConnectTimeout: 10 * time.Second,

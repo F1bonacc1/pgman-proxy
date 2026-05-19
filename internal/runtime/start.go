@@ -758,7 +758,7 @@ func bootEmbeddedNATS(ctx context.Context, cfg config.Config, logger *obs.Logger
 		return nil, &StartupError{Code: ExitConfig, Err: fmt.Errorf("embedded.NewServer: %w", err)}
 	}
 
-	if err := srv.Start(ctx, cfg.NATS.ConnectTimeout); err != nil {
+	if err := srv.Start(ctx, cfg.Cluster.ReadyTimeout); err != nil {
 		return nil, &StartupError{Code: ExitDeps, Err: fmt.Errorf("embedded NATS startup: %w", err)}
 	}
 	return srv, nil

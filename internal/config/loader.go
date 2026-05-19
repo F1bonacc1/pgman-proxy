@@ -105,6 +105,7 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		"PGMAN_PROXY_CLUSTER_ROUTES_LISTEN_PORT":          intSet(&cfg.Cluster.RoutesListen.Port),
 		"PGMAN_PROXY_CLUSTER_REPLICATION_FACTOR_OVERRIDE": intSet(&cfg.Cluster.ReplicationFactorOverride),
 		"PGMAN_PROXY_CLUSTER_TLS_PLAINTEXT_EXPLICIT_ACK":  boolSet(&cfg.Cluster.TLS.PlaintextExplicitAck),
+		"PGMAN_PROXY_CLUSTER_READY_TIMEOUT":               durSet(&cfg.Cluster.ReadyTimeout),
 		// NATS timing knobs are retained for the loopback dial; the
 		// URL/CredsFile/TokenEnv fields are no longer accepted from
 		// any source (validation rejects them with a migration error).

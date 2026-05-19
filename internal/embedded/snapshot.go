@@ -38,7 +38,11 @@ func (s *Server) Snapshot() StatusSnapshot {
 		ServerName:       s.srv.Name(),
 		Ready:            s.readyClosed.Load(),
 		ClientListenAddr: s.srv.ClientURL(),
-		RoutesMeshed:     s.srv.NumRoutes(),
+		// Deduplicated peer count — matches the mesh-readiness gate
+		// (WaitForRouteMesh) so the gauge agrees with the boot
+		// criterion. Raw s.srv.NumRoutes() overcounts because nats-server
+		// opens two TCP connections per peer pair during mesh formation.
+		RoutesMeshed: s.NumUniqueRoutes(),
 	}
 	if addr := s.srv.ClusterAddr(); addr != nil {
 		snap.RoutesListenAddr = addr.String()
