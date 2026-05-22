@@ -22,9 +22,12 @@ import (
 )
 
 // upgradeReq is the body shape for /v1/upgrade/prepare and
-// /v1/upgrade/execute.
+// /v1/upgrade/execute. RequestID is accepted-but-ignored — pgmctl
+// stamps a client-side ULID into the body alongside the X-Request-Id
+// header (FR-039); the server's envelope reuses its own ULID.
 type upgradeReq struct {
-	Plan pgmanager.UpgradePlan `json:"plan"`
+	Plan      pgmanager.UpgradePlan `json:"plan"`
+	RequestID string                `json:"request_id,omitempty"`
 }
 
 func (s *Server) handlePrepareUpgrade(w http.ResponseWriter, r *http.Request, env *requestEnv) {

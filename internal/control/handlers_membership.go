@@ -15,14 +15,21 @@ import (
 	pgmanager "github.com/f1bonacc1/pg-manager"
 )
 
-// switchoverReq is the body for POST /v1/switchover.
+// switchoverReq is the body for POST /v1/switchover. RequestID is
+// accepted-but-ignored — pgmctl's mutating commands all stamp a
+// client-side ULID into the body alongside the X-Request-Id header
+// (FR-039 retry-correlation). The server's envelope reuses its own
+// server-side ULID, so the body field is informational only.
 type switchoverReq struct {
-	Target string `json:"target"`
+	Target    string `json:"target"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
-// fenceReq is the body for POST /v1/fence and /v1/unfence.
+// fenceReq is the body for POST /v1/fence and /v1/unfence. RequestID
+// is accepted-but-ignored (see switchoverReq).
 type fenceReq struct {
-	Target string `json:"target"`
+	Target    string `json:"target"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func (s *Server) handleSwitchover(w http.ResponseWriter, r *http.Request, env *requestEnv) {

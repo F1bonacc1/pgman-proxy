@@ -12,10 +12,14 @@ import (
 
 // updateTopologyReq is the body shape for POST /v1/topology. Topology
 // and Policy use pg-manager's wire shapes verbatim — renames upstream
-// propagate as MINOR-version events here.
+// propagate as MINOR-version events here. RequestID is accepted-but-
+// ignored — pgmctl stamps a client-side ULID into the body alongside
+// the X-Request-Id header (FR-039); the server's envelope reuses its
+// own ULID.
 type updateTopologyReq struct {
-	Topology pgmanager.Topology `json:"topology"`
-	Policy   pgmanager.Policy   `json:"policy"`
+	Topology  pgmanager.Topology `json:"topology"`
+	Policy    pgmanager.Policy   `json:"policy"`
+	RequestID string             `json:"request_id,omitempty"`
 }
 
 func (s *Server) handleUpdateTopology(w http.ResponseWriter, r *http.Request, env *requestEnv) {
