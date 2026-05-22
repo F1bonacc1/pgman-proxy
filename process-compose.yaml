@@ -53,21 +53,12 @@
 #   process-compose down             # stop processes (containers auto-rm)
 
 version: "0.5"
-
-# Cleanup hooks: even if a process exits cleanly, the docker network
-# may stick around. The shutdown lifecycle removes it.
-shutdown:
-  command: |
-    docker rm -f pgman-pc-node-a pgman-pc-node-b pgman-pc-node-c 2>/dev/null
-    docker network rm pgman-pc-net 2>/dev/null
-    true
-  timeout_seconds: 30
-
+disable_env_expansion: true
+is_strict: true
 environment:
   - "PGMAN_PROXY_CONTROL_TOKEN=process-compose-dev-token"
 
 processes:
-
   # ───────────────────────────────────────────────────────────────────
   # network: shared docker network so the three peer containers reach
   # each other by name (node-a, node-b, node-c). Idempotent.
@@ -382,3 +373,126 @@ processes:
       # peers (3) * 1s, so a single black-holed peer port leaves >=2s
       # for the actual INSERT. See cmd/chaos-workload/budget_test.go.
       - "CHAOS_DSN=host=127.0.0.1,127.0.0.1,127.0.0.1 port=16432,16433,16434 user=postgres dbname=postgres sslmode=disable connect_timeout=1"
+
+  # ───────────────────────────────────────────────────────────────────
+  # chaos: on-demand network partition / heal per node. Disabled by
+  # default so they don't fire on `process-compose up`; the operator
+  # starts them manually from the TUI or via
+  # `process-compose process start <name>`.
+  #
+  # Mechanism mirrors docs/chaos-experiments.md §§CR-004/CR-005:
+  # inject iptables INPUT+OUTPUT DROP rules against the two sibling
+  # peer IPs and heal with `iptables -F`. Peer IPs are read from the
+  # host via `docker inspect` (NOT in-container getent) — this avoids
+  # transient in-container DNS gaps when a peer container is mid-
+  # restart, and fails fast with a clear message if a peer is gone.
+  # Containers have CAP_NET_ADMIN and the image setcaps xtables, so
+  # docker exec runs iptables without -u root or sudo.
+  # ───────────────────────────────────────────────────────────────────
+  partition-node-a:
+    description: "chaos: isolate node-a from node-b/node-c via iptables DROP"
+    disabled: true
+    is_daemon: false
+    is_template_disabled: true
+    availability:
+      restart: "no"
+    command: |
+      set -eu
+      C=pgman-pc-node-a
+      tmpl='{{(index .NetworkSettings.Networks "pgman-pc-net").IPAddress}}'
+      peer_b=$(docker inspect -f "$tmpl" pgman-pc-node-b) || { echo "ERROR: docker inspect pgman-pc-node-b failed"; exit 1; }
+      peer_c=$(docker inspect -f "$tmpl" pgman-pc-node-c) || { echo "ERROR: docker inspect pgman-pc-node-c failed"; exit 1; }
+      [ -n "$peer_b" ] || { echo "ERROR: empty IP for node-b on pgman-pc-net"; exit 1; }
+      [ -n "$peer_c" ] || { echo "ERROR: empty IP for node-c on pgman-pc-net"; exit 1; }
+      echo "isolating node-a from node-b=${peer_b} node-c=${peer_c}"
+      docker exec "$C" iptables -A INPUT  -s "${peer_b}" -j DROP
+      docker exec "$C" iptables -A INPUT  -s "${peer_c}" -j DROP
+      docker exec "$C" iptables -A OUTPUT -d "${peer_b}" -j DROP
+      docker exec "$C" iptables -A OUTPUT -d "${peer_c}" -j DROP
+      docker exec "$C" iptables -L -n
+      echo "node-a partitioned. run 'heal-node-a' to restore."
+
+  heal-node-a:
+    description: "chaos: flush iptables on node-a (heal partition)"
+    disabled: true
+    is_daemon: false
+    availability:
+      restart: "no"
+    command: |
+      set -eu
+      C=pgman-pc-node-a
+      docker exec "$C" iptables -F
+      echo "node-a healed; remaining rules:"
+      docker exec "$C" iptables -L -n
+
+  partition-node-b:
+    description: "chaos: isolate node-b from node-a/node-c via iptables DROP"
+    disabled: true
+    is_daemon: false
+    is_template_disabled: true
+    availability:
+      restart: "no"
+    command: |
+      set -eu
+      C=pgman-pc-node-b
+      tmpl='{{(index .NetworkSettings.Networks "pgman-pc-net").IPAddress}}'
+      peer_a=$(docker inspect -f "$tmpl" pgman-pc-node-a) || { echo "ERROR: docker inspect pgman-pc-node-a failed"; exit 1; }
+      peer_c=$(docker inspect -f "$tmpl" pgman-pc-node-c) || { echo "ERROR: docker inspect pgman-pc-node-c failed"; exit 1; }
+      [ -n "$peer_a" ] || { echo "ERROR: empty IP for node-a on pgman-pc-net"; exit 1; }
+      [ -n "$peer_c" ] || { echo "ERROR: empty IP for node-c on pgman-pc-net"; exit 1; }
+      echo "isolating node-b from node-a=${peer_a} node-c=${peer_c}"
+      docker exec "$C" iptables -A INPUT  -s "${peer_a}" -j DROP
+      docker exec "$C" iptables -A INPUT  -s "${peer_c}" -j DROP
+      docker exec "$C" iptables -A OUTPUT -d "${peer_a}" -j DROP
+      docker exec "$C" iptables -A OUTPUT -d "${peer_c}" -j DROP
+      docker exec "$C" iptables -L -n
+      echo "node-b partitioned. run 'heal-node-b' to restore."
+
+  heal-node-b:
+    description: "chaos: flush iptables on node-b (heal partition)"
+    disabled: true
+    is_daemon: false
+    availability:
+      restart: "no"
+    command: |
+      set -eu
+      C=pgman-pc-node-b
+      docker exec "$C" iptables -F
+      echo "node-b healed; remaining rules:"
+      docker exec "$C" iptables -L -n
+
+  partition-node-c:
+    description: "chaos: isolate node-c from node-a/node-b via iptables DROP"
+    disabled: true
+    is_daemon: false
+    is_template_disabled: true
+    availability:
+      restart: "no"
+    command: |
+      set -eu
+      C=pgman-pc-node-c
+      tmpl='{{(index .NetworkSettings.Networks "pgman-pc-net").IPAddress}}'
+      peer_a=$(docker inspect -f "$tmpl" pgman-pc-node-a) || { echo "ERROR: docker inspect pgman-pc-node-a failed"; exit 1; }
+      peer_b=$(docker inspect -f "$tmpl" pgman-pc-node-b) || { echo "ERROR: docker inspect pgman-pc-node-b failed"; exit 1; }
+      [ -n "$peer_a" ] || { echo "ERROR: empty IP for node-a on pgman-pc-net"; exit 1; }
+      [ -n "$peer_b" ] || { echo "ERROR: empty IP for node-b on pgman-pc-net"; exit 1; }
+      echo "isolating node-c from node-a=${peer_a} node-b=${peer_b}"
+      docker exec "$C" iptables -A INPUT  -s "${peer_a}" -j DROP
+      docker exec "$C" iptables -A INPUT  -s "${peer_b}" -j DROP
+      docker exec "$C" iptables -A OUTPUT -d "${peer_a}" -j DROP
+      docker exec "$C" iptables -A OUTPUT -d "${peer_b}" -j DROP
+      docker exec "$C" iptables -L -n
+      echo "node-c partitioned. run 'heal-node-c' to restore."
+
+  heal-node-c:
+    description: "chaos: flush iptables on node-c (heal partition)"
+    disabled: true
+    is_daemon: false
+    availability:
+      restart: "no"
+    command: |
+      set -eu
+      C=pgman-pc-node-c
+      docker exec "$C" iptables -F
+      echo "node-c healed; remaining rules:"
+      docker exec "$C" iptables -L -n
