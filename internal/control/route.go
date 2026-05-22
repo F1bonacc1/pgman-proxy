@@ -68,21 +68,40 @@ func (r *LeaderRouter) LeaderID() string { return r.state.LeaderID() }
 // awaits a reply within the configured timeout. Returns the reply body
 // on success; ErrLeaderRouteTimeout on deadline; any underlying NATS
 // error otherwise.
-func (r *LeaderRouter) Forward(ctx context.Context, op string, payload []byte) ([]byte, error) {
+//
+// Optional headers (`X-Request-Id`, `X-Actor`, `traceparent`) propagate
+// the originating client's identity and trace context to the leader so
+// the leader's audit record correlates with the forwarder's. Older
+// publishers (or this method called with empty values) omit the header,
+// and the responder falls back to defaults — wire-compatible.
+func (r *LeaderRouter) Forward(ctx context.Context, op, requestID, actor, traceparent string, payload []byte) ([]byte, error) {
 	if r.conn == nil {
 		return nil, errors.New("forward: nil NATS connection")
 	}
 	subject := fmt.Sprintf("pgman_proxy.%s.lcm.request.%s", r.clusterID, op)
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
-	msg, err := r.conn.RequestWithContext(timeoutCtx, subject, payload)
+	msg := &nats.Msg{Subject: subject, Data: payload}
+	if requestID != "" || actor != "" || traceparent != "" {
+		msg.Header = nats.Header{}
+		if requestID != "" {
+			msg.Header.Set("X-Request-Id", requestID)
+		}
+		if actor != "" {
+			msg.Header.Set("X-Actor", actor)
+		}
+		if traceparent != "" {
+			msg.Header.Set("traceparent", traceparent)
+		}
+	}
+	reply, err := r.conn.RequestMsgWithContext(timeoutCtx, msg)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
 			return nil, ErrLeaderRouteTimeout
 		}
 		return nil, err
 	}
-	return msg.Data, nil
+	return reply.Data, nil
 }
 
 // ErrLeaderRouteTimeout is the typed sentinel handlers map to the

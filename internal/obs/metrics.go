@@ -39,6 +39,7 @@ type MetricSet struct {
 	LCMInFlight             *prometheus.GaugeVec
 	LCMAuditEmitFailuresTot *prometheus.CounterVec
 	LCMLeaderRouteTotal     *prometheus.CounterVec
+	LCMLeaderResponderTotal *prometheus.CounterVec
 
 	// Embedded NATS metrics (feature 002 / contracts/observability.md).
 	EmbeddedNATSUp                   prometheus.Gauge
@@ -157,6 +158,10 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		Name: "pgman_proxy_lcm_leader_route_total", Help: "LCM leader-routing dispositions.",
 		ConstLabels: constLabels,
 	}, []string{"operation", "disposition"})
+	m.LCMLeaderResponderTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pgman_proxy_lcm_leader_responder_total", Help: "Leader-route responder dispositions (receiver side of LCM leader-routing).",
+		ConstLabels: constLabels,
+	}, []string{"operation", "outcome"})
 
 	// Embedded NATS metrics (feature 002 / contracts/observability.md).
 	m.EmbeddedNATSUp = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -212,7 +217,7 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		m.LeadershipState, m.LeaderChangesTotal, m.LeaseRenewalFailuresTot,
 		m.NATSRoundTrip, m.NATSDisconnectsTotal, m.CoordinationEventsTotal,
 		m.LCMRequestsTotal, m.LCMRequestLatency, m.LCMEngineLatency, m.LCMInFlight,
-		m.LCMAuditEmitFailuresTot, m.LCMLeaderRouteTotal,
+		m.LCMAuditEmitFailuresTot, m.LCMLeaderRouteTotal, m.LCMLeaderResponderTotal,
 		m.EmbeddedNATSUp, m.EmbeddedNATSRoutesMeshed, m.EmbeddedNATSReplicasFactor,
 		m.EmbeddedNATSStorageBytes, m.EmbeddedNATSStorageDegraded,
 		m.EmbeddedNATSLifecycleEventsTotal, m.EmbeddedNATSRouteAuthFailures, m.EmbeddedNATSReloadOutcomes,

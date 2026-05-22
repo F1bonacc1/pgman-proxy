@@ -123,8 +123,15 @@ func (s *Server) forwardEngineCall(w http.ResponseWriter, r *http.Request, env *
 		s.rejectInvalid(r.Context(), w, r, env, "read body: "+err.Error())
 		return
 	}
+	// Forward the originating client's identity + trace context so the
+	// leader's audit record correlates with the forwarder's.
+	tp := traceFromContext(r.Context())
+	var traceparent string
+	if tp.HasTrace() {
+		traceparent = tp.Header()
+	}
 	engineStart := time.Now()
-	reply, err := s.router.Forward(r.Context(), env.Op, body)
+	reply, err := s.router.Forward(r.Context(), env.Op, env.ReqID, env.Actor, traceparent, body)
 	engineLatency := time.Since(engineStart)
 	if err != nil {
 		if errors.Is(err, ErrLeaderRouteTimeout) {

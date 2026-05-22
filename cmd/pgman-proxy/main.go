@@ -258,6 +258,16 @@ func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
 			Stop: func(_ context.Context) error { return res.Fanout.Close() },
 		})
 	}
+	// Drain the leader-route responder after the HTTP control plane so
+	// no new forwards can land, but before the manager step so in-flight
+	// engine calls from already-accepted forwards finish against a live
+	// engine.
+	if res.LeaderRouteResponder != nil {
+		steps = append(steps, runtime.DrainStep{
+			Name: "leader-route-responder",
+			Stop: func(_ context.Context) error { return res.LeaderRouteResponder.Close() },
+		})
+	}
 	if res.ObsSrv != nil {
 		steps = append(steps, runtime.DrainStep{
 			Name: "obs",

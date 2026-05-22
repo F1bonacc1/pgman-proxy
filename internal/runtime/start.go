@@ -28,18 +28,19 @@ import (
 // sequence so the caller (cmd/pgman-proxy/main.go) can drive shutdown
 // in reverse order.
 type StartupResult struct {
-	Logger   *obs.Logger
-	Metrics  *obs.MetricSet
-	Health   *obs.Health
-	ObsSrv   *obs.Server
-	Embedded *embedded.Server // feature 002: in-process NATS server (replaces external NATS)
-	Cluster  *cluster.Handles
-	Manager  *manager.Manager
-	Conn     *nats.Conn
-	EventSub []*nats.Subscription
-	Control  *control.Server
-	Fanout   *fanout.Server     // feature 003: per-peer SliceStatus responder
-	History  *history.Publisher // feature 003: cluster-wide event + audit history sink
+	Logger               *obs.Logger
+	Metrics              *obs.MetricSet
+	Health               *obs.Health
+	ObsSrv               *obs.Server
+	Embedded             *embedded.Server // feature 002: in-process NATS server (replaces external NATS)
+	Cluster              *cluster.Handles
+	Manager              *manager.Manager
+	Conn                 *nats.Conn
+	EventSub             []*nats.Subscription
+	Control              *control.Server
+	LeaderRouteResponder *control.LeaderRouteResponder // FR-026: leader-side responder for forwarded LCM requests
+	Fanout               *fanout.Server                // feature 003: per-peer SliceStatus responder
+	History              *history.Publisher            // feature 003: cluster-wide event + audit history sink
 }
 
 // StartupError carries the documented exit code so the caller can map
@@ -405,6 +406,20 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			return res, &StartupError{Code: ExitControl, Err: err}
 		}
 		res.Control = ctrl
+
+		// Leader-route responder (FR-026 / FR-034). Counterpart to the
+		// LeaderRouter publisher: each peer subscribes to
+		// `pgman_proxy.<cluster>.lcm.request.>` and, when it is the
+		// elected leader, dispatches the forwarded op against the local
+		// engine and replies. Non-leaders stay silent so the publisher's
+		// leader_route_timeout governs.
+		responder := control.NewLeaderRouteResponder(conn, cfg.Cluster.ID, cfg.Node.ID, m,
+			router, audit, res.Metrics, res.Logger, cfg.Control.LeaderRouteTimeout)
+		if err := responder.Serve(); err != nil {
+			return res, &StartupError{Code: ExitControl, Err: fmt.Errorf("leader-route responder: %w", err)}
+		}
+		res.LeaderRouteResponder = responder
+
 		go func() {
 			if err := ctrl.Start(ctx); err != nil {
 				res.Logger.Error("control plane stopped with error",
