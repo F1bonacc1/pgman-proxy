@@ -57,6 +57,13 @@ services:
         # placeholder value is harmless until US4 wires the listener.
         PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN
         PGMAN_PROXY_CONTROL_TOKEN: integration-test-token
+        # LCM control plane (FR-021..FR-034). Bound on all interfaces so
+        # `docker compose exec curl http://127.0.0.1:9091/...` works from
+        # inside the container; plaintext-ack is required because the
+        # bind isn't loopback (FR-033). Test-only — production deploys
+        # MUST configure TLS.
+        PGMAN_PROXY_CONTROL_LISTEN_ADDR: 0.0.0.0:9091
+        PGMAN_PROXY_CONTROL_TLS_PLAINTEXT_EXPLICIT_ACK: "true"
         # Test-only HBA / postgresql.conf scaffolding so peers can stream
         # replication on the compose network (DEMO ONLY — never use trust
         # auth in production). The leader's PostInitDB hook applies these.

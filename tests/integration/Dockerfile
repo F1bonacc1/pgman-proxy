@@ -51,6 +51,7 @@ ENV POSTGRES_BIN_DIR=/usr/lib/postgresql/${POSTGRES_VERSION}/bin
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+         curl \
          iptables \
          iproute2 \
          procps \
