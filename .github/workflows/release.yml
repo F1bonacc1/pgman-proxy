@@ -40,8 +40,12 @@ jobs:
 
       # The go.mod has `replace ../pg-manager`; rewrite to ./pg-manager
       # since GitHub Actions checks out both repos under the workspace root.
+      # Then hide both changes from git so GoReleaser sees a clean tree.
       - name: Patch go.mod replace directive
-        run: sed -i 's|=> \.\./pg-manager|=> ./pg-manager|' go.mod
+        run: |
+          sed -i 's|=> \.\./pg-manager|=> ./pg-manager|' go.mod
+          echo "pg-manager/" >> .gitignore
+          git update-index --assume-unchanged go.mod
 
       - uses: actions/setup-go@v5
         with:
