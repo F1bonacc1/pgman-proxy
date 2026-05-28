@@ -217,17 +217,36 @@ timeout.
 
 ## Mutating commands — single-resource
 
-### `pgmctl fence <node> [-y]`
+### `pgmctl fence <node> [-y] [--force]`
 
 Calls `POST /v1/fence` (existing 001). Prompts unless `-y`.
 
 Prompt text:
 
 ```text
-About to FENCE node-2 in cluster prod-east.
-This will mark the node ineligible to serve writes until manually unfenced.
-Continue? [y/N]:
+About to fence node-2 in cluster prod-east. Continue? [y/N]:
 ```
+
+**Semantics (corrected 2026-05-29).** Fence is a *promotion-eligibility*
+marker, **not** a failover. pg-manager's `EventOperatorFence` preserves
+the node's role (`NewRole: curRole`) and the `StateFenced` act-phase is
+a no-op, so fencing a node neither demotes it nor moves writes off it —
+it only makes the node ineligible for **future** promotion / failover
+candidate selection (001 spec.md:123-124) and excludes it from
+auto-rebootstrap/auto-demote (FR-010). Earlier prompt copy claimed fence
+makes a node "ineligible to serve writes"; that overstated the effect
+and is removed.
+
+**Current-primary guard (FR-028a).** Because fencing the live primary is
+a no-op for writes yet leaves an incoherent snapshot (a node that is
+both serving writes and marked fenced — `pgmctl doctor`'s
+`cluster.has-primary` then reports "no primary observed" while
+`cluster.has-leader` still passes), `pgmctl fence <primary>` is
+**refused** with `EX_USAGE` (64) and a message pointing the operator at
+`failover` / `switchover`. The guard is best-effort: if `GET /v1/status`
+cannot be fetched/decoded it warns and proceeds (strictly additive — no
+previously-working invocation starts failing). Pass `--force` to fence
+the current primary anyway (emits a warning).
 
 ---
 

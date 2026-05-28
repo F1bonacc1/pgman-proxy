@@ -65,8 +65,19 @@ func clusterAffectingPrompt(app *AppContext, op, target string) error {
 func newFenceCmd(app *AppContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "fence <node-id>",
-		Short: "Add a node to the cluster fence list",
-		Long: `Fence a single peer so the reconciler refuses to promote it.
+		Short: "Add a node to the cluster fence list (blocks future promotion)",
+		Long: `Fence a single peer so the reconciler refuses to PROMOTE it.
+
+Fence is a promotion-eligibility marker, not a failover: it does NOT
+demote a running node or move writes off it. pg-manager preserves the
+node's role on fence, so fencing the current primary would leave a
+primary that is simultaneously serving writes and marked ineligible (an
+incoherent state — 'pgmctl doctor' then reports "no primary observed").
+Fencing the current primary is therefore refused; use 'pgmctl failover'
+or 'pgmctl switchover --target <peer>' to move writes off the primary
+first, then fence the old primary once it is a standby. Pass --force to
+fence the primary anyway.
+
 Single-resource op; prompts [y/N] unless --yes is set.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,6 +101,15 @@ func runFenceOp(cmd *cobra.Command, app *AppContext, op, target, path string) er
 	if err := app.Setup(); err != nil {
 		return err
 	}
+	// Guard the fence-the-primary footgun (not unfence — leaving the
+	// fence list is always safe). Fencing the live primary is a no-op
+	// for writes and produces an incoherent snapshot; refuse unless
+	// --force. See fenceCurrentPrimaryGuard.
+	if op == "fence" {
+		if err := fenceCurrentPrimaryGuard(cmd, app, target); err != nil {
+			return err
+		}
+	}
 	if err := singleResourcePrompt(app, op, target); err != nil {
 		return err
 	}
@@ -102,6 +122,62 @@ func runFenceOp(cmd *cobra.Command, app *AppContext, op, target, path string) er
 	}
 	printRequestID(cmd, env)
 	return nil
+}
+
+// fenceCurrentPrimaryGuard refuses to fence the node that is currently
+// the cluster primary, unless --force is set.
+//
+// Why: pg-manager's Fence is a *promotion-eligibility* marker, not a
+// failover. EventOperatorFence preserves the node's role (it transitions
+// state→Fenced with NewRole=curRole), the StateFenced act-phase is a
+// no-op, and the data plane keeps routing writes to whoever is
+// primary+leader — none of which the fence list touches. So fencing the
+// live primary neither demotes it nor moves writes; it only blocks
+// FUTURE promotion. The result is an incoherent snapshot — a node that
+// is simultaneously serving writes and marked fenced — which is exactly
+// why 'pgmctl doctor' then reports "no primary observed" while
+// cluster.has-leader still passes. The correct tool to move writes off
+// the primary is failover / switchover.
+//
+// Strictly additive and best-effort: if cluster status can't be fetched
+// or decoded we warn and proceed, so any invocation that worked before
+// this guard still works during a control-plane hiccup. The only new
+// hard block is the provable case where status confirms the target IS
+// the current primary.
+func fenceCurrentPrimaryGuard(cmd *cobra.Command, app *AppContext, target string) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), commandTimeout(app))
+	defer cancel()
+
+	env, err := app.Client.GetJSON(ctx, "/v1/status")
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: could not fetch cluster status to check whether %q is the current primary (%v); proceeding with fence\n",
+			target, err)
+		return nil
+	}
+	engine, _, err := decodeStatusEngine(env.EngineResult)
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: could not decode cluster status to check whether %q is the current primary (%v); proceeding with fence\n",
+			target, err)
+		return nil
+	}
+	if engine.PrimaryNodeID != target {
+		return nil
+	}
+	if app.Flags.Force {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: %q is the current primary; --force given, fencing anyway. This does NOT demote it or move writes — it only blocks future promotion, leaving a primary marked ineligible. Use `pgmctl failover`/`switchover` to actually move writes.\n",
+			target)
+		return nil
+	}
+	return WithExitCode(ExitUsage, fmt.Errorf(
+		"%[1]q is the current primary — fencing will not demote it or move writes off it. "+
+			"Fence only blocks FUTURE promotion, so this would leave a primary that is both "+
+			"serving writes and marked fenced (`pgmctl doctor` then reports \"no primary observed\"). "+
+			"Run `pgmctl failover` or `pgmctl switchover --target <peer>` to move writes off %[1]q first, "+
+			"then fence it once it is a standby. Pass --force to fence the primary anyway",
+		target))
 }
 
 // --- set-config --------------------------------------------------------
