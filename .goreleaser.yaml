@@ -1,5 +1,15 @@
 # goreleaser config for pgman-proxy.
-# Produces static linux/amd64 + linux/arm64 binaries and a distroless OCI image.
+#
+# Produces:
+#   - pgman-proxy  — the HA proxy + PostgreSQL lifecycle manager
+#   - pgmctl       — kubectl-style operator CLI (client only)
+#
+# Static linux/amd64 + linux/arm64 binaries, tar.gz archives, checksums,
+# and multi-arch distroless OCI images pushed to GHCR.
+#
+# Usage:
+#   goreleaser release --snapshot --clean   # local test
+#   goreleaser release --clean              # CI (tags trigger)
 
 version: 2
 
@@ -28,35 +38,71 @@ builds:
       - -X main.commit={{.ShortCommit}}
       - -X main.date={{.Date}}
 
+  - id: pgmctl
+    main: ./cmd/pgmctl
+    binary: pgmctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+
 archives:
-  - id: tarball
+  - id: pgman-proxy-archive
+    builds:
+      - pgman-proxy
     format: tar.gz
-    name_template: "{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}"
+    name_template: "pgman-proxy_{{.Version}}_{{.Os}}_{{.Arch}}"
+
+  - id: pgmctl-archive
+    builds:
+      - pgmctl
+    format: tar.gz
+    name_template: "pgmctl_{{.Version}}_{{.Os}}_{{.Arch}}"
 
 dockers:
   - image_templates:
       - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-amd64"
     use: buildx
+    ids:
+      - pgman-proxy
     goos: linux
     goarch: amd64
     dockerfile: deploy/docker/Dockerfile
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/f1bonacc1/pgman-proxy"
+      - "--label=org.opencontainers.image.source=https://github.com/F1bonacc1/pgman-proxy"
       - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
   - image_templates:
       - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-arm64"
     use: buildx
+    ids:
+      - pgman-proxy
     goos: linux
     goarch: arm64
     dockerfile: deploy/docker/Dockerfile
     build_flag_templates:
       - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/f1bonacc1/pgman-proxy"
+      - "--label=org.opencontainers.image.source=https://github.com/F1bonacc1/pgman-proxy"
       - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
 
 docker_manifests:
   - name_template: "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}"
+    image_templates:
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-amd64"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-arm64"
+  - name_template: "ghcr.io/f1bonacc1/pgman-proxy:latest"
     image_templates:
       - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-amd64"
       - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-arm64"
@@ -66,3 +112,24 @@ checksum:
 
 release:
   draft: true
+  header: |
+    ## pgman-proxy {{.Version}}
+
+    PostgreSQL HA proxy with embedded NATS coordination and pg-manager lifecycle engine.
+
+    ### Binary Downloads
+
+    | Binary | Description |
+    |--------|-------------|
+    | `pgman-proxy_{{.Version}}_linux_amd64.tar.gz` | HA proxy (linux/amd64) |
+    | `pgman-proxy_{{.Version}}_linux_arm64.tar.gz` | HA proxy (linux/arm64) |
+    | `pgmctl_{{.Version}}_linux_amd64.tar.gz` | Operator CLI (linux/amd64) |
+    | `pgmctl_{{.Version}}_linux_arm64.tar.gz` | Operator CLI (linux/arm64) |
+    | `pgmctl_{{.Version}}_darwin_amd64.tar.gz` | Operator CLI (macOS/amd64) |
+    | `pgmctl_{{.Version}}_darwin_arm64.tar.gz` | Operator CLI (macOS/arm64) |
+
+    ### Container Image
+
+    ```bash
+    docker pull ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}
+    ```
