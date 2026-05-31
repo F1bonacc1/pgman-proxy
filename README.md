@@ -50,6 +50,17 @@ spec `FR-015`):
   `examples/backup-fs/`).
 - ACME / cert-rotation tooling (operators supply TLS material).
 
+## Upgrading PostgreSQL
+
+pgman-proxy does not upgrade PostgreSQL itself — it forwards
+`PrepareUpgrade` / `ExecuteUpgrade` to `pg-manager` and leaves binary
+swapping and the cross-node loop to the **host**. Minor (patch-level)
+rolling upgrades are supported today; major-version strategies are
+gated on v0.7.0.
+
+See **[`docs/upgrade-orchestration.md`](docs/upgrade-orchestration.md)**
+for the step-by-step host orchestration guide.
+
 ## Quickstart
 
 See `specs/001-active-active-pg-proxy/quickstart.md` for the full
