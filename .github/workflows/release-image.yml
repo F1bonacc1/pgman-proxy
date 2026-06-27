@@ -6,10 +6,10 @@
 #   - push tag matching v* — release builds. Tagged as `:vX.Y.Z`,
 #     `:vX.Y`, and `:latest`.
 #
-# Multi-arch (linux/amd64, linux/arm64) via QEMU. The build context
-# contains both pgman-proxy/ and pg-manager/ at the top level so the
-# `replace ../pg-manager` directive in go.mod resolves; the
-# Dockerfile expects exactly that layout.
+# Multi-arch (linux/amd64, linux/arm64) via QEMU. The build context holds
+# only pgman-proxy/. The pinned, private pg-manager module is fetched inside
+# the build via a BuildKit secret mount (PG_MANAGER_TOKEN) — see
+# deploy/docker/Dockerfile.bundle.
 
 name: release-image
 
@@ -39,15 +39,6 @@ jobs:
         with:
           fetch-depth: 0  # needed by git describe --tags
           path: pgman-proxy
-
-      # pg-manager is private; PG_MANAGER_TOKEN must be set in repo
-      # secrets (the same one ci.yml + govulncheck.yml use).
-      - uses: actions/checkout@v4
-        with:
-          repository: f1bonacc1/pg-manager
-          path: pg-manager
-          fetch-depth: 1
-          token: ${{ secrets.PG_MANAGER_TOKEN || github.token }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -101,5 +92,7 @@ jobs:
           build-args: |
             VERSION=${{ steps.vars.outputs.version }}
             COMMIT=${{ steps.vars.outputs.commit }}
+          secrets: |
+            pgm_token=${{ secrets.PG_MANAGER_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

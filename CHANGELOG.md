@@ -40,9 +40,14 @@ changes to the 001 contract; see `contracts/control-plane-extensions.md`):
   `cluster.password`).
 
 **Upstream pin**: `github.com/f1bonacc1/pg-manager` now requires
-`Manager.RestartPostgres(ctx context.Context) error`. Wired via
-`replace ../pg-manager` during development; release builds MUST pin
-to the tagged release that ships the method.
+`Manager.RestartPostgres(ctx context.Context) error`, shipped in
+pg-manager `v0.3.0`. `go.mod` pins that tag. The module is private, so
+local / CI / GoReleaser builds fetch it with `GOPRIVATE` + a git
+credential, and the bundled image fetches it through a BuildKit secret
+mount (the token never enters a layer, cache, or provenance). Local
+integration builds (`tests/integration/Dockerfile`) instead redirect it
+at the sibling `../pg-manager` source via a build-stage `replace`; use a
+git-ignored `go.work` for cross-repo development.
 
 **Configuration**: pgmctl reads `$XDG_CONFIG_HOME/pgmctl/config.yaml`
 (mode `0600` required; loader refuses looser perms). Kubeconfig-style

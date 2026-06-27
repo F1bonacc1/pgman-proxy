@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Production bundled image: pgman-proxy + PostgreSQL 18 in one container.
 #
 # Each peer in the active/active topology runs this image. pgman-proxy
@@ -10,24 +11,36 @@
 # image holding only the pgman-proxy binary — appropriate for sidecar
 # topologies where Postgres runs in a separate container or on the host.
 #
-# Build context MUST contain both `pgman-proxy/` and `pg-manager/` at
-# the top level (the `replace github.com/f1bonacc1/pg-manager =>
-# ../pg-manager` directive in pgman-proxy/go.mod). The matching CI
-# workflow (.github/workflows/release-image.yml) lays them out that
-# way before invoking `docker build`.
+# pgman-proxy/go.mod pins the wrapped pg-manager engine to a tagged release
+# in a PRIVATE repo. The build stage fetches it with the Go toolchain,
+# authenticating through a BuildKit *secret mount* (id=pgm_token). The token
+# is read from a tmpfs mount and used to build a throwaway ~/.netrc that is
+# created and deleted inside a single RUN, so the credential never lands in
+# any image layer, build history, exported cache, or provenance attestation —
+# even with `cache-to: mode=max` + `provenance: mode=max`. The matching CI
+# workflow (.github/workflows/release-image.yml) supplies the secret via
+# build-push-action's `secrets:` input; only `pgman-proxy/` is in the
+# build context.
 
 # --- stage 1: build pgman-proxy ---------------------------------------
 # Go toolchain pinned to match pgman-proxy/go.mod's `go 1.26.3` line.
 FROM golang:1.26.3-bookworm AS build
 WORKDIR /src
 
-# Pull both modules into the build context. The replace directive in
-# pgman-proxy/go.mod points at ../pg-manager, so both must be present.
-COPY pg-manager /src/pg-manager
 COPY pgman-proxy /src/pgman-proxy
-
 WORKDIR /src/pgman-proxy
-RUN go mod download
+
+# Fetch modules, including the private pinned pg-manager. The token is
+# mounted as a tmpfs secret; the ~/.netrc holding it is written and removed
+# within this single RUN, so it is absent from the committed layer (and thus
+# from any exported cache or provenance). go.sum still pins the checksums.
+ENV GOPRIVATE=github.com/f1bonacc1/* GOWORK=off
+RUN --mount=type=secret,id=pgm_token \
+    printf 'machine github.com login x-access-token password %s\n' \
+        "$(cat /run/secrets/pgm_token)" > "$HOME/.netrc" \
+    && chmod 600 "$HOME/.netrc" \
+    && go mod download \
+    && rm -f "$HOME/.netrc"
 
 ARG VERSION=dev
 ARG COMMIT=unknown
