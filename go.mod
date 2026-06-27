@@ -1,12 +1,12 @@
 module github.com/f1bonacc1/pgman-proxy
 
-// Go 1.26.3 minimum — earlier versions hit the stdlib findings
+// Go 1.26.4 minimum — earlier versions hit the stdlib findings
 // surfaced by `.github/workflows/govulncheck.yml`, notably
-// GO-2026-4971 (net) and GO-2026-4918 (net/http). Bump in lockstep
-// with new govulncheck stdlib findings. setup-go in CI uses this
-// directive as the install version, so a `toolchain` line would be
-// redundant.
-go 1.26.3
+// GO-2026-5037 (crypto/x509) and GO-2026-5039 (net/textproto), both
+// fixed in go1.26.4. Bump in lockstep with new govulncheck stdlib
+// findings. setup-go in CI uses this directive as the install version,
+// so a `toolchain` line would be redundant.
+go 1.26.4
 
 // During development, the wrapped pg-manager engine is consumed via the
 // sibling worktree. Release builds MUST replace this with a tagged version
