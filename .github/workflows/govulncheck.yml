@@ -4,9 +4,10 @@
 # newly-disclosed CVEs in pinned dependencies are surfaced even when
 # the tree is idle.
 #
-# The pg-manager replace directive means we need the sibling checked
-# out the same way ci.yml does it. PG_MANAGER_TOKEN is a repository
-# secret holding a PAT with contents:read on f1bonacc1/pg-manager.
+# pgman-proxy/go.mod pins the private module github.com/f1bonacc1/pg-manager;
+# the Go toolchain authenticates its git fetch with PG_MANAGER_TOKEN (a repo
+# secret holding a PAT with contents:read on f1bonacc1/pg-manager), the same
+# way ci.yml does.
 
 name: govulncheck
 on:
@@ -25,18 +26,19 @@ jobs:
   govulncheck:
     name: govulncheck ./...
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/f1bonacc1/*
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
           path: pgman-proxy
 
-      - uses: actions/checkout@v4
-        with:
-          repository: f1bonacc1/pg-manager
-          path: pg-manager
-          fetch-depth: 1
-          token: ${{ secrets.PG_MANAGER_TOKEN || github.token }}
+      - name: Authenticate private module fetch
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.PG_MANAGER_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
 
       - uses: actions/setup-go@v5
         with:

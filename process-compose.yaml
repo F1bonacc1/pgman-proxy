@@ -74,11 +74,12 @@ processes:
 
   # ───────────────────────────────────────────────────────────────────
   # builder: build the pgman-proxy:dev image off the integration
-  # Dockerfile (multi-stage: golang:1.25-bookworm builder → postgres:18
-  # base with /usr/local/bin/pgman-proxy as the entrypoint). Build
-  # context is the parent directory so COPY can pull in the sibling
-  # ../pg-manager checkout that the `replace` directive in go.mod
-  # points at.
+  # Dockerfile (multi-stage: golang builder → postgres:18 base with
+  # /usr/local/bin/pgman-proxy as the entrypoint). Build context is the
+  # parent directory so COPY can pull in the sibling ../pg-manager
+  # checkout; the integration Dockerfile redirects the pinned pg-manager
+  # module at that copied source via a build-stage `replace`, so local
+  # builds need no module token.
   # ───────────────────────────────────────────────────────────────────
   builder:
     description: "docker build pgman-proxy:dev (pgman-proxy + pg18 in one image)"

@@ -8,13 +8,15 @@ module github.com/f1bonacc1/pgman-proxy
 // so a `toolchain` line would be redundant.
 go 1.26.4
 
-// During development, the wrapped pg-manager engine is consumed via the
-// sibling worktree. Release builds MUST replace this with a tagged version
-// (see .specify/memory/constitution.md § Additional Constraints).
-replace github.com/f1bonacc1/pg-manager => ../pg-manager
-
+// The wrapped pg-manager engine is pinned to a tagged release. pg-manager is
+// a PRIVATE repo, so every build fetches it with GOPRIVATE + token auth:
+// local, CI, and GoReleaser via a git credential on the runner; the bundled
+// image via a BuildKit secret mount (see .github/workflows/{ci,govulncheck,
+// release,release-image}.yml and deploy/docker/Dockerfile.bundle). The
+// credential is never persisted to an image layer, exported cache, or
+// provenance attestation.
 require (
-	github.com/f1bonacc1/pg-manager v0.0.0-00010101000000-000000000000
+	github.com/f1bonacc1/pg-manager v0.3.0
 	github.com/fatih/color v1.19.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/mattn/go-isatty v0.0.22

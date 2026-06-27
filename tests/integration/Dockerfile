@@ -25,12 +25,18 @@ ARG POSTGRES_VERSION=17
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
 
-# Pull both modules into the build context. The replace directive in
-# pgman-proxy/go.mod points at ../pg-manager, so both must be present.
+# Pull both modules into the build context. go.mod pins pg-manager to a
+# tagged (private) release; for local integration/chaos builds we redirect
+# it at the copied sibling source with a build-stage-only `replace`, so the
+# build needs no module token. GOWORK=off keeps a developer's stray go.work
+# from interfering. (CI's bundled image instead fetches the pinned module
+# via a secret mount — see deploy/docker/Dockerfile.bundle.)
 COPY pg-manager /src/pg-manager
 COPY pgman-proxy /src/pgman-proxy
 
 WORKDIR /src/pgman-proxy
+ENV GOWORK=off
+RUN go mod edit -replace github.com/f1bonacc1/pg-manager=../pg-manager
 RUN go mod download
 RUN CGO_ENABLED=0 go build \
         -trimpath \

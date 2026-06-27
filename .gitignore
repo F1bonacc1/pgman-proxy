@@ -15,6 +15,12 @@ coverage.html
 # Go module cache outputs are global; vendor/ only when explicitly populated.
 vendor/
 
+# Go workspace files — local cross-repo development only (e.g.
+# `go work init . ../pg-manager`). Never committed: a checked-in go.work
+# would override the pinned pg-manager module in CI and release builds.
+go.work
+go.work.sum
+
 # IDE / editor
 .vscode/
 .idea/

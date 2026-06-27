@@ -24,28 +24,23 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/f1bonacc1/*
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # pg-manager is required by the go.mod replace directive.
-      # Checked out inside the workspace; the replace path is patched below.
-      - uses: actions/checkout@v4
-        with:
-          repository: F1bonacc1/pg-manager
-          path: pg-manager
-          fetch-depth: 1
-          token: ${{ secrets.PG_MANAGER_TOKEN || github.token }}
-
-      # The go.mod has `replace ../pg-manager`; rewrite to ./pg-manager
-      # since GitHub Actions checks out both repos under the workspace root.
-      # Then hide both changes from git so GoReleaser sees a clean tree.
-      - name: Patch go.mod replace directive
+      # pgman-proxy/go.mod pins the private module
+      # github.com/f1bonacc1/pg-manager. Authenticate the Go toolchain so
+      # GoReleaser's `go mod download` can fetch it. PG_MANAGER_TOKEN is a
+      # repo secret with contents:read on f1bonacc1/pg-manager. No go.mod
+      # patching is needed any more, so GoReleaser sees a clean tree.
+      - name: Authenticate private module fetch
         run: |
-          sed -i 's|=> \.\./pg-manager|=> ./pg-manager|' go.mod
-          echo "pg-manager/" >> .gitignore
-          git update-index --assume-unchanged go.mod .gitignore
+          git config --global \
+            url."https://x-access-token:${{ secrets.PG_MANAGER_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
 
       - uses: actions/setup-go@v5
         with:

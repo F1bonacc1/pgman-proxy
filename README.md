@@ -96,11 +96,13 @@ GitHub Actions workflows in `.github/workflows/`:
   (linux/amd64, linux/arm64); see "Container images" below.
 
 **Required repo secret**: `PG_MANAGER_TOKEN` — a PAT (or fine-grained
-token) with `contents:read` on `f1bonacc1/pg-manager`. The `ci`,
-`govulncheck`, and `release-image` jobs check out the sibling
-`pg-manager` repo to satisfy the `replace github.com/f1bonacc1/pg-manager
-=> ../pg-manager` directive in `go.mod`; the default `GITHUB_TOKEN`
-cannot read other private repos.
+token) with `contents:read` on `f1bonacc1/pg-manager`. `go.mod` pins
+that private module to a tagged release, so every build authenticates
+the Go toolchain's fetch with this token: the `ci`, `govulncheck`, and
+`release` jobs configure a git credential on the runner, and
+`release-image` passes it to the bundle build as a BuildKit secret
+mount (it never enters an image layer, cache, or provenance). The
+default `GITHUB_TOKEN` cannot read other private repos.
 
 ## Performance baseline (SC-003)
 
