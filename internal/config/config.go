@@ -68,6 +68,16 @@ type ClusterConfig struct {
 	// route mesh bringup, which scale with disk I/O and cold-start
 	// contention rather than network RTT.
 	ReadyTimeout time.Duration `yaml:"ready_timeout" json:"ready_timeout"`
+
+	// LeaseTTL is the leadership campaign + renewal interval handed
+	// to pg-manager's NATS leadership adapter. A SIGKILLed leader's
+	// lease is evicted after ~3 renewal ticks (≈1.5×TTL wallclock),
+	// which bounds how fast an unplanned failover can begin — the
+	// Constitution III tuning knob ("lease/heartbeat timeouts MUST be
+	// tunable; defaults MUST favor safety"). Zero uses the adapter's
+	// 5s default; test topologies tighten it to meet the SC-002
+	// failover budget.
+	LeaseTTL time.Duration `yaml:"lease_ttl" json:"lease_ttl"`
 }
 
 // EndpointConfig is a host/port pair used for the embedded-NATS

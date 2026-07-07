@@ -130,6 +130,15 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		// the chaos rig to shorten cold-restart recovery; production
 		// keeps the 5s default.
 		"PGMAN_PROXY_POLICY_LIVENESS_INTERVAL": durSet(&cfg.Policy.LivenessInterval),
+		// Wait between confirmed primary failure and triggering
+		// failover. The yaml key (`policy.failover_delay`) existed
+		// without an env binding; test topologies tighten it to meet
+		// the SC-002 failover budget. Production keeps the 30s default.
+		"PGMAN_PROXY_POLICY_FAILOVER_DELAY": durSet(&cfg.Policy.FailoverDelay),
+		// Leadership lease TTL (Constitution III tuning knob). Zero =
+		// pg-manager adapter default (5s). Stale-lease eviction takes
+		// ~1.5×TTL, so this bounds unplanned-failover start latency.
+		"PGMAN_PROXY_CLUSTER_LEASE_TTL": durSet(&cfg.Cluster.LeaseTTL),
 		// AutoDemote timing knobs. Production defaults (1h / 15s / 5s) are
 		// applied by pg-manager when these stay zero. Chaos rigs tighten
 		// the cooldown so a refused demote doesn't park the cluster for

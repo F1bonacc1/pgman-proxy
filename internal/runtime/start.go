@@ -158,7 +158,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: pre-create cluster KV: %w", kvErr)}
 	}
 
-	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger)
+	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger, cfg.Cluster.LeaseTTL)
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: build handles: %w", err)}
 	}
@@ -295,6 +295,12 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("manager.New: %w", err)}
 	}
 	res.Manager = m
+
+	// Feature 002 (contracts/observability.md FR-013): keep the
+	// embedded-NATS and leadership gauges current. Registered since
+	// 002 but previously had no writer.
+	startObservabilityGauges(ctx, res.Metrics, res.Embedded, &managerLeaderState{m: m},
+		replicaDecision.Effective(), replicaDecision.Overridden())
 
 	// Feature 003 — per-peer status aggregation substrate. pg-manager's
 	// Manager.Status() returns per-peer scalars but does not populate
