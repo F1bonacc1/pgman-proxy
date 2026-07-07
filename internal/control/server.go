@@ -566,6 +566,8 @@ func traceFromContext(ctx context.Context) obs.TraceContext {
 }
 
 // reqIDFromContext returns the request-ID stored in ctx, or "" if none.
+//
+//lint:ignore U1000 utility for handlers, symmetric with traceFromContext
 func reqIDFromContext(ctx context.Context) string { //nolint:unused // utility for handlers
 	v, _ := ctx.Value(ridCtxKey{}).(string)
 	return v
