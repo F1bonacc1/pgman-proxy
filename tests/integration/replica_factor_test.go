@@ -31,8 +31,10 @@ func TestReplicaFactor_ThreePeer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	deadline := time.Now().Add(45 * time.Second)
 	for _, p := range Peers() {
+		// Per-peer deadline: a shared one lets the first peer starve
+		// the others' polling budget entirely.
+		deadline := time.Now().Add(45 * time.Second)
 		var lastBody string
 		met := false
 		for time.Now().Before(deadline) {

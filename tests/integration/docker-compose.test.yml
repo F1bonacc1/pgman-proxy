@@ -52,6 +52,38 @@ services:
         PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
         LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
         PGMAN_PROXY_OBS_LOG_LEVEL: info
+        # Failover posture for the suite. The zz_failover test SIGKILLs
+        # the real primary: (a) tightened detection + delay so SC-002's
+        # 45s leader-loss-to-first-write budget is measurable (production
+        # defaults are 2s×3 liveness + 30s delay — deliberately slower);
+        # (b) the Gap-O recovery toggles so the deposed primary rejoins
+        # as a standby instead of parking as a divergence fence forever
+        # (they default to false = fail-closed for production).
+        # FAILOVER_DELAY 2s: operations that take the primary's
+        # postgres down briefly ON PURPOSE (upgrade-execute, managed
+        # restart — sub-second) stay well under the 3×1s detection +
+        # 2s delay ≈ 5s auto-failover threshold. Deliberately NOT
+        # tightened below this: the nightly suite runs on shared
+        # GitHub-hosted runners where more aggressive timers risk
+        # spurious failovers under load — a 500ms interval also
+        # quadruples the reconciler-tick rate, which is what sampled
+        # the sub-tick promote window behind the false postgres_crashed
+        # park (fixed upstream via the two-tick debounce; the 1s
+        # interval is defense-in-depth). Measured leader-loss-to-
+        # first-write with this posture: ~7s fast path, 11-17s when
+        # the embedded-NATS KV leader dies with the primary — inside
+        # the 45s SC-002 budget either way.
+        PGMAN_PROXY_POLICY_LIVENESS_INTERVAL: 1s
+        PGMAN_PROXY_POLICY_FAILOVER_DELAY: 2s
+        PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED: "true"
+        PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED: "true"
+        # Leadership lease TTL (default 5s): a SIGKILLed leader's lease
+        # evicts after ~1.5×TTL, which is serial with failure detection
+        # in the unplanned-failover pipeline — 1s keeps the SC-002
+        # budget comfortable without renewal chatter so tight it flakes
+        # on loaded CI runners (500ms TTL = 250ms renewals; one missed
+        # renewal under load and a healthy leader loses its lease).
+        PGMAN_PROXY_CLUSTER_LEASE_TTL: 1s
         # Validation requires a control-plane token source even when the
         # control-plane HTTP server is not yet built (Phase 5). The
         # placeholder value is harmless until US4 wires the listener.
@@ -68,7 +100,14 @@ services:
         # replication on the compose network (DEMO ONLY — never use trust
         # auth in production). The leader's PostInitDB hook applies these.
         PGMAN_PROXY_POSTGRES_HBA_EXTRAS: "host replication all 0.0.0.0/0 trust\nhost all         all 0.0.0.0/0 trust"
-        PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB"
+        # restore_command must be SET for pg_rewind --restore-target-wal
+        # to even start (a demoted ex-primary rewinds onto the new
+        # timeline; without this the node wedges down with `pg_rewind:
+        # "restore_command" is not set in the target cluster`). There is
+        # no WAL archive in this harness — `false` is never actually
+        # invoked because wal_keep_size retains every needed segment
+        # locally on a test-sized cluster.
+        PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB\nrestore_command = 'false'"
         PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
         PGMAN_PROXY_PEERS: node-a,node-b,node-c
       PGMAN_PROXY_NODE_ID: node-a

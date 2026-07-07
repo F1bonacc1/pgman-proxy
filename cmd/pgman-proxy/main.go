@@ -123,11 +123,12 @@ func run(args []string) int {
 		flagOverrides["metrics"] = metricsAddr
 	}
 
-	cfg, _, err := config.Load(config.LoadOptions{
+	loadOpts := config.LoadOptions{
 		YAMLPath: configPath,
 		Env:      os.Getenv,
 		Flags:    flagOverrides,
-	})
+	}
+	cfg, _, err := config.Load(loadOpts)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "pgman-proxy: config error: %v\n", err)
 		return runtime.ExitConfig
@@ -164,6 +165,22 @@ func run(args []string) int {
 		teardownPartial(ctx, res, logger, cfg.Shutdown.DrainBudget)
 		return startErr.Code
 	}
+
+	// Feature 002 FR-014a: SIGHUP hot-reload of the allow-listed
+	// embedded-NATS surfaces (peer routes, cluster password). The
+	// handler was defined with feature 002 but never installed here —
+	// `kill -HUP` was a silent no-op (caught by the integration
+	// suite's TestSIGHUPReload once its baseline gate un-skipped).
+	// SignalContext also Notify()s SIGHUP (to keep it from killing
+	// the process); Go delivers the signal to both channels.
+	reload := &runtime.ReloadHandler{
+		CurrentCfg: &cfg,
+		LoadOpts:   loadOpts,
+		Embedded:   res.Embedded,
+		Logger:     logger,
+		Metrics:    res.Metrics,
+	}
+	go reload.Wait(ctx)
 
 	// Run the manager loop until ctx is cancelled or it returns.
 	startResult := make(chan error, 1)

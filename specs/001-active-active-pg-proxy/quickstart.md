@@ -169,7 +169,8 @@ curl -s http://<any-peer>:9090/metrics | \
 watch -n1 'curl -s http://<any-peer>:9090/metrics | grep pgman_proxy_leader_changes_total'
 ```
 
-Within 5s (SC-002), `pgman_proxy_leader_changes_total` increments and
+Within 45s (SC-002; typically ~7s unless the embedded-NATS KV leader
+died with the primary), `pgman_proxy_leader_changes_total` increments and
 the structured log on every peer carries a `leader changed` event with
 the same `cluster_id`.
 

@@ -1,0 +1,81 @@
+# Nightly integration suite — the full docker-compose topology
+# (3 pgman-proxy peers, each colocated with a real PostgreSQL 17 and
+# an embedded NATS server) via `make integration`. This is the
+# "separate workflow with a longer timeout" that ci.yml's header
+# comment refers to; it stays out of the per-PR gate so the PR
+# feedback loop remains fast (Constitution VI still gets its real-
+# server coverage nightly and on demand via workflow_dispatch).
+#
+# The integration image (tests/integration/Dockerfile) builds
+# pgman-proxy against the SIBLING pg-manager checkout with a
+# build-stage-only `replace` (its compose build context is the parent
+# directory of both repos). This job therefore checks out
+# f1bonacc1/pg-manager at the exact tag go.mod pins, so nightly runs
+# test the engine version production actually ships.
+
+name: nightly-integration
+on:
+  schedule:
+    # 03:17 UTC — off the top of the hour to dodge scheduler
+    # congestion on shared runners.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: docker-compose integration suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOPRIVATE: github.com/f1bonacc1/*
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: pgman-proxy
+
+      # Same PAT the per-PR gate uses: contents:read on
+      # f1bonacc1/pg-manager (the default GITHUB_TOKEN cannot read
+      # other private repos). Needed twice here — once for the Go
+      # toolchain's module fetch, once for the sibling checkout.
+      - name: Authenticate private module fetch
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.PG_MANAGER_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: pgman-proxy/go.mod
+          cache-dependency-path: pgman-proxy/go.sum
+
+      - name: Resolve pinned pg-manager version
+        id: pgm
+        working-directory: pgman-proxy
+        run: |
+          v="$(go list -m -f '{{.Version}}' github.com/f1bonacc1/pg-manager)"
+          echo "pinned pg-manager: $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Check out sibling pg-manager at the pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: f1bonacc1/pg-manager
+          token: ${{ secrets.PG_MANAGER_TOKEN }}
+          ref: ${{ steps.pgm.outputs.version }}
+          fetch-depth: 1
+          path: pg-manager
+
+      - name: integration
+        working-directory: pgman-proxy
+        run: make integration
+
+      # The suite's TestMain runs `compose down -v` itself; this is a
+      # belt-and-braces sweep so a panicked run can't leak containers
+      # into subsequent jobs on a reused runner.
+      - name: Tear down leftover compose projects
+        if: always()
+        run: docker ps -aq --filter "name=pgman-proxy-it" | xargs -r docker rm -f

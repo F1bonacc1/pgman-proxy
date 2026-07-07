@@ -31,11 +31,20 @@ func TestLCM_AuditCompleteness_AllThreeOutcomes(t *testing.T) {
 	// 3) failed: TriggerBackup — backup_executor_missing.
 	_, _, _ = callLCM(ctx, peers[0].Name, "POST", "/v1/backup", integrationToken, "")
 
-	// Verify all three outcomes appear in the peer's slog sink.
-	logs, err := dumpLogs(ctx, peers[0].Name)
-	if err != nil {
-		t.Fatalf("dumpLogs: %v", err)
+	// Verify all three outcomes appear in the slog sink. Audit records
+	// land on the peer that EXECUTED the operation — for mutations in
+	// forward mode that's the leader, whose identity depends on the
+	// boot-time election — so grep the union of every peer's logs
+	// rather than assuming peers[0] is the leader.
+	var union strings.Builder
+	for _, p := range peers {
+		logs, err := dumpFullLogs(ctx, p.Name)
+		if err != nil {
+			t.Fatalf("dumpFullLogs %s: %v", p.Name, err)
+		}
+		union.WriteString(logs)
 	}
+	logs := union.String()
 	want := []string{
 		`"outcome":"accepted"`,
 		`"outcome":"rejected"`,

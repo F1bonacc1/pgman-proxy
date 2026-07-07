@@ -63,7 +63,8 @@ authentication, audit, and leader-routing.
 **Performance Goals**:
   - Per-query proxy overhead < 1ms p99 on local-loopback (Constitution
     Performance Baseline).
-  - Leader-failover end-to-end < 5s p99 (SC-002).
+  - Leader-failover end-to-end < 45s p99 (SC-002, as revised at
+    constitution v1.3.0).
   - Crash-restart MTTR < 10s under standard supervisor (SC-007).
 **Constraints**:
   - No virtual-IP / ARP / keepalived code paths (FR-004).

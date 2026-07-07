@@ -39,9 +39,12 @@ func TestObs_LogSchema_RequiredEventsPresent(t *testing.T) {
 	peers := Peers()
 	_, _ = retryLCM(t, ctx, peers[0].Name, "GET", "/v1/status", "", 200, 2*time.Minute)
 
-	logs, err := dumpLogs(ctx, peers[0].Name)
+	// Full logs, not a tail: the startup events under test are the
+	// FIRST lines the peer ever logged, and a busy suite (or a peer
+	// restart in an earlier test) pushes them past any fixed tail.
+	logs, err := dumpFullLogs(ctx, peers[0].Name)
 	if err != nil {
-		t.Fatalf("dumpLogs: %v", err)
+		t.Fatalf("dumpFullLogs: %v", err)
 	}
 
 	for _, e := range requiredStartupEvents {

@@ -53,7 +53,7 @@ test plan owns the concrete steps for each):
 
 | REQ-id | Source | Stated commitment |
 |---|---|---|
-| `REQ-AVAIL-01` | 001 SC-002; 002 SC-003; Constitution "performance baseline" | After a forced leader failover, a freshly reconnected client MUST reach the new leader through any proxy peer within **5 s p99** for the leader-change-observed-as-structured-event signal. |
+| `REQ-AVAIL-01` | 001 SC-002; 002 SC-003; Constitution "performance baseline" | After a forced leader failover, a freshly reconnected client MUST reach the new leader through any proxy peer within **45 s p99** (5 s before constitution v1.3.0) for the leader-change-observed-as-structured-event signal. |
 | `REQ-AVAIL-02` | 001 SC-007 | MTTR for a proxy peer crash under a standard process supervisor MUST be **< 10 s** from process-exit to `/readyz=200`. |
 | `REQ-AVAIL-03` | 002 SC-002 | Single-peer startup time (process exec → `ready`) MUST be **< 5 s** on a developer laptop, no external network calls besides the upstream PostgreSQL. |
 | `REQ-AVAIL-04` | 002 SC-008 / RD-006 | Rolling restart of all 3 peers MUST complete end-to-end in **≤ 60 s p99**, per-peer **≤ 20 s** (5 s drain + 5 s exit + 5 s boot + 5 s mesh + leadership re-confirm). |

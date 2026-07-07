@@ -53,6 +53,17 @@ func dumpLogs(ctx context.Context, peerName string) (string, error) {
 	return string(out), nil
 }
 
+// dumpFullLogs returns peerName's entire container log. Use when the
+// lines under test may be arbitrarily old (startup events, audit
+// records from earlier in the suite).
+func dumpFullLogs(ctx context.Context, peerName string) (string, error) {
+	out, err := dockerComposeOutput(ctx, "logs", peerName)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 func lastN(s string, n int) string {
 	if len(s) <= n {
 		return s

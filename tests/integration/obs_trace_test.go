@@ -59,7 +59,9 @@ func TestObs_HTTPTraceparent_EchoesOnResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("control plane curl: %v\n%s", err, out)
 	}
-	if !bytes.Contains(out, []byte("traceparent: "+tp)) {
+	// Header names are case-insensitive; Go's HTTP stack writes the
+	// canonical form ("Traceparent:"), so compare case-insensitively.
+	if !bytes.Contains(bytes.ToLower(out), []byte("traceparent: "+tp)) {
 		t.Errorf("control plane should echo traceparent on /v1/status, got:\n%s", out)
 	}
 }

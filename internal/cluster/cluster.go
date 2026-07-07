@@ -105,11 +105,16 @@ func Connect(ctx context.Context, url string, cfg config.NATSConfig, nodeID stri
 // BuildHandles constructs the leadership, state-store, and event-bus
 // adapters on top of an existing connection. Failure of any adapter
 // returns a wrapped error and the caller is responsible for draining
-// the connection.
-func BuildHandles(ctx context.Context, conn *nats.Conn, clusterID, nodeID string, logger *obs.Logger) (*Handles, error) {
+// the connection. leaseTTL tunes the leadership campaign/renewal
+// interval (Constitution III); zero keeps the adapter's safe default.
+func BuildHandles(ctx context.Context, conn *nats.Conn, clusterID, nodeID string, logger *obs.Logger, leaseTTL time.Duration) (*Handles, error) {
+	ldOpts := []natsadapter.LeadershipOption{natsadapter.WithLogger(logger)}
+	if leaseTTL > 0 {
+		ldOpts = append(ldOpts, natsadapter.WithLeaseTTL(leaseTTL))
+	}
 	leadership, err := natsadapter.NewLeadership(
 		ctx, conn, clusterID, pgmanager.NodeID(nodeID),
-		natsadapter.WithLogger(logger),
+		ldOpts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("leadership: %w", err)
