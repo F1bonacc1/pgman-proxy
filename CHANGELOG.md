@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — release-image build broken by stale Go base-image pin
+
+`deploy/docker/Dockerfile.bundle` pinned `golang:1.26.3-bookworm`
+while `go.mod` has required go ≥ 1.26.4 since the stdlib-CVE bump;
+the official golang images set `GOTOOLCHAIN=local`, so the v0.2.0
+tag's release-image workflow failed with "go.mod requires go >=
+1.26.4 (running go 1.26.3)" instead of self-upgrading. The base image
+now matches the directive (the goreleaser binary release was
+unaffected — it reads the toolchain from `go-version-file: go.mod`).
+Keep the two in lockstep when bumping the `go` directive.
+
 ### Changed — pg-manager pin bumped to v0.4.1
 
 `go.mod` now requires `github.com/f1bonacc1/pg-manager v0.4.1`

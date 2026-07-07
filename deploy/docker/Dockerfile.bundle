@@ -23,8 +23,11 @@
 # build context.
 
 # --- stage 1: build pgman-proxy ---------------------------------------
-# Go toolchain pinned to match pgman-proxy/go.mod's `go 1.26.3` line.
-FROM golang:1.26.3-bookworm AS build
+# Go toolchain pinned; MUST be kept in lockstep with pgman-proxy/go.mod's
+# `go` directive. The official golang images set GOTOOLCHAIN=local, so a
+# base image older than the directive does not self-upgrade — it fails the
+# release-image build with "go.mod requires go >= X (running Y)".
+FROM golang:1.26.4-bookworm AS build
 WORKDIR /src
 
 COPY pgman-proxy /src/pgman-proxy
