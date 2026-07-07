@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — pg-manager pin bumped to v0.4.1
+
+`go.mod` now requires `github.com/f1bonacc1/pg-manager v0.4.1`
+(previously v0.3.0). The bump picks up two reconciler fixes that the
+integration suite depends on and that the nightly workflow (which
+checks out the pinned tag as the sibling build context) needs to run
+reliably: pg_rewind now receives the leader's real conninfo instead
+of a placeholder that wedged every demoted ex-primary, and the
+destructive `postgres_crashed` verdict is debounced so a transient
+probe blip during a planned promote can no longer park a healthy
+primary in terminal `StateFailed`. The major-upgrade gate sentinel
+pinned by the feature-004 tests is unchanged in v0.4.1
+(`manager/backup_upgrade.go:102`).
+
+### Added — feature 004 upgrade test coverage + nightly integration CI
+
+Behavioral coverage for the existing upgrade surface
+(`POST /v1/upgrade/prepare|execute`) across {minor, major} × {happy,
+bad} paths (`specs/004-upgrade-tests/`), in two tiers: contract tests
+with a fault-injected `fakeEngine`
+(`internal/control/handlers_upgrade_test.go`) and integration tests
+against the real engine, PostgreSQL 17, and embedded NATS
+(`tests/integration/lcm_upgrade_test.go`). The minor happy path
+proves exactly one postmaster restart; major execution pins the
+upstream gate sentinel verbatim so a pg-manager bump that lifts the
+gate fails loudly. A new nightly workflow
+(`.github/workflows/nightly-integration.yml`) runs the full
+`make integration` suite on a schedule — previously no CI executed
+the integration tier at all. The full suite was also hardened to run
+green end-to-end: the forced-failover test restores the peer it
+kills, runs last (`zz_failover_test.go`), gates on cluster
+convergence before selecting its victim, and dumps per-peer
+control-plane diagnostics on failure; `make integration`/`make smoke`
+now pass `-count=1` because Go's test cache cannot see Docker state.
+
+### Fixed — observability gauges, SIGHUP reload, and failover tunables
+
+Suite hardening surfaced production wiring gaps:
+`pgman_proxy_embedded_nats_up`, `routes_meshed`, `replicas_factor`,
+and `leadership_state` were registered but never set (now driven by
+`internal/runtime/obs_gauges.go`); the SIGHUP reload handler existed
+but was never installed in `main` (now wired, so
+`sighup_reload_outcomes_total` moves); and two policy knobs required
+by Constitution III were unbindable from the environment —
+`PGMAN_PROXY_POLICY_FAILOVER_DELAY` and the new
+`PGMAN_PROXY_CLUSTER_LEASE_TTL` (`cluster.lease_ttl`, zero keeps the
+adapter's 5s default).
+
+### Changed — SC-002 leader-failover budget revised to 45s p99
+
+Constitution v1.3.0. Instrumenting the unplanned-failover pipeline
+showed the p99 is dominated by structure, not timers: when the killed
+primary also hosts the embedded-NATS JetStream KV leader (~1/3 of
+boots) survivors spend 5–10s in JetStream re-election before the
+lease can be read, and after promote the first commit stalls ~4s
+until a standby re-attaches (correct no-data-loss behavior). Measured
+~7s fast path, 16–29s colocated on a workstation; 45s adds margin for
+shared CI runners. Spec references updated across 001/002.
+
 ### Added — feature 003 `pgmctl` operator CLI
 
 The operator CLI ships as a kubectl-style client. Single statically-
