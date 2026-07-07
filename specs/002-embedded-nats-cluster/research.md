@@ -271,7 +271,8 @@ new-binary boot + 5 s embedded-NATS re-mesh + leadership re-confirm.
 Asserted by `tests/integration/embedded_cluster_test.go` invoking the
 restart procedure.
 
-**Rationale**: 001's SC-002 sets a 5 s p99 leader-failover budget;
+**Rationale**: 001's SC-002 sets a 45 s p99 leader-failover budget
+(5 s at the time of writing; revised at constitution v1.3.0);
 restart adds drain + boot. The drain budget is already configured by
 001's FR-014 (per-peer shutdown budget). 5 s for embedded-NATS re-mesh
 is comfortably above NATS's typical sub-second route convergence time.

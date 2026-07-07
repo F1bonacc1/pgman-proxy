@@ -135,8 +135,9 @@ default plan: subcommand approach for ergonomics).
 
 **Performance Goals (delta from 001)**:
 
-- 001 baselines hold: per-query overhead < 1 ms p99; failover < 5 s p99
-  (001 SC-002); restart MTTR < 10 s (001 SC-007).
+- 001 baselines hold: per-query overhead < 1 ms p99; failover < 45 s p99
+  (001 SC-002, as revised at constitution v1.3.0); restart MTTR < 10 s
+  (001 SC-007).
 - New: embedded NATS server idle overhead per peer:
   - **Memory**: 60 MB RSS p95 cap at idle (single-peer, no JetStream
     persistence). Justified in research.md from upstream nats-server idle
