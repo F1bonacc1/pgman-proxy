@@ -59,9 +59,7 @@ func setupHarness() error {
 	}
 	harness.project = fmt.Sprintf("pgman-proxy-it-%d", time.Now().UnixNano())
 
-	verify, cancelV := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelV()
-	if err := exec.CommandContext(verify, "docker", "compose", "version").Run(); err != nil { //nolint:gosec
+	if err := verifyComposeV2(context.Background()); err != nil {
 		return fmt.Errorf("docker compose v2 required: %w", err)
 	}
 
@@ -77,6 +75,36 @@ func setupHarness() error {
 		return fmt.Errorf("readiness gate: %w", err)
 	}
 	return nil
+}
+
+// verifyComposeV2 confirms the Docker Compose v2 plugin is present.
+// `docker compose version` is a local, daemon-free call that normally
+// returns in milliseconds, but the FIRST docker CLI invocation on a
+// cold or heavily-loaded CI runner can stall (plugin discovery, config
+// / credential-helper init) long enough to blow a tight deadline — the
+// nightly suite has been SIGKILLed here at exactly the old 10s mark.
+// Retry a few times with a generous per-attempt timeout so a single
+// transient stall doesn't fail the whole run; a genuinely absent plugin
+// fails fast on each attempt, so the retries stay cheap.
+func verifyComposeV2(ctx context.Context) error {
+	const attempts = 3
+	var err error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+		attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err = exec.CommandContext(attempt, "docker", "compose", "version").Run() //nolint:gosec
+		cancel()
+		if err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func teardownHarness() {
