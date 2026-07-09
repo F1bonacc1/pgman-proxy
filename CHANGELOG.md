@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — Go toolchain bumped to 1.26.5 (GO-2026-5856, crypto/tls)
+
+`govulncheck` flagged GO-2026-5856 in the standard library's
+`crypto/tls` (reachable via NATS cluster TLS, the control-plane HTTPS
+server, and the pgmctl SSE client), fixed in go1.26.5. The `go.mod`
+`go` directive — which both `setup-go` and the govulncheck workflow
+install from — now requires 1.26.5, and `deploy/docker/Dockerfile.bundle`
+tracks it in lockstep (`golang:1.26.5-bookworm`). No source changes.
+
 ### Fixed — release-image build broken by stale Go base-image pin
 
 `deploy/docker/Dockerfile.bundle` pinned `golang:1.26.3-bookworm`
