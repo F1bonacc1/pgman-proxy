@@ -156,3 +156,58 @@ func retryLCM(t *testing.T, ctx context.Context, peer string, method, path, body
 		time.Sleep(500 * time.Millisecond)
 	}
 }
+
+// waitForConvergence blocks until the cluster reports exactly one
+// primary (same node across three consecutive polls, filtering the
+// transient windows where a demoting ex-primary briefly answers
+// "not in recovery") and that primary sees both standbys streaming.
+// Returns the stable primary's name. Shared by the failover suite
+// (pick a valid victim / confirm the restore) and the upgrade suite
+// (quiescence barrier before postmaster start-time snapshots).
+func waitForConvergence(ctx context.Context, deadline time.Time) (string, error) {
+	stable := 0
+	lastPrimary := ""
+	for {
+		var primaries []string
+		for _, p := range Peers() {
+			out, err := localPsql(ctx, p.Name, "SELECT pg_is_in_recovery()")
+			if err == nil && strings.TrimSpace(out) == "f" {
+				primaries = append(primaries, p.Name)
+			}
+		}
+		if len(primaries) == 1 {
+			if primaries[0] == lastPrimary {
+				stable++
+			} else {
+				lastPrimary, stable = primaries[0], 1
+			}
+			if stable >= 3 {
+				out, err := localPsql(ctx, lastPrimary,
+					"SELECT count(*) FROM pg_stat_replication WHERE state='streaming'")
+				if err == nil && strings.TrimSpace(out) == "2" {
+					return lastPrimary, nil
+				}
+			}
+		} else {
+			lastPrimary, stable = "", 0
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("cluster never converged to one primary + 2 streaming standbys (current primaries=%v, stable primary=%q)",
+				primaries, lastPrimary)
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("context cancelled while awaiting convergence (current primaries=%v): %w", primaries, ctx.Err())
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+// localPsql runs a single SQL statement against peerName's LOCAL
+// PostgreSQL over its in-container unix socket (bypasses the proxy,
+// so role queries answer for that node specifically).
+func localPsql(ctx context.Context, peerName, sql string) (string, error) {
+	out, err := dockerComposeOutput(ctx, "exec", "-T", peerName,
+		"psql", "-U", "postgres", "-h", "/var/run/postgresql", "-tA", "-c", sql)
+	return string(out), err
+}

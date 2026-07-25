@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 		os.Exit(2)
 	}
 	code := m.Run()
-	teardownHarness()
+	teardownHarness(code != 0)
 	os.Exit(code)
 }
 
@@ -107,13 +107,37 @@ func verifyComposeV2(ctx context.Context) error {
 	return err
 }
 
-func teardownHarness() {
+func teardownHarness(failed bool) {
 	if harness.project == "" {
 		return
+	}
+	if failed {
+		dumpComposeLogs()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := runCompose(ctx, "down", "-v", "--remove-orphans"); err != nil {
 		fmt.Fprintf(os.Stderr, "compose down: %v\n", err)
 	}
+}
+
+// dumpComposeLogs streams every container's recent log tail to
+// stderr. Called only on a failed run, BEFORE `down -v` erases the
+// topology — the containers hold the only record of which
+// engine/reconciler action produced an unexpected state (the
+// 2026-07-25 nightly flake left no trace without this). runCompose is
+// unsuitable here: it buffers output and discards it on success.
+func dumpComposeLogs() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	fmt.Fprintf(os.Stderr, "=== suite failed; compose logs for %s ===\n", harness.project)
+	cmd := exec.CommandContext(ctx, "docker",
+		composeArgs("logs", "--no-color", "--timestamps", "--tail", "5000")...) //nolint:gosec
+	cmd.Dir = harness.workdir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "compose logs: %v\n", err)
+	}
+	fmt.Fprintln(os.Stderr, "=== end compose logs ===")
 }

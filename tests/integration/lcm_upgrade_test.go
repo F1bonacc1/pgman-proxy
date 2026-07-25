@@ -28,6 +28,16 @@
 // MUST fail — that is the sentinel firing, not a pgman-proxy
 // regression. Follow contracts/upgrade-endpoints.md § "Sentinel
 // obligations"; do not loosen the assertion in place.
+//
+// RESTART ATTRIBUTION: the engine's minor execute does NOT fence the
+// reconcilers on other nodes while the leader's postmaster is down,
+// so the cluster converges on a variable timeline afterwards — a
+// heal/demote can restart another node's postmaster SECONDS after
+// the execute envelope returns (nightly run 30146463840: node-c
+// restarted inside RejectsDowngrade's window and was misattributed).
+// Every test that snapshots pg_postmaster_start_time() therefore
+// takes its baseline from awaitPostmasterQuiescence, which waits out
+// that convergence tail first.
 
 package integration
 
@@ -35,6 +45,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -214,6 +225,40 @@ func localPostmasterStartTimes(t *testing.T, ctx context.Context) map[string]str
 	return out
 }
 
+// awaitPostmasterQuiescence waits until the cluster has finished any
+// asynchronous convergence work left over from an earlier real
+// restart (this file's minor happy path, lcm_switchover, ...), then
+// returns a postmaster start-time snapshot that is safe to use as a
+// no-restart baseline. Quiescence = one stable primary with both
+// standbys streaming (the reconciler has nothing destructive
+// pending), THEN two consecutive identical start-time samples 5s
+// apart (no restart still landing). Without this barrier a delayed
+// reconciler heal lands inside the caller's before/after window and
+// gets misattributed to the operation under test.
+func awaitPostmasterQuiescence(t *testing.T, ctx context.Context) map[string]string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Minute)
+	if _, err := waitForConvergence(ctx, deadline); err != nil {
+		t.Fatalf("awaiting convergence before start-time baseline: %v", err)
+	}
+	prev := localPostmasterStartTimes(t, ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("context ended awaiting postmaster quiescence: %v", ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
+		cur := localPostmasterStartTimes(t, ctx)
+		if maps.Equal(cur, prev) {
+			return cur
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("postmaster start times never stabilized: %v -> %v", prev, cur)
+		}
+		prev = cur
+	}
+}
+
 // lcmErrString renders the envelope's error for failure messages.
 func lcmErrString(env lcmResponse) string {
 	if env.Error == nil {
@@ -287,7 +332,7 @@ func TestUpgradeExecute_MinorHappyPath(t *testing.T) {
 	defer cancel()
 	awaitClusterReady(t, ctx)
 	major, minor, preNum := engineVersion(t, ctx)
-	before := localPostmasterStartTimes(t, ctx)
+	before := awaitPostmasterQuiescence(t, ctx)
 
 	plan := pgmanager.UpgradePlan{
 		Strategy:      pgmanager.UpgradeMinor,
@@ -341,7 +386,7 @@ func TestUpgradePrepare_RejectsDowngrade(t *testing.T) {
 	defer cancel()
 	awaitClusterReady(t, ctx)
 	major, _, _ := engineVersion(t, ctx)
-	before := localPostmasterStartTimes(t, ctx)
+	before := awaitPostmasterQuiescence(t, ctx)
 
 	plan := pgmanager.UpgradePlan{
 		Strategy:    pgmanager.UpgradeMinor,
@@ -465,7 +510,7 @@ func TestUpgradeMajorExecute_GateSentinel(t *testing.T) {
 	defer cancel()
 	awaitClusterReady(t, ctx)
 	major, _, preNum := engineVersion(t, ctx)
-	before := localPostmasterStartTimes(t, ctx)
+	before := awaitPostmasterQuiescence(t, ctx)
 
 	for _, tc := range []struct {
 		name     string
