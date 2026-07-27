@@ -167,6 +167,7 @@ func retryLCM(t *testing.T, ctx context.Context, peer string, method, path, body
 func waitForConvergence(ctx context.Context, deadline time.Time) (string, error) {
 	stable := 0
 	lastPrimary := ""
+	lastStreaming := "unknown"
 	for {
 		var primaries []string
 		for _, p := range Peers() {
@@ -184,16 +185,21 @@ func waitForConvergence(ctx context.Context, deadline time.Time) (string, error)
 			if stable >= 3 {
 				out, err := localPsql(ctx, lastPrimary,
 					"SELECT count(*) FROM pg_stat_replication WHERE state='streaming'")
-				if err == nil && strings.TrimSpace(out) == "2" {
-					return lastPrimary, nil
+				if err == nil {
+					lastStreaming = strings.TrimSpace(out)
+					if lastStreaming == "2" {
+						return lastPrimary, nil
+					}
+				} else {
+					lastStreaming = fmt.Sprintf("query failed: %v", err)
 				}
 			}
 		} else {
 			lastPrimary, stable = "", 0
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("cluster never converged to one primary + 2 streaming standbys (current primaries=%v, stable primary=%q)",
-				primaries, lastPrimary)
+			return "", fmt.Errorf("cluster never converged to one primary + 2 streaming standbys (current primaries=%v, stable primary=%q, last streaming count=%s)",
+				primaries, lastPrimary, lastStreaming)
 		}
 		select {
 		case <-ctx.Done():

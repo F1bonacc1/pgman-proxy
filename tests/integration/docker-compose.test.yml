@@ -77,6 +77,23 @@ services:
         PGMAN_PROXY_POLICY_FAILOVER_DELAY: 2s
         PGMAN_PROXY_POLICY_AUTO_DEMOTE_ENABLED: "true"
         PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED: "true"
+        # Auto-rebootstrap timing, tightened for the test rig (the
+        # loader comment blesses exactly this: "chaos rigs tighten the
+        # cooldown + persistence window"). Left unset these fall back
+        # to production patience — 5m persistence window, 1h cooldown.
+        # Nightly run 30243549323: after a switchover's timeline
+        # switch, the uninvolved standby's WAL source went stale and
+        # the cluster ran degraded (1 of 2 standbys streaming) for the
+        # full 5m window, longer than any test-scale convergence
+        # budget (the upgrade suite's quiescence barrier allows 3m).
+        # 30s window: a genuinely stale standby heals in ~40s, while
+        # deliberate brief primary outages (upgrade-execute restart,
+        # sub-10s) clear the condition long before it persists. 60s
+        # cooldown: the suite runs several disruptive tests back to
+        # back; a same-condition 1h cooldown would park a twice-stale
+        # node in degraded state for the rest of the run.
+        PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_PERSISTENCE_WINDOW: 30s
+        PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_COOLDOWN: 60s
         # Leadership lease TTL (default 5s): a SIGKILLed leader's lease
         # evicts after ~1.5×TTL, which is serial with failure detection
         # in the unplanned-failover pipeline — 1s keeps the SC-002
