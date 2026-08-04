@@ -20,7 +20,7 @@ integration tests in `tests/integration/lcm_upgrade_test.go`
 harness). The minor happy path uses a same-version plan (v1 wires a
 no-op pre-swap). Major execution is gated upstream — tests pin the
 exact error `"upgrade: major strategies wired but gated on v0.7.0"`
-(pg-manager v0.4.1 `manager/backup_upgrade.go:102`) as a sentinel
+(pg-manager v0.5.0 `manager/backup_upgrade.go:103`) as a sentinel
 that must fail loudly when a pg-manager bump lifts the gate. Zero
 production code changes.
 

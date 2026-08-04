@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — pg-manager pin bumped to v0.5.0
+
+`go.mod` now requires `github.com/f1bonacc1/pg-manager v0.5.0`
+(previously v0.4.1), after the nightlies stabilized on the fixes the
+bump carries. It picks up the 014/CR-009c election-livelock closure
+(a SIGKILLed ex-primary can no longer re-acquire the lease and starve
+survivors: the health-gated renewal path releases the leader key,
+candidacy follows renewal health via `Manager.ShouldCampaign` /
+`nats.WithCampaignGate`, and demotion fast-paths past a dead
+postmaster), peer-address decoupling (all peer-DSN lookups route
+through the resolver chain; DNS failures are transient in basebackup
+retry; `TriggerBackup` dials `LocalPGAddr`/loopback instead of
+`host=<NodeID>`), and a bounded retry for unclassified `pg_ctl start`
+failures that fixed the compose-tier S1 restart flake. Transitive
+bumps: `golang.org/x/crypto` 0.52.0, `golang.org/x/sys` 0.45.0. The
+major-upgrade gate sentinel pinned by the feature-004 tests is
+unchanged in v0.5.0 (`manager/backup_upgrade.go:103`).
+
 ### Security — Go toolchain bumped to 1.26.5 (GO-2026-5856, crypto/tls)
 
 `govulncheck` flagged GO-2026-5856 in the standard library's
