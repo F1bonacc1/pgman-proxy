@@ -30,7 +30,24 @@ func TestLCM_TransientRefusal_ClusterBootstrapping(t *testing.T) {
 	code, body, err := callLCM(ctx, peers[0].Name, "POST", "/v1/switchover",
 		integrationToken, `{"target":"node-b"}`)
 	if err != nil {
-		t.Skipf("callLCM: %v (cluster may not be reachable yet)", err)
+		// NOT a skip. TestMain has already run `compose up --wait`, so
+		// every peer is up before any Test* runs and a transport error
+		// here is a real defect, not an unmet precondition.
+		//
+		// This was `t.Skipf` until 2026-08-22, and it masked exactly the
+		// kind of regression it should have caught. An upstream
+		// pg-manager change demoted the ex-primary read-only on every
+		// planned switchover, opening a leaderless window in which this
+		// call blocked for the full 30s leader-route timeout. The suite
+		// stayed green: 32 PASS / 0 FAIL / 9 SKIP either side of the
+		// bisect, with only the per-test duration moving (0.08s -> 30.0s).
+		// The defect was found by diffing timings, which is not a thing
+		// anyone should have to do. See pg-manager B-019.
+		t.Fatalf("callLCM: %v\n"+
+			"The control plane did not answer. A timeout here usually means a "+
+			"leader-routed call had no leader to route to — check for a "+
+			"leaderless window during the switchover this suite performs "+
+			"a few tests earlier (pg-manager B-019).", err)
 	}
 	if code == 200 {
 		t.Skipf("cluster already past bootstrap; outcome=accepted (this is the happy path)")

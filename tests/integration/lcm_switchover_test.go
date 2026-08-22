@@ -42,6 +42,28 @@ func TestLCM_Switchover_ToPeerB(t *testing.T) {
 	if !strings.Contains(peerLogs, `"operation":"Switchover"`) {
 		t.Errorf("Switchover audit missing from node-a logs (sample: %s)", lastN(peerLogs, 800))
 	}
+
+	// Do not return until the rotation has actually COMPLETED.
+	//
+	// The LCM call above returns on `accepted`, not on done. Without
+	// this barrier the switchover stays in flight while later tests run,
+	// and any of them that issues a leader-routed call can land in the
+	// window where the old primary has resigned and the new one has not
+	// finished promoting. There is no leader to route to, so the call
+	// blocks for the full 30s leader-route timeout and returns 504.
+	// TestLCM_TransientRefusal_ClusterBootstrapping, four tests later,
+	// hit exactly that — intermittently, which is worse than reliably.
+	//
+	// This also strengthens the test: previously it asserted only that
+	// the request was accepted and audited, never that leadership
+	// actually moved to the requested target.
+	primary, err := waitForConvergence(ctx, time.Now().Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("cluster did not converge after switchover: %v", err)
+	}
+	if primary != "node-b" {
+		t.Errorf("switchover target was node-b, but the cluster converged on %q", primary)
+	}
 }
 
 // dumpLogs returns the last ~200 log lines from peerName's container.

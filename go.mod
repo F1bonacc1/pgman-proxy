@@ -16,6 +16,16 @@ go 1.26.5
 // release,release-image}.yml and deploy/docker/Dockerfile.bundle). The
 // credential is never persisted to an image layer, exported cache, or
 // provenance attestation.
+//
+// COUPLED BUMP: pg-manager's own go.mod pins github.com/jackc/pgx/v5,
+// and MVS raises this module's pgx to match. v0.5.0 requires pgx
+// v5.9.2, which is what the require block below carries. pg-manager
+// after v0.5.0 requires pgx v5.10.0 — so the next pg-manager bump must
+// raise pgx in the same commit, or the integration image fails to build
+// with "missing go.sum entry for ... pgx/v5 (imported by
+// github.com/f1bonacc1/pg-manager/internal/pgproto)". That build applies
+// a `replace` onto the sibling checkout (tests/integration/Dockerfile),
+// so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
 	github.com/f1bonacc1/pg-manager v0.5.0
 	github.com/fatih/color v1.19.0
