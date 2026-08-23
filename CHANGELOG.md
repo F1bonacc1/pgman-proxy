@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — Go toolchain bumped to 1.26.7 (go1.26.6 stdlib batch)
+
+`govulncheck` went red on six reachable standard-library advisories, all
+fixed in go1.26.6: GO-2026-6218 (`net/url`, quadratic `resolvePath`,
+reached from the pgmctl SSE client), GO-2026-6090 (`crypto/tls`,
+unbounded post-handshake messages — NATS cluster TLS, the control-plane
+HTTPS server, the SSE client), GO-2026-6089 (`net/http`, missing
+`ReadHeaderTimeout` on the unencrypted HTTP/2 check — `control.Server.Start`),
+GO-2026-6088 (`encoding/xml`, decode recursion depth — reached through
+pgx row scanning in the chaos workload), GO-2026-5972 (`encoding/asn1`,
+recursion depth — reached through the embedded NATS server), and
+GO-2026-5026 (`net/http` via `x/net/idna` punycode). No source changes:
+the call sites are correct, the stdlib under them was not.
+
+The `go.mod` `go` directive — which `setup-go` installs from in every
+workflow — now requires 1.26.7, the current patch of that line (nothing
+security-relevant landed after 1.26.6, so this only avoids re-pinning a
+patch behind). `deploy/docker/Dockerfile.bundle` tracks it in lockstep
+(`golang:1.26.7-bookworm`), since the official images set
+`GOTOOLCHAIN=local` and a stale base image fails the release-image build
+outright.
+
 ### Changed — pg-manager pin bumped to v0.5.0
 
 `go.mod` now requires `github.com/f1bonacc1/pg-manager v0.5.0`

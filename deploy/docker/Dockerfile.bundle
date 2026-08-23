@@ -27,7 +27,7 @@
 # `go` directive. The official golang images set GOTOOLCHAIN=local, so a
 # base image older than the directive does not self-upgrade — it fails the
 # release-image build with "go.mod requires go >= X (running Y)".
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.26.7-bookworm AS build
 WORKDIR /src
 
 COPY pgman-proxy /src/pgman-proxy
