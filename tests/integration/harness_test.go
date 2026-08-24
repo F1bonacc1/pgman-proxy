@@ -92,14 +92,22 @@ func runCompose(ctx context.Context, args ...string) error {
 // can be open before the leader's Postgres has finished bootstrap, in
 // which case the data-plane EOFs the client. The SQL probe closes
 // that race.
+//
+// The timeout messages carry the last observation per peer — an HTTP
+// status, a dial error, a SQL handshake error. A bare "gate timed out"
+// cannot distinguish a peer that never bound its health port from one
+// answering 503 for five minutes, and that distinction is the whole
+// question when triaging a red nightly.
 func waitReady(ctx context.Context, peers []Peer, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	hc := &http.Client{Timeout: 2 * time.Second}
 	for _, p := range peers {
 		url := p.HealthURL + "/readyz"
+		last := "no attempt completed"
 		for {
 			if time.Now().After(deadline) {
-				return fmt.Errorf("peer %s never reached /readyz=200 (last URL: %s)", p.Name, url)
+				return fmt.Errorf("peer %s never reached /readyz=200 within %s (%s, last: %s)",
+					p.Name, budget, url, last)
 			}
 			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 			resp, err := hc.Do(req)
@@ -108,10 +116,14 @@ func waitReady(ctx context.Context, peers []Peer, budget time.Duration) error {
 				if resp.StatusCode == http.StatusOK {
 					break
 				}
+				last = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			} else {
+				last = err.Error()
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("peer %s never reached /readyz=200 (%s, last: %s): %w",
+					p.Name, url, last, ctx.Err())
 			case <-time.After(500 * time.Millisecond):
 			}
 		}
@@ -119,21 +131,37 @@ func waitReady(ctx context.Context, peers []Peer, budget time.Duration) error {
 	// Once every peer's /readyz is green, verify a SQL handshake succeeds
 	// on at least one peer — that proves the leader's Postgres is live
 	// and the proxy is forwarding to it.
+	lastSQL := make(map[string]string, len(peers))
+	for _, p := range peers {
+		lastSQL[p.Name] = "no attempt completed"
+	}
 	for {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("no peer accepted SQL within deadline")
+			return fmt.Errorf("no peer accepted SQL within %s (%s)", budget, sqlErrSummary(peers, lastSQL))
 		}
 		for _, p := range peers {
-			if pingSQL(ctx, p.DSN()) == nil {
+			err := pingSQL(ctx, p.DSN())
+			if err == nil {
 				return nil
 			}
+			lastSQL[p.Name] = err.Error()
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("no peer accepted SQL (%s): %w", sqlErrSummary(peers, lastSQL), ctx.Err())
 		case <-time.After(1 * time.Second):
 		}
 	}
+}
+
+// sqlErrSummary renders the last SQL handshake error per peer in the
+// stable Peers() order, for the readiness-gate timeout message.
+func sqlErrSummary(peers []Peer, last map[string]string) string {
+	parts := make([]string, 0, len(peers))
+	for _, p := range peers {
+		parts = append(parts, fmt.Sprintf("%s: %s", p.Name, last[p.Name]))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // pingSQL opens a fresh libpq session and runs `SELECT 1`. Returns nil

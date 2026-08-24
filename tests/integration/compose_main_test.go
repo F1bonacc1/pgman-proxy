@@ -36,6 +36,14 @@ var harness harnessConfig
 func TestMain(m *testing.M) {
 	if err := setupHarness(); err != nil {
 		fmt.Fprintf(os.Stderr, "integration harness setup failed: %v\n", err)
+		// A setup failure is exactly when the containers hold the only
+		// record of what stalled, so dump and tear down before exiting
+		// rather than treating "no tests ran" as "nothing to clean up".
+		// Nightly runs 31863006490 and 32688663723 both died on the
+		// readiness gate, left no trace, and leaked their containers to
+		// the workflow's belt-and-braces sweep. teardownHarness no-ops
+		// when the project name was never assigned.
+		teardownHarness(true)
 		os.Exit(2)
 	}
 	code := m.Run()
@@ -69,9 +77,15 @@ func setupHarness() error {
 		return fmt.Errorf("compose up: %w", err)
 	}
 
-	readyCtx, cancelReady := context.WithTimeout(context.Background(), 5*time.Minute)
+	// The ctx deadline carries slack over the budget so waitReady's own
+	// deadline — the one that knows WHICH gate and WHICH peer stalled —
+	// trips first. Handed identical values, the ctx.Done() arms always
+	// won the race and the error degraded to a bare "context deadline
+	// exceeded", which is all two red nightlies ever reported.
+	const readyBudget = 5 * time.Minute
+	readyCtx, cancelReady := context.WithTimeout(context.Background(), readyBudget+30*time.Second)
 	defer cancelReady()
-	if err := waitReady(readyCtx, Peers(), 5*time.Minute); err != nil {
+	if err := waitReady(readyCtx, Peers(), readyBudget); err != nil {
 		return fmt.Errorf("readiness gate: %w", err)
 	}
 	return nil
@@ -130,6 +144,17 @@ func teardownHarness(failed bool) {
 func dumpComposeLogs() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	fmt.Fprintf(os.Stderr, "=== suite failed; compose ps for %s ===\n", harness.project)
+	// Container state first: "Exited (1) 3 seconds ago" and "Up 5
+	// minutes" are different failures, and the log tail alone does not
+	// tell them apart.
+	ps := exec.CommandContext(ctx, "docker", composeArgs("ps", "-a")...) //nolint:gosec
+	ps.Dir = harness.workdir
+	ps.Stdout = os.Stderr
+	ps.Stderr = os.Stderr
+	if err := ps.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "compose ps: %v\n", err)
+	}
 	fmt.Fprintf(os.Stderr, "=== suite failed; compose logs for %s ===\n", harness.project)
 	cmd := exec.CommandContext(ctx, "docker",
 		composeArgs("logs", "--no-color", "--timestamps", "--tail", "5000")...) //nolint:gosec
