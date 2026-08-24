@@ -22,7 +22,15 @@
 # to 18 via `--build-arg POSTGRES_VERSION=18`.
 ARG POSTGRES_VERSION=17
 
-FROM golang:1.26-bookworm AS build
+# Go toolchain pinned; MUST be kept in lockstep with go.mod's `go`
+# directive, exactly as deploy/docker/Dockerfile.bundle is. The official
+# golang images set GOTOOLCHAIN=local, so a base image older than the
+# directive does not self-upgrade — it fails this build with "go.mod
+# requires go >= X (running Y)". A floating `golang:1.26-bookworm` tag
+# survived only as long as the tag happened to track the directive: it
+# breaks on the first directive bump made before docker-library
+# publishes that patch, and the nightly suite is where that lands.
+FROM golang:1.26.7-bookworm AS build
 WORKDIR /src
 
 # Pull both modules into the build context. go.mod pins pg-manager to a
