@@ -22,7 +22,7 @@ go 1.26.7
 // provenance attestation.
 //
 // COUPLED BUMP: pg-manager's own go.mod pins github.com/jackc/pgx/v5,
-// and MVS raises this module's pgx to match. v0.6.0 requires pgx
+// and MVS raises this module's pgx to match. v0.6.1 requires pgx
 // v5.10.0, which is what the require block below carries. A pg-manager
 // bump that moves pgx must raise it here in the SAME commit, or the
 // integration image fails to build with "missing go.sum entry for
@@ -31,7 +31,7 @@ go 1.26.7
 // a `replace` onto the sibling checkout (tests/integration/Dockerfile),
 // so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
-	github.com/f1bonacc1/pg-manager v0.6.0
+	github.com/f1bonacc1/pg-manager v0.6.1
 	github.com/fatih/color v1.19.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/mattn/go-isatty v0.0.22
