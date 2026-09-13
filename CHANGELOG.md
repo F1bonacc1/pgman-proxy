@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (switchover): lease acquisition now honors `Manager.ShouldCampaign`
+
+pgman-proxy never passed `nats.WithCampaignGate` to the leadership
+adapter, so pg-manager's campaign gate was inert here. Every switchover
+resign reopened a three-way lease race that the ex-primary and the
+bystander standby could win repeatedly (1 to 18 non-target wins per
+switchover in a local reproduction), and each flip repointed every
+standby's `primary_conninfo` at the new lease holder, starving the
+target's WAL stream. That widened the window in which pg-manager
+abandons the switchover (`target_refused`, fixed upstream as B-022),
+which is how nightly run 34202505825 ended with
+`TestLCM_Switchover_ToPeerB` converging on node-c. `cluster.BuildHandles`
+now takes the gate, and the runtime passes `Manager.ShouldCampaign`
+through a pointer published after `manager.New`.
+
+The same predicate carries pg-manager 014's health clause, so a crashed
+ex-primary now also sits out the lease race until its Postgres is back.
+The v0.5.0 pin entry below claimed that behavior; it was not true in
+pgman-proxy until this change. `nats.WithHealthCheck` (renewal gated on
+local Postgres health) is still not wired: it changes crash-failover
+timing and needs its own validation.
+
 ### Security — Go toolchain bumped to 1.26.7 (go1.26.6 stdlib batch)
 
 `govulncheck` went red on six reachable standard-library advisories, all
