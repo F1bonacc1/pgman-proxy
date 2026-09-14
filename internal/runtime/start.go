@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	pgmanager "github.com/f1bonacc1/pg-manager"
@@ -158,7 +159,16 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: pre-create cluster KV: %w", kvErr)}
 	}
 
-	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger, cfg.Cluster.LeaseTTL)
+	// Lease acquisition follows Manager.ShouldCampaign (pg-manager
+	// milestones 013 and 014): peers sit out the race while a fresh
+	// switchover request names another node, and a crashed ex-primary
+	// sits it out until its Postgres is back. The Manager needs the
+	// leadership handle built here, so the gate reads a pointer
+	// published once manager.New returns. ShouldCampaign is
+	// nil-receiver-safe (true), so the boot window campaigns normally.
+	var mgrRef atomic.Pointer[manager.Manager]
+	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger, cfg.Cluster.LeaseTTL,
+		func() bool { return mgrRef.Load().ShouldCampaign() })
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: build handles: %w", err)}
 	}
@@ -295,6 +305,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("manager.New: %w", err)}
 	}
 	res.Manager = m
+	mgrRef.Store(m)
 
 	// Feature 002 (contracts/observability.md FR-013): keep the
 	// embedded-NATS and leadership gauges current. Registered since

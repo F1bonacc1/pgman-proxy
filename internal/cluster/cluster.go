@@ -107,10 +107,18 @@ func Connect(ctx context.Context, url string, cfg config.NATSConfig, nodeID stri
 // returns a wrapped error and the caller is responsible for draining
 // the connection. leaseTTL tunes the leadership campaign/renewal
 // interval (Constitution III); zero keeps the adapter's safe default.
-func BuildHandles(ctx context.Context, conn *nats.Conn, clusterID, nodeID string, logger *obs.Logger, leaseTTL time.Duration) (*Handles, error) {
+// campaignGate, when non-nil, is consulted before every lease
+// acquisition attempt (natsadapter.WithCampaignGate) and must be as
+// cheap as Manager.ShouldCampaign, which is what the runtime passes.
+// Without it every switchover resign reopens a lease race the target
+// can lose repeatedly.
+func BuildHandles(ctx context.Context, conn *nats.Conn, clusterID, nodeID string, logger *obs.Logger, leaseTTL time.Duration, campaignGate func() bool) (*Handles, error) {
 	ldOpts := []natsadapter.LeadershipOption{natsadapter.WithLogger(logger)}
 	if leaseTTL > 0 {
 		ldOpts = append(ldOpts, natsadapter.WithLeaseTTL(leaseTTL))
+	}
+	if campaignGate != nil {
+		ldOpts = append(ldOpts, natsadapter.WithCampaignGate(campaignGate))
 	}
 	leadership, err := natsadapter.NewLeadership(
 		ctx, conn, clusterID, pgmanager.NodeID(nodeID),

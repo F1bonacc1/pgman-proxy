@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (switchover): lease acquisition now honors `Manager.ShouldCampaign`
+
+pgman-proxy never passed `nats.WithCampaignGate` to the leadership
+adapter, so pg-manager's campaign gate was inert here. Every switchover
+resign reopened a three-way lease race that the ex-primary and the
+bystander standby could win repeatedly (1 to 18 non-target wins per
+switchover in a local reproduction), and each flip repointed every
+standby's `primary_conninfo` at the new lease holder, starving the
+target's WAL stream. That widened the window in which pg-manager
+abandons the switchover (`target_refused`, fixed upstream as B-022),
+which is how nightly run 34202505825 ended with
+`TestLCM_Switchover_ToPeerB` converging on node-c. `cluster.BuildHandles`
+now takes the gate, and the runtime passes `Manager.ShouldCampaign`
+through a pointer published after `manager.New`.
+
+The same predicate carries pg-manager 014's health clause, so a crashed
+ex-primary now also sits out the lease race until its Postgres is back.
+The v0.5.0 pin entry below claimed that behavior; it was not true in
+pgman-proxy until this change. `nats.WithHealthCheck` (renewal gated on
+local Postgres health) is still not wired: it changes crash-failover
+timing and needs its own validation.
+
+### Changed (deps): pg-manager pin bumped to v0.6.1
+
+`go.mod` now requires `github.com/f1bonacc1/pg-manager v0.6.1`
+(previously v0.6.0). It carries the engine half of the switchover fix
+above (B-022): a target refused only for WAL lag keeps the switchover
+request while it catches up, standbys replicate from the published
+primary rather than the lease holder, and a primary holds its resign
+for one `LivenessInterval` so peers defer first, so a switchover can
+take up to one tick longer. It also fixes stale-leader eviction timing
+(a node returning from a partition could evict a live leader inside one
+renewal gap) and stops passing `--restore-target-wal` to `pg_rewind`
+when no `restore_command` is configured. No API or dependency change
+reaches this module; `pgx` stays at v5.10.0.
+
+Known upstream issue, not fixed in v0.6.1: after a switchover the
+non-target standby can fork off WAL the writable ex-primary wrote
+before the standby was repointed (pg-manager B-023). Auto-rebootstrap,
+which the integration harness enables, is the only repair path.
+
 ### Security — Go toolchain bumped to 1.26.7 (go1.26.6 stdlib batch)
 
 `govulncheck` went red on six reachable standard-library advisories, all
