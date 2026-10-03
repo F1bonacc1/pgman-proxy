@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (boot): one unanswered JetStream reply no longer kills a peer's cold start
+
+`PreCreateClusterKV` handed its 60 s context straight to every
+JetStream call. nats.go applies its 5 s request default only when the
+context has no deadline, so a single `$JS.API.STREAM.INFO` request that
+nats-server left unanswered (it stays silent on several paths while a
+fresh stream's Raft group elects a leader) blocked for the whole 60 s,
+and the 15 s retry loop never ran a second attempt. That is how nightly
+run 36230204614 lost node-b: it exited 75 (`look up cluster KV bucket
+"pgmgr_pgman-proxy-it": context deadline exceeded`) 63 s into boot,
+while node-a and node-c finished the same phase in about 4 s. Each
+attempt is now capped at 10 s and retried until the 60 s budget runs
+out, and the error reports the attempt count. `EnsureHistoryStream` had
+the same single-shot 30 s budget with no retry at all and gets the same
+treatment.
+
+A permanent failure in this phase (the Replicas shrink refusal) now
+retries for the full 60 s before the peer exits, up from 15 s.
+
 ### Fixed (switchover): lease acquisition now honors `Manager.ShouldCampaign`
 
 pgman-proxy never passed `nats.WithCampaignGate` to the leadership

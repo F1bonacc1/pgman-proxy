@@ -116,8 +116,9 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	//   1a. Wait for the embedded NATS routes mesh so JetStream
 	//       meta-cluster election has the quorum it needs.
 	//   1b. Wait until the JS subsystem answers a trivial RPC. The JS
-	//       client's internal per-request timeout is 5 s, so without
-	//       this gate the first call inside cluster.BuildHandles
+	//       client's default per-request timeout is 5 s (applied only
+	//       when the caller's ctx has no deadline), so without this
+	//       gate the first call inside cluster.BuildHandles
 	//       (NewLeadership → ensureBucket → js.KeyValue) fails-closed
 	//       on a fresh cold start.
 	//   1c. Pre-create the cluster KV bucket with the cluster-size-
@@ -126,8 +127,10 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	//       rest re-fetch. Runs before BuildHandles so pg-manager's
 	//       ensureBucket sees an existing correctly-replicated bucket
 	//       and skips the create entirely (which would otherwise have
-	//       defaulted to Replicas=1). Retired by upstream T007 once
-	//       pg-manager exposes WithReplicas(int).
+	//       defaulted to Replicas=1). Each attempt is time-boxed so an
+	//       unanswered JS API request costs one attempt, not the boot.
+	//       Retired by upstream T007 once pg-manager exposes
+	//       WithReplicas(int).
 	//   1d. Build cluster handles (pg-manager NewLeadership, state
 	//       store, event bus). The substrate is now fully formed; any
 	//       transient JS RPC errors during pg-manager bootstrap are

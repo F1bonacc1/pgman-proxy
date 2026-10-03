@@ -14,10 +14,11 @@ import (
 // WaitForJetStreamResponsive blocks until the embedded JetStream
 // subsystem can answer a trivial API call (`js.AccountInfo`) — i.e. the
 // meta-cluster Raft node has elected a leader and is serving requests.
-// Necessary because the JS client's internal per-request timeout is
-// only 5 s; without this gate, the first JS RPC issued by
-// pg-manager's NewLeadership (in cluster.BuildHandles) hits that
-// timeout on a fresh cold start before the meta cluster is up.
+// Necessary because the JS client's default per-request timeout is
+// only 5 s (applied only when the caller's ctx carries no deadline);
+// without this gate, the first JS RPC issued by pg-manager's
+// NewLeadership (in cluster.BuildHandles) hits that timeout on a
+// fresh cold start before the meta cluster is up.
 //
 // Each probe attempt has a 3 s deadline; on failure the function backs
 // off `interval` (defaulting to 500 ms) and retries within the parent
@@ -91,7 +92,9 @@ func WaitForJetStreamResponsive(ctx context.Context, conn *nats.Conn, interval t
 // A single inner attempt is wrapped in a bounded retry loop so transient
 // JetStream placement / sync errors during cold-start (meta-cluster
 // leader still settling, KV stream RAFT not yet elected) don't fail the
-// boot — see tryPreCreateClusterKV for the per-attempt body.
+// boot — see tryPreCreateClusterKV for the per-attempt body. Each
+// attempt is capped by preCreateAttemptTimeout so an unanswered
+// request costs one attempt, not the whole budget.
 func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, replicas int) error {
 	if conn == nil {
 		return errors.New("PreCreateClusterKV: nats connection is nil")
@@ -118,28 +121,35 @@ func PreCreateClusterKV(ctx context.Context, conn *nats.Conn, clusterID string, 
 	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	var lastErr error
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		err = tryPreCreateClusterKV(callCtx, js, name, replicas)
+	for attempt := 1; ; attempt++ {
+		attemptCtx, attemptCancel := context.WithTimeout(callCtx, preCreateAttemptTimeout)
+		err = tryPreCreateClusterKV(attemptCtx, js, name, replicas)
+		attemptCancel()
 		if err == nil {
 			return nil
 		}
-		lastErr = err
-
-		if !time.Now().Before(deadline) {
-			break
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-callCtx.Done():
+			return fmt.Errorf("PreCreateClusterKV failed after %d attempts: %w", attempt, err)
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-
-	return fmt.Errorf("PreCreateClusterKV failed after retry: %w", lastErr)
 }
+
+// preCreateAttemptTimeout bounds one tryPreCreateClusterKV pass.
+// nats.go applies its 5 s per-request default only to contexts WITHOUT
+// a deadline, so passing the 60 s callCtx straight through let a single
+// unanswered JS API request (nats-server stays silent on several paths
+// while a stream's Raft group settles) wait out the whole budget with
+// no retry (nightly-integration run 36230204614). 2x the client default
+// leaves room for a slow clustered create; cutting an attempt short is
+// safe because every step is idempotent and the next attempt resumes.
+// Variable so tests can shorten it.
+var preCreateAttemptTimeout = 10 * time.Second
 
 // tryPreCreateClusterKV attempts a single execution of KV bucket pre-creation and configuration.
 func tryPreCreateClusterKV(callCtx context.Context, js jetstream.JetStream, name string, replicas int) error {
@@ -222,9 +232,11 @@ func tryPreCreateClusterKV(callCtx context.Context, js jetstream.JetStream, name
 		// On a freshly-created replicated stream, the underlying RAFT
 		// group can take several seconds to elect a leader. UpdateStream
 		// blocks waiting for the stream leader; without this wait the
-		// 60 s callCtx budget gets burned on a single hung call during
-		// cold-start contention (chaos-rig RCA, 2026-05-16).
-		if err := WaitForStreamReady(callCtx, js, streamName, 30*time.Second, 500*time.Millisecond); err != nil {
+		// attempt budget gets burned on a single hung call during
+		// cold-start contention (chaos-rig RCA, 2026-05-16). The wait
+		// is capped by the attempt ctx; a leader still missing at the
+		// cap is picked up again by the next attempt.
+		if err := WaitForStreamReady(callCtx, js, streamName, preCreateAttemptTimeout, 500*time.Millisecond); err != nil {
 			return fmt.Errorf("wait for KV stream %q leader before AllowDirect tune: %w", streamName, err)
 		}
 		scfg.AllowDirect = false
