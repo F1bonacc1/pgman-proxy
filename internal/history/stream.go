@@ -99,6 +99,39 @@ func EnsureHistoryStream(ctx context.Context, js jetstream.JetStream, clusterID 
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	for attempt := 1; ; attempt++ {
+		attemptCtx, attemptCancel := context.WithTimeout(callCtx, ensureAttemptTimeout)
+		stream, err := ensureOnce(attemptCtx, js, cfg)
+		attemptCancel()
+		if err == nil {
+			return stream, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		select {
+		case <-callCtx.Done():
+			return nil, fmt.Errorf("history: ensure stream gave up after %d attempts: %w", attempt, err)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// ensureAttemptTimeout bounds one ensureOnce pass. nats.go applies its
+// 5 s per-request default only to contexts WITHOUT a deadline, so
+// handing it the 30 s budget directly let a single unanswered JS API
+// request consume the whole budget with no retry. Same failure mode as
+// embedded.preCreateAttemptTimeout, one boot gate later. Variable so
+// tests can shorten it.
+var ensureAttemptTimeout = 10 * time.Second
+
+// ensureOnce is a single create-or-reconcile pass. Idempotent: a create
+// that lands server-side after the attempt timed out is found by the
+// next attempt as ErrStreamNameAlreadyInUse (or as an identical-config
+// create, which JetStream acknowledges).
+func ensureOnce(callCtx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) (jetstream.Stream, error) {
+	name := cfg.Name
 	stream, err := js.CreateStream(callCtx, cfg)
 	if err != nil {
 		if !errors.Is(err, jetstream.ErrStreamNameAlreadyInUse) {
