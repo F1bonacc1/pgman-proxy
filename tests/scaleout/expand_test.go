@@ -112,8 +112,9 @@ done`
 }
 
 // longestWriteGap parses the probe's output and returns the longest
-// interval between consecutive successful commits.
-func (tp *topo) longestWriteGap() (time.Duration, int) {
+// interval between consecutive successful commits, how many commits
+// succeeded, and the time of the last one.
+func (tp *topo) longestWriteGap() (time.Duration, int, time.Time) {
 	tp.t.Helper()
 	out := tp.mustDocker(time.Minute, "logs", tp.prefix+"-probe")
 	var last int64
@@ -136,7 +137,7 @@ func (tp *topo) longestWriteGap() (time.Duration, int) {
 		last = ms
 		oks++
 	}
-	return longest, oks
+	return longest, oks, time.UnixMilli(last)
 }
 
 // TestExpandOneToThree is S1 (spec 005 US2, SC-002, SC-003): five
@@ -162,9 +163,18 @@ func TestExpandOneToThree(t *testing.T) {
 			g := buildGolden(tp, goldenRows, singleEnv("a"))
 			tp.startWriteProbe("a")
 			time.Sleep(2 * time.Second) // a baseline of successful commits before the restart
+			expandAt := time.Now()
 			expand(tp, order)
 			assertExpanded(tp, g, 4*time.Minute)
-			gap, oks := tp.longestWriteGap()
+			// The gap only spans successful commits, so also require one
+			// after the expansion began: writes must have come back.
+			var gap time.Duration
+			var oks int
+			waitFor(t, 30*time.Second, time.Second, "a probe commit after the expansion", func() (bool, string) {
+				var lastOK time.Time
+				gap, oks, lastOK = tp.longestWriteGap()
+				return oks >= 10 && lastOK.After(expandAt), fmt.Sprintf("%d commits, last at %s", oks, lastOK.Format(time.RFC3339Nano))
+			})
 			t.Logf("longest write gap through node-a: %s (%d commits)", gap.Round(time.Millisecond), oks)
 			if gap >= 30*time.Second {
 				t.Errorf("write outage %s, want < 30s (SC-003)", gap)

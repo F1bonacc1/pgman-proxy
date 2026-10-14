@@ -22,8 +22,9 @@ go 1.26.7
 // provenance attestation.
 //
 // COUPLED BUMP: pg-manager's own go.mod pins github.com/jackc/pgx/v5,
-// and MVS raises this module's pgx to match. v0.6.1 requires pgx
-// v5.10.0, which is what the require block below carries. A pg-manager
+// and MVS raises this module's pgx to match. pg-manager main after
+// v0.6.1 (and so milestone 015) requires pgx v5.11.0 and nats.go
+// v1.53.1, which is what the require block below carries. A pg-manager
 // bump that moves pgx must raise it here in the SAME commit, or the
 // integration image fails to build with "missing go.sum entry for
 // ... pgx/v5 (imported by
@@ -33,10 +34,10 @@ go 1.26.7
 require (
 	github.com/f1bonacc1/pg-manager v0.6.1
 	github.com/fatih/color v1.19.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/nats-io/nats-server/v2 v2.14.0
-	github.com/nats-io/nats.go v1.51.0
+	github.com/nats-io/nats.go v1.53.1
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2

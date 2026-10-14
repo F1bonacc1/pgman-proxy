@@ -50,7 +50,10 @@ func buildGolden(tp *topo, rows int, env map[string]string) golden {
 		}()
 	}
 
+	// probe is the write-probe table (startWriteProbe, write); it must
+	// exist before the expansion so the outage measurement is real.
 	load := fmt.Sprintf("create table bulk(id bigint primary key, pad text); "+
+		"create table if not exists probe(t timestamptz default now(), src text); "+
 		"insert into bulk select g, repeat('x', 900) from generate_series(1, %d) g", rows)
 	out, err := tp.exec("a", 10*time.Minute, "psql", "-h", "/var/run/postgresql", "-U", "postgres",
 		"-XAtq", "-v", "ON_ERROR_STOP=1", "-c", load)

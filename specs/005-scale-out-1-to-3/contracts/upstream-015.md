@@ -2,7 +2,7 @@
 
 **Feature**: `005-scale-out-1-to-3`
 **Upstream**: `../pg-manager`, milestone `015-empty-peer-safety`. Input: `docs/scale-out-1-to-3/plan.md` section WI-B (B1-B7).
-**Status**: requirements on upstream. Names marked *(proposed)* are pinned when 015's own contracts are written; this file is then updated to match, and the tests that assert them change in the same commit.
+**Status**: implemented upstream on pg-manager branch `015-empty-peer-safety` (commit f3ba7c0, 2026-10-15; not yet tagged). The names below are final. Upstream contracts: `../pg-manager/specs/015-empty-peer-safety/contracts/`.
 
 ## Behavior pgman-proxy relies on (no API calls needed)
 
@@ -16,23 +16,28 @@
 | U6 | B6: identity-mismatch detection | US5 |
 | U7 | B7 (optional): leader publishes its snapshot before the first promote preflight | SC-003 margin only |
 
-### Data-presence predicate (request)
+### Data-presence predicate (delivered)
 
-- **U1's `has_data`** must not count a partially written data directory as data.
-- **The case**: a crash in the middle of a clone or initdb leaves such a directory behind (spec edge case; research R-003). Basing `has_data` on `PG_VERSION` alone is insufficient.
-- **The request**: export the predicate *(proposed: `pgmanager.PGDataComplete(dir string) (bool, error)`)*, so pgman-proxy's boot-window gate uses the same rule. pgman-proxy then deletes its local `pgdataComplete`.
+Upstream records a tri-state, not a boolean:
+- `empty`: no `PG_VERSION`;
+- `partial`: `PG_VERSION` but no `global/pg_control`;
+- `complete`: both present.
+
+It is exported as `pgmanager.ClassifyDataDir(ctx, fs FilesystemOps, dataDir) (DataState, error)`.
+
+pgman-proxy's local `pgdataComplete` encodes the same rule. Replace it with `ClassifyDataDir(ctx, osfs.New(), dir) == DataStateComplete` in the WI-C5 bump commit.
 
 ## API surface pgman-proxy calls
 
 | Use | Upstream symbol | Notes |
 |---|---|---|
-| Identity mismatch, doctor and gauge | `Manager.Status()` → *(proposed)* `Status.IdentityMismatch *IdentityMismatch{LocalSystemIdentifier, LeaderSystemIdentifier string; LeaderNodeID NodeID}` (nil when matching or unknown) | Read-only |
-| Identity mismatch, event | *(proposed)* topic `identity_mismatch` (single segment, like the existing exact topics: subject `pgmanager.<cluster>.identity_mismatch`), payload = the struct above + `EventHeader` | Forwarded by `cluster.SubscribeCoordinationEvents`; its topic list is explicit (`internal/cluster/events.go`), so T038 adds the name |
-| Complete-database predicate | *(proposed)* `pgmanager.PGDataComplete` | Optional; local fallback until exported |
+| Identity mismatch, doctor and gauge | `Manager.Status()` → `Status.IdentityMismatch *pgmanager.IdentityMismatch{LocalSystemIdentifier, LeaderSystemIdentifier string; LeaderNodeID NodeID}` (nil when matching or unknown) | Read-only |
+| Identity mismatch, event | subjects `pgmanager.<cluster>.identity.mismatch` and `identity.mismatch_cleared` (family `identity`), payload `IdentityMismatchEvent{EventHeader, LocalSystemIdentifier, LeaderSystemIdentifier, LeaderNodeID}` | Forwarded by `cluster.SubscribeCoordinationEvents`; the `identity` and `empty_peer` families are wired on branch 005 |
+| Complete-database predicate | `pgmanager.ClassifyDataDir` | Replace the local `pgdataComplete` at the bump |
 
 ## Log lines asserted by `tests/scaleout`
 
-| Scenario | Pattern *(proposed; pin when 015 lands)* |
+| Scenario | Pattern (final) |
 |---|---|
 | (none in pgman-proxy) | `campaign: empty-node deference armed` is not reachable in S6: with node-a down the empty nodes exit at the route-mesh gate before the engine starts. It is covered by pg-manager's own reconciler scenarios (WI-B tests (c)); pgman-proxy's boot-window deferral line is `campaign: boot-window deferral` |
 | S1, S6 (negative) | no `initdb: starting` on node-b or node-c (exists today, `reconciler/act.go:330`) |
