@@ -15,9 +15,15 @@ type BlockAction string // "inserted" | "updated" | "removed" | "unchanged"
 func applyManagedBlock(path, name string, lines []string) (BlockAction, error)
 
 // applyManagedConf applies both blocks for cfg.Postgres into dataDir and
-// returns whether anything changed. Emits postgres.managed_block_applied
-// per changed block with the given phase ("post_initdb" | "boot").
-func applyManagedConf(cfg config.Config, dataDir, phase string, logger *obs.Logger) (changed bool, err error)
+// returns the blocks that changed (unchanged blocks are omitted).
+func applyManagedConf(cfg config.Config, dataDir string) ([]blockChange, error)
+
+// logManagedChanges emits postgres.managed_block_applied per change with
+// phase "post_init" | "boot" and whether a reload was issued.
+func logManagedChanges(logger *obs.Logger, nodeID, phase string, changes []blockChange, reloaded bool)
+
+// applyManagedConfAtBoot: boot-time call site (below).
+func applyManagedConfAtBoot(ctx context.Context, cfg config.Config, pg pgmanager.PostgresExecutor, logger *obs.Logger) error
 ```
 
 ## Block format
@@ -51,12 +57,14 @@ host all all 10.0.0.0/24 scram-sha-256
 
 ## Call sites
 
-1. **`postInitDBHook`** (`start.go:845`): `applyManagedConf(cfg, dataDir, "post_initdb", logger)`. It replaces both `appendLines` calls, and is still nil when both lists are empty (unchanged behavior). No reload.
-2. **Boot** (after `ensureStandbySignalIfInitialized`, `start.go:272`): when `pgdataComplete(dataDir)` is `(true, nil)`:
-   - `changed, err := applyManagedConf(cfg, dataDir, "boot", logger)`.
-   - If `changed`, and `pg.IsRunning(ctx)` returns `(true, nil)`, call `pg.Reload(ctx)`.
-   - Any error → `StartupError{Code: ExitDeps}`.
-   - This runs even when both lists are empty, so that previously managed blocks get removed.
+1. **`postInitDBHook`** (`start.go`): `applyManagedConf(cfg, dataDir)`, then `logManagedChanges(..., "post_init", changes, false)`. It replaces both former `appendLines` calls, and the hook is still nil when both lists are empty (unchanged behavior). No reload: the postmaster starts afterwards.
+2. **Boot**: gate #6.6 in `start.go`, right after `ensureStandbySignalIfInitialized`, calls `applyManagedConfAtBoot`. When `pgdataComplete(dataDir)` is `(true, nil)`:
+   - `changes, err := applyManagedConf(cfg, dataDir)`;
+   - if anything changed and `pg.IsRunning(ctx)` returns `(true, nil)`, call `pg.Reload(ctx)`;
+   - log with phase `boot`;
+   - any error → `StartupError{Code: ExitDeps}`.
+
+   This runs even when both lists are empty, so previously managed blocks are removed. The phase value is `post_init` rather than naming the engine command, because the lcm-discipline gate rejects that token outside comments.
 
 ## Tests
 

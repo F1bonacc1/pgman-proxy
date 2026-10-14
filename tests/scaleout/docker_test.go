@@ -125,14 +125,14 @@ func (tp *topo) volume(node, kind string) string { return tp.prefix + "-" + node
 
 // rootRun runs a one-shot root container from the test image with the
 // given volume mounts (volume name → mount path) and shell script.
-func (tp *topo) rootRun(mounts map[string]string, script string) string {
+func (tp *topo) rootRun(mounts map[string]string, script string) {
 	tp.t.Helper()
 	args := []string{"run", "--rm", "-u", "root", "--entrypoint", "sh"}
 	for vol, path := range mounts {
 		args = append(args, "-v", vol+":"+path)
 	}
 	args = append(args, image, "-c", script)
-	return tp.mustDocker(5*time.Minute, args...)
+	tp.mustDocker(5*time.Minute, args...)
 }
 
 // ensureVolumes creates node's data and store volumes owned by the

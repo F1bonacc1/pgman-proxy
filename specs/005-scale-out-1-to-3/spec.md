@@ -163,8 +163,12 @@ node and verify the expansion completes.
    healthy.
 2. **Given** an expansion where the data-holding node is down, **When**
    the two empty nodes run for 3 minutes, **Then** no database is
-   created, no node accepts writes, and each empty node logs that it is
-   deferring to peers that have data or have not reported.
+   created and no node accepts writes. In pgman-proxy the empty nodes
+   never reach leadership at all: every configured peer must be
+   reachable first, so they exit with the documented "route mesh not
+   formed" code and a supervisor restarts them. When the data holder
+   is reachable but still booting, the empty nodes log that they are
+   deferring instead.
 3. **Given** the scenario above, **When** the data-holding node is then
    started, **Then** the expansion completes as in User Story 2.
 4. **Given** a node that has not yet started its engine (the boot

@@ -143,20 +143,20 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 ### Tests for User Story 2
 
-- [ ] T017 [P] [US2] Write unit tests in `internal/embedded/store_layout_test.go`, covering every case listed in contracts/jetstream-store-layout.md "Tests". Use `t.TempDir()` fixtures: create `jetstream/$SYS/_js_/_meta_` for clustered, and `jetstream/<acct>/streams` for standalone. Assert that the parent dir inode (`os.SameFile`) and mode are unchanged after an archive.
-- [ ] T018 [P] [US2] Write unit tests in `internal/runtime/managed_block_test.go`, covering every row of the contracts/managed-conf-blocks.md semantics table, plus:
+- [X] T017 [P] [US2] Write unit tests in `internal/embedded/store_layout_test.go`, covering every case listed in contracts/jetstream-store-layout.md "Tests". Use `t.TempDir()` fixtures: create `jetstream/$SYS/_js_/_meta_` for clustered, and `jetstream/<acct>/streams` for standalone. Assert that the parent dir inode (`os.SameFile`) and mode are unchanged after an archive.
+- [X] T018 [P] [US2] Write unit tests in `internal/runtime/managed_block_test.go`, covering every row of the contracts/managed-conf-blocks.md semantics table, plus:
   - CRLF input;
   - no trailing newline;
   - modes 0600 and 0640 preserved;
   - legacy-marker coexistence;
   - idempotence (the second apply is `unchanged`, with no write; mtime unchanged);
   - a read-only parent dir → error, with the original content intact.
-- [ ] T019 [P] [US2] Extend `internal/runtime/campaign_gate_test.go` with a table for `campaignGate(m, dataDir)`, with the manager abstracted behind a tiny interface so the test needs no real Manager:
+- [X] T019 [P] [US2] Extend `internal/runtime/campaign_gate_test.go` with a table for `campaignGate(m, dataDir)`, with the manager abstracted behind a tiny interface so the test needs no real Manager:
   - nil manager + complete PGDATA → true;
   - nil manager + empty → false;
   - nil manager + stat error → false;
   - non-nil manager → delegates (true/false).
-- [ ] T020 [P] [US2] Write `TestExpandOneToThree` (S1) in `tests/scaleout/expand_test.go`. **(needs 015)**
+- [ ] T020 [P] [US2] Write `TestExpandOneToThree` (S1) in `tests/scaleout/expand_test.go`. **(needs 015)** *Status: written; skips until 015; not yet run green.*
   - Iterations: `PGMAN_SCALEOUT_ITERATIONS` (default 5).
   - Start order: round-robin over {a-first, a-last, together}, shuffled with a logged seed.
   - Per iteration:
@@ -171,7 +171,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
     - b/c logs lack `initdb: starting` and contain `bootstrap: starting basebackup` with `node-a`;
     - node-a logs contain `embedded_nats.store_archived` with `"actual_layout":"standalone"`;
     - the longest write gap is under 30 s.
-- [ ] T021 [P] [US2] Write `TestExpandWithoutPriorReplicationHBA` (S7) in `tests/scaleout/expand_test.go`.
+- [X] T021 [P] [US2] Write `TestExpandWithoutPriorReplicationHBA` (S7) in `tests/scaleout/expand_test.go`.
   - Build golden with `withoutReplHBA(env)`.
   - Expand with the full HBA extras.
   - Always assert:
@@ -181,27 +181,27 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Create `internal/embedded/store_layout.go` with `StoreLayout`, `DetectStoreLayout` and `ArchiveIncompatibleStore`, exactly per contracts/jetstream-store-layout.md (rules 1-6).
-- [ ] T023 [US2] Wire store archiving in `internal/runtime/start.go` `bootEmbeddedNATS`, after `embedded.BuildOptions` and before `embedded.NewServer` (line ~791).
+- [X] T022 [US2] Create `internal/embedded/store_layout.go` with `StoreLayout`, `DetectStoreLayout` and `ArchiveIncompatibleStore`, exactly per contracts/jetstream-store-layout.md (rules 1-6).
+- [X] T023 [US2] Wire store archiving in `internal/runtime/start.go` `bootEmbeddedNATS`, after `embedded.BuildOptions` and before `embedded.NewServer` (line ~791).
   - Call `embedded.ArchiveIncompatibleStore(cc.JetStreamDir, routesEnabled, time.Now())`, reusing the existing `routesEnabled` variable.
   - On error, return `&StartupError{Code: ExitConfig, Err: fmt.Errorf("archive incompatible jetstream store in %q: %w", cc.JetStreamDir, err)}`.
   - On a non-empty `to`, emit `logger.Event("embedded_nats.store_archived", ...)` at Warn with the fields from contracts/observability.md.
   - Check whether `obs.Logger.Event` supports a level. If it does not, use `logger.Warn` with an `event` field, matching how other Warn-level events are emitted in `start.go` (for example `embedded_nats.replica_advisory`).
-- [ ] T024 [US2] Create `internal/runtime/managed_block.go` with `BlockAction`, `applyManagedBlock` and `applyManagedConf`, per contracts/managed-conf-blocks.md.
+- [X] T024 [US2] Create `internal/runtime/managed_block.go` with `BlockAction`, `applyManagedBlock` and `applyManagedConf`, per contracts/managed-conf-blocks.md.
   - The atomic write uses `os.CreateTemp(filepath.Dir(path), ".pgman-proxy-*")`, then `Chmod` to the original mode, `Sync`, `Close` and `os.Rename`.
   - `applyManagedConf` emits `postgres.managed_block_applied` per changed block, and returns `changed`.
-- [ ] T025 [US2] Rewire `postInitDBHook` in `internal/runtime/start.go` (line ~845).
-  - Replace both `appendLines` calls with `applyManagedConf(cfg, dataDir, "post_initdb", logger)`.
+- [X] T025 [US2] Rewire `postInitDBHook` in `internal/runtime/start.go` (line ~845).
+  - Replace both `appendLines` calls with `applyManagedConf(cfg, dataDir, "post_init", logger)`.
   - Keep returning nil when both lists are empty.
   - Delete `appendLines` (now unused).
   - Keep the two `"postgresql.conf"` / `"pg_hba.conf"` string literals, which the lcm-discipline-gate allow-lists.
-- [ ] T026 [US2] Add the boot-time apply in `internal/runtime/start.go`, right after the `ensureStandbySignalIfInitialized` call (line ~272).
+- [X] T026 [US2] Add the boot-time apply in `internal/runtime/start.go`, right after the `ensureStandbySignalIfInitialized` call (line ~272).
   - If `ok, err := pgdataComplete(cfg.Postgres.DataDir)` returns an error, fail with `ExitDeps`.
   - If `ok`, call `applyManagedConf(cfg, cfg.Postgres.DataDir, "boot", res.Logger)`.
   - If `changed`, `running, rerr := pg.IsRunning(ctx)`; when `running`, call `pg.Reload(ctx)`. Include `reloaded` in a follow-up Info log.
   - Any error → `&StartupError{Code: ExitDeps, Err: ...}`.
   - `pg` is the executor built at gate #6. Move this block after gate #6 if it is not already after it.
-- [ ] T027 [US2] Implement the boot-window campaign gate in `internal/runtime/campaign_gate.go`.
+- [X] T027 [US2] Implement the boot-window campaign gate in `internal/runtime/campaign_gate.go`.
   - Define `type campaigner interface{ ShouldCampaign() bool }` and `func campaignGate(m campaigner, dataDir string) bool`.
   - It handles a typed-nil `*manager.Manager` correctly: check `m == nil` via a helper that takes `*manager.Manager`, or pass an explicit nil interface.
   - Replace the closure at `start.go:174` with `func() bool { if mm := mgrRef.Load(); mm != nil { return mm.ShouldCampaign() }; return bootWindowCampaign(cfg.Postgres.DataDir, res.Logger) }`.
@@ -224,12 +224,12 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 **Independent Test**: `go test -tags=scaleout -run 'TestFreshCluster|TestDataNodeDown|TestSoloInThreeNodeConfig' ./tests/scaleout/...`
 
-- [ ] T030 [P] [US3] Write `TestSoloInThreeNodeConfig` (S4) in `tests/scaleout/solo_test.go`.
+- [X] T030 [P] [US3] Write `TestSoloInThreeNodeConfig` (S4) in `tests/scaleout/topology_test.go`.
   - Build golden, then start node-a alone with `threeEnv("a")`.
   - Assert that `wait(node-a)` returns 75 after 110-180 s.
   - Restart with `singleEnv("a")`, wait until Postgres answers queries (primary or standby, either is fine for reads), and assert that the golden sysid and row count are unchanged.
   - The golden was built by a WI-A build, so its `initdb` conf already has an empty sync-names value, and no S5b step is needed.
-- [ ] T031 [P] [US3] Write `TestFreshClusterBootstrapsOnce` (S2) in `tests/scaleout/fresh_test.go`.
+- [X] T031 [P] [US3] Write `TestFreshClusterBootstrapsOnce` (S2) in `tests/scaleout/topology_test.go`.
   - Start three empty nodes with the 3-node env, together.
   - Within 4 min, assert:
     - exactly one node's logs contain `initdb: starting`;
@@ -237,15 +237,15 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
     - the sysid is equal on all three;
     - `write` succeeds on the primary.
   - Call `requireUpstream015(t)` only for the exactly-once assertion; the rest runs on today's engine.
-- [ ] T032 [P] [US3] Write `TestDataNodeDownEmptyNodesWait` (S6) in `tests/scaleout/data_node_down_test.go`. **(needs 015)**
-  - Build golden for node-a but leave node-a stopped. Start b and c with the 3-node env.
-  - For 180 s, poll every 10 s and assert:
+- [ ] T032 [P] [US3] Write `TestDataNodeDownEmptyNodesWait` (S6) in `tests/scaleout/topology_test.go`. **(second half needs 015)** *Status: written; first half green 2026-10-15; second half skips until 015.*
+  - Build golden for node-a, then stop node-a. Start b and c with the 3-node env.
+  - For up to 180 s, poll every 10 s and assert:
     - no `initdb: starting` in b/c logs;
-    - `docker exec ls /var/lib/postgresql/data/PG_VERSION` fails on b and c;
+    - no `PG_VERSION` on b or c;
     - no node answers `write`.
-  - Assert b/c logs contain the deference-armed line pinned in contracts/upstream-015.md.
-  - Then start node-a with the 3-node env and reuse the S1 assertion helper.
-- [ ] T033 [US3] Extract the shared S1 assertion helper `assertExpanded(t, tp, goldenSysid, goldenRows)` into `tests/scaleout/expand_test.go`, and use it in T020 and T032.
+  - Assert b and c exit 75: the route mesh needs every peer (F15), so the empty nodes never reach the engine. The deference-armed line is not reachable here; see contracts/upstream-015.md.
+  - With 015: start node-a, restart b and c, and assert `assertExpanded`.
+- [X] T033 [US3] Extract the shared S1 assertion helper `assertExpanded(t, tp, goldenSysid, goldenRows)` into `tests/scaleout/expand_test.go`, and use it in T020 and T032.
 
 **Checkpoint**: the safety boundaries hold.
 
@@ -257,7 +257,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 **Independent Test**: `go test -tags=scaleout -run TestRollbackToSingle ./tests/scaleout/...`
 
-- [ ] T034 [US4] Write `TestRollbackToSingle` (S3) in `tests/scaleout/rollback_test.go`. **(needs 015)**
+- [ ] T034 [US4] Write `TestRollbackToSingle` (S3) in `tests/scaleout/topology_test.go`. **(needs 015)** *Status: written; skips until 015; not yet run green.*
   - Expand (reuse T020's setup with one iteration, a-last).
   - Stop b and c (`docker stop -t 30`), then stop node-a.
   - Start node-a with `singleEnv("a")`.
@@ -286,7 +286,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - Append it at the end, keeping the catalogue order stable for pgmctl.
   - Use the suggested-fix text from contracts/observability.md.
 - [ ] T037 [US5] Add the gauge `IdentityMismatch prometheus.Gauge` (`pgman_proxy_cluster_identity_mismatch`) to `internal/obs/metrics.go` and register it. Set it from the observability gauge loop in `startObservabilityGauges` (`internal/runtime`), reading `Manager.Status()`. **(needs 015)**
-- [ ] T038 [US5] Make sure the upstream `cluster.identity_mismatch` topic reaches logs and history. **(needs 015)**
+- [ ] T038 [US5] Make sure the upstream `identity_mismatch` topic reaches logs and history. **(needs 015)**
   - Check whether `internal/cluster` `SubscribeCoordinationEvents` subscribes by wildcard or by an explicit topic list.
   - Add the topic if it is a list.
   - Add a unit test in the cluster package's existing event-subscription test file.
@@ -298,13 +298,13 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T040 [P] Amend `specs/002-embedded-nats-cluster/spec.md` User Story 2 acceptance scenario 2 (FR-020).
+- [X] T040 [P] Amend `specs/002-embedded-nats-cluster/spec.md` User Story 2 acceptance scenario 2 (FR-020).
   - Replace the SIGHUP scale-out promise with the restart-based procedure.
   - Add a dated note citing 005 and the reason:
     - size 1 has no routes listener;
     - `declared_size` and `routes_listen` are startup-only;
     - a lone NATS server cannot become a cluster member (`raft.go:364`).
-- [ ] T041 [P] Write `docs/scale-out-1-to-3/runbook.md` (FR-019). Cover:
+- [ ] T041 [P] Write `docs/scale-out-1-to-3/runbook.md` (FR-019). *Status: drafted 2026-10-15; finalize after 015 (timings, deference log names).* Cover:
   - prerequisites;
   - the config delta table from `docs/scale-out-1-to-3/plan.md` §2;
   - the procedure (push config, start b and c, restart a);
@@ -315,7 +315,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - the one-time step for pre-005 single nodes (until 015);
   - a troubleshooting section: exit 75 after 120 s, deference logs, the identity-mismatch doctor check;
   - "config sanity", noting that `len(peers)` should equal `declared_size` (research R-001 note).
-- [ ] T042 [P] Extend the `CHANGELOG.md` Unreleased section (FR-021).
+- [ ] T042 [P] Extend the `CHANGELOG.md` Unreleased section (FR-021). *Status: Changed entries (store archiving, managed blocks, boot-window gate) written; Added entries wait for 015.*
   - **Added**: safe 1→3 expansion, the scaleout suite, the identity check and gauge.
   - **Changed**: stores are moved aside at boot (both directions); `hba_extras`/`conf_extras` are now managed blocks applied on every boot, legacy blocks are untouched, and reload happens when Postgres is running.
   - **Upgrade note**: list the new log events.

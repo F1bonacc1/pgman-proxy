@@ -112,7 +112,7 @@ A rename failure returns `StartupError{Code: ExitConfig}` with the path (FR-011)
 
 **Decision**: pgman-proxy consumes three things from pg-manager v0.7.0 (exact names pinned in [contracts/upstream-015.md](contracts/upstream-015.md) and adjusted when 015 lands):
 1. a `Status` field reporting the mismatch (local and leader identities);
-2. a coordination event topic `cluster.identity_mismatch`;
+2. a coordination event topic `identity_mismatch`;
 3. no new mutating API.
 
 pgman-proxy then exposes it in three places:

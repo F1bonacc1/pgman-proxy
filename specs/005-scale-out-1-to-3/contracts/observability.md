@@ -39,10 +39,10 @@ Emitted when a managed configuration block is inserted, updated or removed (FR-0
 | `block` | string | `postgres.hba_extras` or `postgres.conf_extras` |
 | `action` | string | `inserted`, `updated`, `removed` |
 | `lines` | int | Number of configured lines now in the block (0 when removed) |
-| `phase` | string | `post_initdb` or `boot` |
+| `phase` | string | `post_init` or `boot` |
 | `reloaded` | bool | `true` iff a configuration reload was issued because the postmaster was running |
 
-### `cluster.identity_mismatch` (Error, pass-through from pg-manager ≥ v0.7.0)
+### `identity_mismatch` (pass-through from pg-manager 015; subject `pgmanager.<cluster>.identity_mismatch`)
 
 Forwarded through the existing coordination-event subscription into logs and the history stream. pgman-proxy adds no fields. The upstream payload (local and leader system identifiers, leader node id) is documented in [upstream-015.md](upstream-015.md).
 

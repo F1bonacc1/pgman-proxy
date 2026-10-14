@@ -27,14 +27,14 @@
 | Use | Upstream symbol | Notes |
 |---|---|---|
 | Identity mismatch, doctor and gauge | `Manager.Status()` → *(proposed)* `Status.IdentityMismatch *IdentityMismatch{LocalSystemIdentifier, LeaderSystemIdentifier string; LeaderNodeID NodeID}` (nil when matching or unknown) | Read-only |
-| Identity mismatch, event | *(proposed)* topic `cluster.identity_mismatch`, payload = the struct above + `EventHeader` | Forwarded by `cluster.SubscribeCoordinationEvents` |
+| Identity mismatch, event | *(proposed)* topic `identity_mismatch` (single segment, like the existing exact topics: subject `pgmanager.<cluster>.identity_mismatch`), payload = the struct above + `EventHeader` | Forwarded by `cluster.SubscribeCoordinationEvents`; its topic list is explicit (`internal/cluster/events.go`), so T038 adds the name |
 | Complete-database predicate | *(proposed)* `pgmanager.PGDataComplete` | Optional; local fallback until exported |
 
 ## Log lines asserted by `tests/scaleout`
 
 | Scenario | Pattern *(proposed; pin when 015 lands)* |
 |---|---|
-| S6 | `campaign: empty-node deference armed` with `peers_with_data` or `peers_unreported` |
+| (none in pgman-proxy) | `campaign: empty-node deference armed` is not reachable in S6: with node-a down the empty nodes exit at the route-mesh gate before the engine starts. It is covered by pg-manager's own reconciler scenarios (WI-B tests (c)); pgman-proxy's boot-window deferral line is `campaign: boot-window deferral` |
 | S1, S6 (negative) | no `initdb: starting` on node-b or node-c (exists today, `reconciler/act.go:330`) |
 | S1 (positive) | `bootstrap: starting basebackup` with `source=node-a` on node-b and node-c (exists today, `reconciler/act.go`) |
 

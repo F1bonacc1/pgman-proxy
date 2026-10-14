@@ -38,3 +38,23 @@ This confirms research R-002 end to end.
 | `single-writes` | `BLOCKED (>10s, check wait_event=SyncRep)` | `primary after: 6s`, `synchronous_standby_names=[]`, `W_OK` |
 | `golden` | load hung without the rig's ALTER SYSTEM workaround | `rows=1000000` (the rig still applies its workaround, which is harmless here) |
 | `single-restart` | `primary after: never` (`missing_quorum_snapshot`) | `primary after: 7s`, `W_OK` |
+
+## 2026-10-15: US2/US3 pre-015 slice (WI-C1, WI-C2, WI-C3), pg-manager v0.6.1 sibling
+
+**Regression, `make integration`** (fresh 3-node compose cluster with the boot-window gate, store archiving and boot-time managed blocks): `ok ... tests/integration 118.175s`, exit 0.
+
+**Scaleout**, full suite: `PGMAN_SCALEOUT_IMAGE=pgman-proxy-scaleout:dev go test -count=1 -tags=scaleout -v ./tests/scaleout/`
+
+```text
+--- SKIP: TestExpandOneToThree (0.00s)                      needs pg-manager 015
+--- PASS: TestExpandWithoutPriorReplicationHBA (12.58s)     node-a assertions only (015 absent)
+--- PASS: TestSingleNodeFreshWritesAndRestart (18.42s)      first commit 86ms after primary; writable 11.2s after restart
+--- PASS: TestSingleNodeStaleSyncNamesUpgrade (33.69s)
+--- PASS: TestSoloInThreeNodeConfig (129.06s)               node-a exited 75 after 2m0s; golden data intact
+--- PASS: TestFreshClusterBootstrapsOnce (12.65s)           exactly one `initdb: starting`, on the primary
+--- SKIP: TestDataNodeDownEmptyNodesWait (134.85s)         first half passed (no initdb, no PGDATA, b/c exit 75); second half needs 015
+--- SKIP: TestRollbackToSingle (0.01s)                      needs pg-manager 015
+ok  	github.com/f1bonacc1/pgman-proxy/tests/scaleout	341.261s
+```
+
+**Gates**: lcm-discipline grep, scope-gate grep and `make grep-gates` are clean. `golangci-lint run ./...`: 0 issues.

@@ -120,13 +120,24 @@ files left behind.
    reaches `ready` state without contacting any external NATS endpoint and
    the same NATS-backed leader-election code path used in the 3-peer case is
    exercised end-to-end.
-2. **Given** a single-peer cluster, **When** the operator scales out by
-   starting a second peer with a configuration that lists the original peer
-   as a route, **Then** the two peers form a NATS cluster, agree on a single
-   leader, and data-plane traffic converges on that leader. Reconfiguring
-   the original peer to add the new sibling is performed by updating its
-   peer-routes configuration and sending SIGHUP per FR-014a — no
-   restart of the original peer is required.
+2. **Given** a single-peer cluster, **When** the operator scales out to
+   three peers by pushing the 3-peer configuration to all three hosts,
+   starting the two new peers and **restarting** the original peer,
+   **Then** the three peers form a NATS cluster, the original peer stays
+   the leader with its data, the new peers clone from it, and data-plane
+   traffic converges on that leader.
+
+   *Amended 2026-10-15 by feature 005 (`specs/005-scale-out-1-to-3/`).*
+   The original text promised a SIGHUP-only scale-out with no restart of
+   the original peer. The code cannot do that, and no test ever
+   exercised it:
+   - a size-1 peer opens no routes listener;
+   - `cluster.declared_size` and `cluster.routes_listen` are startup-only;
+   - a lone nats-server cannot become a JetStream cluster member at
+     runtime (`raft.go:364` requires at least two peers).
+
+   The restart-based procedure is in `docs/scale-out-1-to-3/runbook.md`
+   and is covered by `tests/scaleout` (S1).
 3. **Given** any single-peer or multi-peer configuration, **When** the
    operator inspects the running configuration via the control-plane
    `Status`/`Diagnose` operation, **Then** the embedded NATS server's

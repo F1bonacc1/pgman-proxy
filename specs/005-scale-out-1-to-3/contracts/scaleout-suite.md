@@ -46,7 +46,7 @@ make scaleout       # go test -trimpath -count=1 -timeout=40m -tags=scaleout ./t
 | S1 | yes | golden node-a (50 k rows) + empty b, c; 3-node config; start order per iteration ∈ {a-first, a-last, together} (round-robin, shuffled) | every node same sysid as golden; rows == golden on all; node-a primary; `streaming(node-a) == 2`; final `ssn` names node-b and node-c; no `initdb: starting` in b/c logs; `embedded_nats.store_archived` on node-a; longest write gap through node-a < 30 s | 5 × 4 min |
 | S2 | yes (for "exactly once") | three empty nodes, 3-node config | exactly one node logs `initdb: starting`; the others clone from it; one sysid; writes succeed | 4 min |
 | S3 | yes | after S1-style expansion: stop b, c; node-a single-node config | node-a primary and writable ≤ 30 s; `ssn = ''`; `embedded_nats.store_archived` (clustered) logged; rows intact | 3 min |
-| S6 | yes | golden volume for node-a but node-a **not started**; b, c empty, 3-node config | over 180 s: no `initdb: starting` on b/c; b/c PGDATA still empty; deference-armed line logged; no node accepts writes. Then start node-a → S1 assertions hold | 7 min |
+| S6 | partial | golden volume for node-a but node-a **stopped**; b, c empty, 3-node config | over 180 s: no `initdb: starting` on b/c, no `PG_VERSION` on b/c, no node accepts writes; b and c exit 75 (route mesh needs every peer, F15; this part runs today). **With 015**: start node-a, restart b and c (as a supervisor would) → S1 assertions hold | 8 min |
 
 `make integration` (unchanged) remains the regression test that a fresh
 3-node bootstrap from empty volumes works (FR-018). S2 adds the
