@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-14
 - **Baseline:** pgman-proxy `main` @ `62292d9`, pg-manager `v0.6.1` (`027fbca`), nats-server `v2.14.0`, PostgreSQL 17
-- **Status:** plan only; nothing implemented. Every "Verified" statement below was reproduced on a 3-container docker rig on 2026-10-14 (section 6 explains how to rerun it).
+- **Status:** pgman-proxy side (WI-A, WI-C1, WI-C2, WI-C3, WI-C6 harness, WI-C7 part 1) implemented on branch `005-scale-out-1-to-3` (see `specs/005-scale-out-1-to-3/`); WI-B (pg-manager 015), WI-C4, WI-C5 pending. Every "Verified" statement below was reproduced on a 3-container docker rig on 2026-10-14 (section 6 explains how to rerun it).
 - **Goal:** a single-node pgman-proxy can be expanded to a 3-node cluster by (1) pushing the 3-node config to all three hosts, (2) starting node-b and node-c, (3) restarting node-a. No manual Postgres steps, no data loss, write outage measured in seconds. Losing non-crucial KV state (fences, cooldown history, audit history) is accepted.
 
 ---

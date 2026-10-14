@@ -4,7 +4,8 @@
 # Throwaway verification tooling, not a test suite: it drives the
 # integration image (tests/integration/Dockerfile) with plain `docker run`
 # so a single node can be restarted into a 3-node config, which the
-# compose harness cannot do. Replace with tests/scaleout once WI-7 lands.
+# compose harness cannot do. Superseded for CI by tests/scaleout (make
+# scaleout); kept for manual runs at the 1 GB scale of the original evidence.
 #
 # Build the image first (from the directory that contains BOTH
 # pg-manager/ and pgman-proxy/):

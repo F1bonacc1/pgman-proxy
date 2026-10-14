@@ -319,8 +319,8 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - **Added**: safe 1→3 expansion, the scaleout suite, the identity check and gauge.
   - **Changed**: stores are moved aside at boot (both directions); `hba_extras`/`conf_extras` are now managed blocks applied on every boot, legacy blocks are untouched, and reload happens when Postgres is running.
   - **Upgrade note**: list the new log events.
-- [ ] T043 Move `docs/scale-out-1-to-3/plan.md` status line from "plan only" to "implemented in feature 005", and replace the rig README pointer in `docs/scale-out-1-to-3/rig/scenarios.sh` (header comment "Replace with tests/scaleout once WI-7 lands") with "superseded by tests/scaleout (make scaleout)".
-- [ ] T044 Run the gates locally:
+- [X] T043 Move `docs/scale-out-1-to-3/plan.md` status line from "plan only" to "implemented in feature 005", and replace the rig README pointer in `docs/scale-out-1-to-3/rig/scenarios.sh` (header comment "Replace with tests/scaleout once WI-7 lands") with "superseded by tests/scaleout (make scaleout)".
+- [X] T044 Run the gates locally:
   - `make lint`;
   - `make test`;
   - `make grep-gates`;
