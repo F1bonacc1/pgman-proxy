@@ -6,6 +6,7 @@
 #   lint          - go vet + staticcheck + golangci-lint
 #   integration   - go test ./tests/integration/...  (requires docker compose)
 #   smoke         - go test ./tests/smoke/...        (requires docker compose)
+#   scaleout      - go test ./tests/scaleout/...     (requires docker + sibling ../pg-manager)
 #   release       - goreleaser dry-run (use 'release-publish' to actually publish)
 #   clean         - remove build artefacts
 #
@@ -23,7 +24,7 @@ PKG         := github.com/f1bonacc1/pgman-proxy/cmd/pgman-proxy
 PGMCTL_BIN  ?= bin/pgmctl
 PGMCTL_PKG  := github.com/f1bonacc1/pgman-proxy/cmd/pgmctl
 
-.PHONY: all build pgmctl pgmctl-docs test lint integration smoke release pgmctl-release clean grep-gates
+.PHONY: all build pgmctl pgmctl-docs test lint integration smoke scaleout release pgmctl-release clean grep-gates
 
 all: lint test build pgmctl grep-gates
 
@@ -69,6 +70,14 @@ integration:
 
 smoke:
 	$(GO) test $(GOFLAGS) -count=1 -timeout=10m -tags=smoke ./tests/smoke/...
+
+# scaleout: topology-change scenarios (1→3 expansion, rollback, single
+# node) driven with the docker CLI against the integration image, which
+# builds from the sibling ../pg-manager checkout. Scenarios that need
+# pg-manager 015 skip unless go.mod pins it or
+# PGMAN_SCALEOUT_UPSTREAM_015=1 (specs/005-scale-out-1-to-3/contracts/scaleout-suite.md).
+scaleout:
+	$(GO) test $(GOFLAGS) -count=1 -timeout=40m -tags=scaleout ./tests/scaleout/...
 
 release:
 	goreleaser release --snapshot --clean

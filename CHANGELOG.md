@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (single node): commits no longer hang, and a restart no longer leaves the node read-only
+
+A single-peer pgman-proxy handed pg-manager a `QuorumSync` policy whose
+pool was the node itself. Two failures followed:
+
+- **Every commit hung.** `initdb` rendered
+  `synchronous_standby_names = 'ANY 1 ("node-a")'`, so commits waited
+  in `SyncRep` forever.
+- **A restarted node never became writable.** After any restart the
+  node came back as a standby, as it does on every boot with PGDATA.
+  Promotion was then refused with `missing_quorum_snapshot` forever,
+  because a one-peer pool never publishes that snapshot.
+
+Single-peer configs now run pg-manager's `AsyncOnly` policy, derived
+from `len(peers) == 1` with no new config key. Configs with two or more
+peers are unchanged. The startup line `manager started` carries a new
+`replication_policy` field (`async` or `quorum(min_sync=N)`). Both
+failures were reproduced and verified fixed on a docker rig
+(`docs/scale-out-1-to-3/plan.md` F1-F3, `tests/scaleout` S5).
+
+**Upgrade note: single nodes initialized by an earlier release.** Their
+`postgresql.conf` still holds the self-referential value from
+`initdb`, and the engine does not clear it yet (pg-manager 015). Writes
+on such a node keep hanging until you run this once on it as a
+superuser:
+
+```sql
+ALTER SYSTEM SET synchronous_standby_names = '';
+SELECT pg_reload_conf();
+```
+
+If the node is stuck read-only after a restart on an earlier release,
+upgrade first. It then promotes on its own, and you run the two
+statements above. Multi-peer clusters need no action.
+
 ### Fixed (boot): one unanswered JetStream reply no longer kills a peer's cold start
 
 `PreCreateClusterKV` handed its 60 s context straight to every

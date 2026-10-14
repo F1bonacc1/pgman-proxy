@@ -490,7 +490,8 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	}
 
 	res.Logger.Info("manager started",
-		pgmanager.Field{Key: "singleton_claim_attempts", Value: 1})
+		pgmanager.Field{Key: "singleton_claim_attempts", Value: 1},
+		pgmanager.Field{Key: "replication_policy", Value: policyLabel(mgrCfg.Policy.Replication)})
 	res.Health.SetManagerReady(true)
 	return res, nil
 }
@@ -652,12 +653,9 @@ func policyFromConfig(cfg config.Config) pgmanager.Policy {
 		PromoteTimeout:   cfg.Policy.PromoteTimeout,
 		LivenessInterval: cfg.Policy.LivenessInterval,
 		LivenessFailures: cfg.Policy.LivenessFailures,
-		Replication: pgmanager.QuorumSync{
-			MinSync: cfg.Policy.QuorumSync.MinSync,
-			Pool:    nodeIDs(cfg.Peers),
-		},
-		AutoDemote:      autoDemotePolicy(cfg.Policy.AutoDemote),
-		AutoRebootstrap: autoRebootstrapPolicy(cfg.Policy.AutoRebootstrap),
+		Replication:      replicationPolicy(cfg),
+		AutoDemote:       autoDemotePolicy(cfg.Policy.AutoDemote),
+		AutoRebootstrap:  autoRebootstrapPolicy(cfg.Policy.AutoRebootstrap),
 	}
 }
 
