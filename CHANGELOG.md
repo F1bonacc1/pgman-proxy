@@ -42,6 +42,75 @@ If the node is stuck read-only after a restart on an earlier release,
 upgrade first. It then promotes on its own, and you run the two
 statements above. Multi-peer clusters need no action.
 
+### Changed (boot): a JetStream store written in the other mode is moved aside
+
+A store created by a single node (standalone) and reused by a clustered
+node, or the reverse on rollback, gave undefined results: in a
+reproduction the clustered server adopted the old history stream but
+started a fresh KV bucket. At boot, before the embedded server starts,
+pgman-proxy now compares the layout of `<cluster.jetstream_dir>/jetstream`
+with the mode it is about to run in. It decides "clustered" exactly as
+the server does: routes enabled and `declared_size > 1`. On a mismatch
+it renames the store to `jetstream.<standalone|clustered>-<UTC timestamp>`.
+
+- The configured directory itself is never renamed, since it is often
+  a mount point.
+- Nothing is deleted. The archived store keeps the old KV state and
+  history for forensics; delete it once the cluster is verified.
+- A Warn-level `embedded_nats.store_archived` event names both paths.
+- If the rename fails, startup fails (exit `ExitConfig`).
+
+### Changed (postgres): `hba_extras` / `conf_extras` are managed blocks applied on every boot
+
+These lines used to be appended once, by the post-initialization hook
+on the node that created the database. A single node deployed without
+a replication rule therefore never gained one. Its new peers could not
+clone it, even after the rule was added to the config.
+
+The lines are now written as marked blocks:
+
+```text
+# BEGIN pgman-proxy managed: postgres.hba_extras
+...
+# END pgman-proxy managed: postgres.hba_extras
+```
+
+How the blocks behave:
+- **When**: they are written when the database is created, and again on
+  every boot of a node whose database exists.
+- **Edits**: a block is rewritten in place, and removed when the list is
+  emptied. Everything outside the markers is untouched.
+- **Reload**: when Postgres is already running, pgman-proxy reloads it
+  through pg-manager's executor.
+- **Events**: changes emit `postgres.managed_block_applied` (`file`,
+  `block`, `action`, `lines`, `phase`, `reloaded`).
+- **Failures**: malformed markers or a failed write or reload fail
+  startup (`ExitDeps`).
+- **Legacy**: blocks appended by earlier releases
+  (`# pgman-proxy: postgres.hba_extras`) are left as they are. Duplicate
+  HBA lines are harmless, and in `postgresql.conf` the later managed
+  block wins.
+
+### Changed (leadership): an empty node does not campaign during the boot window
+
+Until `manager.New` returns, pg-manager's campaign gate answers "yes"
+for every node. That let a node with an empty data directory win the
+leadership lease while it booted. It then initialized a new, empty
+database, even though another peer held the real data.
+
+Before the Manager exists, pgman-proxy now lets only a node with a
+complete data directory campaign. Complete means `PG_VERSION` and
+`global/pg_control` are both present; a clone interrupted mid-copy has
+the first but not the second. A node that is held back logs
+`campaign: boot-window deferral` with a `reason`. After the Manager
+exists, its `ShouldCampaign` decides as before. A fresh cluster of
+empty nodes still bootstraps, because the gate is consulted again on
+every lease tick once the Manager is up.
+
+On its own this narrows the 1→3 expansion race but does not close it.
+That needs pg-manager 015's empty-node deference: see
+`docs/scale-out-1-to-3/runbook.md`.
+
 ### Fixed (boot): one unanswered JetStream reply no longer kills a peer's cold start
 
 `PreCreateClusterKV` handed its 60 s context straight to every

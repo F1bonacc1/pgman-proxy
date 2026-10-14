@@ -83,3 +83,58 @@ func TestPGDATACompleteUnreadable(t *testing.T) {
 		t.Fatal("an unreadable data dir must not report complete")
 	}
 }
+
+type fakeCampaigner bool
+
+func (f fakeCampaigner) ShouldCampaign() bool { return bool(f) }
+
+// TestCampaignGate pins WI-C1 (spec 005 FR-006, F12): before
+// manager.New publishes the Manager, pg-manager's nil-receiver
+// ShouldCampaign returns true, so an empty node used to campaign during
+// boot. The boot-window rule lets only a node with a complete database
+// campaign; once the Manager exists its decision is final.
+func TestCampaignGate(t *testing.T) {
+	complete := mkPGDATA(t, true, true)
+	partial := mkPGDATA(t, true, false)
+
+	cases := []struct {
+		name string
+		m    campaigner
+		dir  string
+		want bool
+	}{
+		{"boot window, complete PGDATA", nil, complete, true},
+		{"boot window, empty PGDATA", nil, t.TempDir(), false},
+		{"boot window, interrupted clone", nil, partial, false},
+		{"boot window, data dir unset", nil, "", false},
+		{"manager says campaign", fakeCampaigner(true), t.TempDir(), true},
+		{"manager says defer despite PGDATA", fakeCampaigner(false), complete, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := newBootWindowGate(c.dir, nil)
+			if got := campaignGate(c.m, g.allow); got != c.want {
+				t.Fatalf("campaignGate = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestBootWindowGateUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	dir := mkPGDATA(t, true, true)
+	global := filepath.Join(dir, "global")
+	if err := os.Chmod(global, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(global, 0o700) })
+	g := newBootWindowGate(dir, nil)
+	if g.allow() {
+		t.Fatal("an unreadable data dir must not campaign (fail-closed)")
+	}
+	if got := g.lastReason(); got != "pgdata_unreadable" {
+		t.Fatalf("reason = %q, want pgdata_unreadable", got)
+	}
+}
