@@ -109,7 +109,10 @@ default `GITHUB_TOKEN` cannot read other private repos.
 The proxy hop adds <1 ms p99 to a `SELECT 1` round-trip vs. direct PG
 on the same host. The benchmark lives at
 `tests/integration/perf_test.go` and runs as part of `make integration`.
-It records p50 / p99 / sample count via `t.Logf`.
+It records p50 / p99 / sample count via `t.Logf`. The test times the
+full client round-trip through the proxy and has no direct-PG leg, so
+the recorded p99 is an upper bound on the hop overhead, not the
+overhead itself.
 
 **How to record a baseline:**
 
@@ -124,7 +127,7 @@ deviation > 10% from the recorded baseline as a regression.
 
 | Date       | Hardware            | p50    | p99    | Notes |
 |------------|---------------------|--------|--------|-------|
-| 2026-05-09 | _baseline pending_  | _TBD_  | _TBD_  | Recorded after Phase 3 cluster-bootstrap fix lands. |
+| 2026-10-16 | AMD Ryzen 9 5900HX (16 threads), linux/amd64, docker compose 3-node harness | 86.2 µs | 161.7 µs | `SELECT 1` via node-a, 1000 samples after 50 warm-up, single run on `v0.3.0` (`72ff4f5`). |
 
 ## pgmctl — operator CLI
 
