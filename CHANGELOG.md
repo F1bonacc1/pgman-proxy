@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (scale-out): expanding a single node to three keeps its data
+
+A single node can now be expanded to three nodes by pushing the 3-node
+config, starting two empty nodes and restarting node-a. node-a keeps
+its database and stays primary; the new nodes clone it. Before, the
+same steps ended with a new, empty database as primary in 3 of 3 rig
+runs, and clients were routed to it. The procedure, what is lost (the
+coordination store's fences, cooldowns and history) and the rollback
+are in `docs/scale-out-1-to-3/runbook.md`. It needs pg-manager v0.7.0,
+which this release pins.
+
+- **Write outage**: node-a restarts once. 7.6 to 10.8 s (median about
+  8.8 s) across 20 test expansions with the default 5 s lease.
+- **Identity check**: `pgmctl doctor` gains `cluster.identity`, which
+  fails when a standby follows a primary with a different database
+  identity. The new gauge `pgman_proxy_cluster_identity_mismatch` is 1
+  while that holds. Neither takes any action: do not wipe either node
+  before you know which one holds the acknowledged writes.
+- **Events**: pg-manager's `empty_peer.*` and `identity.*` families
+  (deference armed and released, initdb refused, sync set changed,
+  identity mismatch and cleared) are logged, counted and kept in
+  `pgmctl history`.
+- **Tests**: `make scaleout` runs the expansion (S1, three start
+  orders), rollback, single node, fresh-cluster bootstrap and
+  data-node-down scenarios against real containers. A nightly job runs
+  it.
+
 ### Fixed (single node): commits no longer hang, and a restart no longer leaves the node read-only
 
 A single-peer pgman-proxy handed pg-manager a `QuorumSync` policy whose

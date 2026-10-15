@@ -94,3 +94,31 @@ Across both runs, S1 passed 15/15 expansions in all three start orders. SC-002 a
 **Regression, `make integration` against the 015 sibling**: `ok ... tests/integration 142.090s`, exit 0. The suite runs a fresh 3-node compose cluster, failover, switchover, fencing and upgrade tests. A fresh cluster now waits for every peer's empty report before bootstrapping, and the suite stays well inside its budget (118 s before 015).
 
 **Plan section 4 definition of done, status against the 015 sibling**: rig `race` and `a-wins` print PASS; `make scaleout` is green (S1 15/15); `make integration` is green and unchanged. Remaining: the runbook merges with the PR, and the same runs repeat on the tagged pg-manager release (T028).
+
+## 2026-10-16: rerun on pg-manager 4204520 (release candidate for v0.7.0)
+
+Since the runs above, pg-manager gained:
+- the v0.8.0 gate move (65a16b0);
+- a guard that refuses a switchover to a target with an empty or partial data directory (f8083c6);
+- example-harness fixes (4204520).
+
+pgman-proxy gained the `cluster.identity` doctor check and gauge, and adopted `ClassifyDataDir`; S1 now asserts the gauge is 0 on every node (06a45b3). Image rebuilt from the sibling at 4204520.
+
+- **Gates**: `make test lint grep-gates`, exit 0 (golangci-lint 0 issues).
+- **`make integration`**: `ok ... tests/integration 144.984s`. This includes the `lcm_switchover` tests the new guard could affect.
+- **`make scaleout`** with `PGMAN_SCALEOUT_UPSTREAM_015=1`: green twice. The second run is verbose, with no skips:
+
+```text
+start-order seed 1792103394713490732
+--- PASS: TestExpandOneToThree (120.72s)          5/5; gaps 8.8, 9.5, 8.4, 10.4, 10.8 s (18-25 commits each)
+--- PASS: TestExpandWithoutPriorReplicationHBA (20.24s)
+--- PASS: TestSingleNodeFreshWritesAndRestart (16.15s)   first commit 82ms after primary; writable 6.8s after restart
+--- PASS: TestSingleNodeStaleSyncNamesUpgrade (11.90s)   writable 4.7s after restart with no manual step
+--- PASS: TestSoloInThreeNodeConfig (129.02s)            node-a exited 75 after 2m0s
+--- PASS: TestFreshClusterBootstrapsOnce (12.65s)
+--- PASS: TestDataNodeDownEmptyNodesWait (150.67s)
+--- PASS: TestRollbackToSingle (40.46s)                  writable 4.7s after rollback restart
+ok  	github.com/f1bonacc1/pgman-proxy/tests/scaleout	521.663s
+```
+
+**S1 across all runs on the 015 code**: 20/20 expansions, all three start orders. Write outage through node-a 7.6-10.8 s, median about 8.8 s, against the 30 s budget (SC-003). Remaining for T028: repeat these runs on the published v0.7.0 tag once `go.mod` pins it.

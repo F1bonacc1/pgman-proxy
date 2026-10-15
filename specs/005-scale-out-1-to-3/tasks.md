@@ -304,7 +304,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
     - size 1 has no routes listener;
     - `declared_size` and `routes_listen` are startup-only;
     - a lone NATS server cannot become a cluster member (`raft.go:364`).
-- [ ] T041 [P] Write `docs/scale-out-1-to-3/runbook.md` (FR-019). *Status: drafted 2026-10-15; finalize after 015 (timings, deference log names).* Cover:
+- [X] T041 [P] Write `docs/scale-out-1-to-3/runbook.md` (FR-019). *Status: finalized 2026-10-16 against pg-manager 4204520 (v0.7.0 naming, 015 log lines, outage over 20 expansions).* Cover:
   - prerequisites;
   - the config delta table from `docs/scale-out-1-to-3/plan.md` §2;
   - the procedure (push config, start b and c, restart a);
@@ -315,7 +315,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - the one-time step for pre-005 single nodes (until 015);
   - a troubleshooting section: exit 75 after 120 s, deference logs, the identity-mismatch doctor check;
   - "config sanity", noting that `len(peers)` should equal `declared_size` (research R-001 note).
-- [ ] T042 [P] Extend the `CHANGELOG.md` Unreleased section (FR-021). *Status: Changed entries (store archiving, managed blocks, boot-window gate) written; Added entries wait for 015.*
+- [ ] T042 [P] Extend the `CHANGELOG.md` Unreleased section (FR-021). *Status: Added (scale-out) and Changed entries written 2026-10-16; the pg-manager v0.7.0 pin entry and the single-node upgrade note land with the T028 bump.*
   - **Added**: safe 1→3 expansion, the scaleout suite, the identity check and gauge.
   - **Changed**: stores are moved aside at boot (both directions); `hba_extras`/`conf_extras` are now managed blocks applied on every boot, legacy blocks are untouched, and reload happens when Postgres is running.
   - **Upgrade note**: list the new log events.
@@ -328,7 +328,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - the scope-gate grep from `.github/workflows/scope-gate.yml`.
 
   Fix any hit. In particular, no lowercase engine command names in new non-comment code.
-- [ ] T045 Draft the PR description(s) per plan.md "Delivery slices".
+- [ ] T045 Draft the PR description(s) per plan.md "Delivery slices". *Status: drafted 2026-10-16 (one PR, commit per slice; follow-up issue text included); finalize with the T028 bump commit.*
   - Include the Constitution IV flag for WI-C3, with a link to a newly filed pg-manager follow-up issue ("own HBA/conf extras rendering"). Draft its text in the PR; filing it is a user action.
   - Include the R-013 version-collision note.
   - Include the rig before/after outputs.

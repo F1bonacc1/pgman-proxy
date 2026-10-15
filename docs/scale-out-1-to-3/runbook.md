@@ -1,14 +1,14 @@
 # Runbook: expand a single pgman-proxy node to three
 
-**Applies to**: pgman-proxy with feature 005. The safe expansion also requires pg-manager 015 (empty-peer safety); check `go list -m github.com/f1bonacc1/pg-manager` or the release notes.
+**Applies to**: pgman-proxy with feature 005. The safe expansion also requires pg-manager v0.7.0 or later (milestone 015, empty-peer safety); check `go list -m github.com/f1bonacc1/pg-manager` or the release notes.
 **Background**: [plan.md](plan.md) (verified facts F1-F16), [specs/005-scale-out-1-to-3/spec.md](../../specs/005-scale-out-1-to-3/spec.md).
 
-> **Do not expand on a release without pg-manager 015.** On earlier releases an empty new node can win the leadership race and initialize a **new, empty database**, and clients are routed to it (F4, F5). Your data stays on node-a, but the cluster no longer serves it.
+> **Do not expand on a release without pg-manager v0.7.0.** On earlier releases an empty new node can win the leadership race and initialize a **new, empty database**, and clients are routed to it (F4, F5). Your data stays on node-a, but the cluster no longer serves it.
 
 ## What changes, what is lost
 
 - **Changes**: node-a keeps its database and stays primary. node-b and node-c clone it.
-- **Restarts**: node-a restarts once. The write outage is measured in seconds: 7.6 to 10.7 s (median about 8.3 s) across 15 test expansions on a workstation with the default 5 s lease. The CI budget is 30 s.
+- **Restarts**: node-a restarts once. The write outage is measured in seconds: 7.6 to 10.8 s (median about 8.8 s) across 20 test expansions on a workstation with the default 5 s lease. The CI budget is 30 s.
 - **Lost**: everything in node-a's embedded coordination store (JetStream):
   - divergence and identity fences;
   - auto-demote and auto-rebootstrap cooldown history;
@@ -23,7 +23,7 @@
    - the cluster routes port (default 6222);
    - PostgreSQL (5432 or your `topology.port`);
    - the control plane, if you use it.
-3. **Single node initialized before feature 005**: run the one-time step from the CHANGELOG first (`ALTER SYSTEM SET synchronous_standby_names = ''; SELECT pg_reload_conf();`). With pg-manager 015 this is no longer needed.
+3. **Single node initialized before feature 005**: run the one-time step from the CHANGELOG first (`ALTER SYSTEM SET synchronous_standby_names = ''; SELECT pg_reload_conf();`). With pg-manager v0.7.0 this is no longer needed.
 
 ## Configuration: one node → three
 
@@ -67,11 +67,15 @@ Start order between steps 2 and 3 does not matter for correctness. Starting node
 
 ### What you will see in the logs
 
-- **node-a**: `embedded_nats.store_archived` (Warn; `actual_layout=standalone`, `from`, `to`), then `postgres.managed_block_applied` when the HBA block changed, then promotion.
+- **node-a**:
+  - `embedded_nats.store_archived` (Warn; `actual_layout=standalone`, `from`, `to`);
+  - `postgres.managed_block_applied` when the HBA block changed;
+  - promotion;
+  - `replication: empty peers excluded from synchronous set` (`excluded=[node-b node-c]`, `join_window=true`), logged again with `excluded=[]` once both stream.
 - **node-b and node-c**:
   - `campaign: boot-window deferral reason=pgdata_empty` while their engine starts;
-  - with pg-manager 015, its empty-node deference lines;
-  - then `bootstrap: starting basebackup source=node-a`.
+  - `campaign: empty-node deference armed`;
+  - then `bootstrap: starting basebackup source=node-a`. One `bootstrap: basebackup transient error; retrying` with `the standby was promoted during online backup` is expected when the clone starts before node-a's promotion completes.
 - **node-b and node-c must never log `initdb: starting`.** If one does, stop the cluster and see Troubleshooting.
 
 ## Verify
@@ -80,13 +84,13 @@ Check each of the following:
 
 ```bash
 pgmctl status            # node-a primary, node-b and node-c streaming standbys
-pgmctl doctor            # all checks pass, including cluster.identity (pg-manager 015)
+pgmctl doctor            # all checks pass, including cluster.identity (pg-manager v0.7.0)
 ```
 
 - **Metrics**, on every node:
   - `pgman_proxy_embedded_nats_replicas_factor` = 3;
   - `pgman_proxy_embedded_nats_routes_meshed` = 2;
-  - `pgman_proxy_cluster_identity_mismatch` = 0 (pg-manager 015).
+  - `pgman_proxy_cluster_identity_mismatch` = 0 (pg-manager v0.7.0).
 - **Database identity**: on every node,
 
   ```sql
@@ -107,7 +111,7 @@ What happens next:
 - node-a moves the clustered store aside (`jetstream.clustered-<ts>`);
 - it runs asynchronous replication (single peer);
 - it becomes writable within 30 s;
-- with pg-manager 015 the stale sync value is cleared automatically. Without it, run the one-time `ALTER SYSTEM` step.
+- with pg-manager v0.7.0 the stale sync value is cleared automatically. Without it, run the one-time `ALTER SYSTEM` step.
 
 node-b and node-c can then be wiped and reused.
 
@@ -116,7 +120,7 @@ node-b and node-c can then be wiped and reused.
 | Symptom | Meaning | Action |
 |---|---|---|
 | A node exits 75 after about 120 s | The route mesh did not form: not every peer was reachable | Check routes port reachability, `cluster.route_peers`, credentials and TLS on all three hosts |
-| node-b or node-c logged `initdb: starting` | A new database was created (pre-015 engine, or a gate failure) | Stop all three. Do not let clients write. node-a's data is intact. Roll back (above), then retry on a pg-manager 015 release |
+| node-b or node-c logged `initdb: starting` | A new database was created (engine older than v0.7.0, or a gate failure) | Stop all three. Do not let clients write. node-a's data is intact. Roll back (above), then retry on pg-manager v0.7.0 or later |
 | `pgmctl doctor` fails `cluster.identity` | A standby follows a primary with a different database identity | Do not wipe either node before identifying which one holds the acknowledged writes |
 | node-a refuses to start: `archive incompatible jetstream store` | The store could not be moved aside (permissions or a read-only mount) | Fix permissions on `cluster.jetstream_dir`; the directory itself is never renamed, only `jetstream/` inside it |
 | node-a refuses to start: `managed postgres config blocks` | A managed block could not be written, or the markers are malformed | Fix the file. Each BEGIN needs exactly one matching END |
