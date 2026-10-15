@@ -122,3 +122,28 @@ ok  	github.com/f1bonacc1/pgman-proxy/tests/scaleout	521.663s
 ```
 
 **S1 across all runs on the 015 code**: 20/20 expansions, all three start orders. Write outage through node-a 7.6-10.8 s, median about 8.8 s, against the 30 s budget (SC-003). Remaining for T028: repeat these runs on the published v0.7.0 tag once `go.mod` pins it.
+
+## 2026-10-16: on the published tag (go.mod pins pg-manager v0.7.0, T028)
+
+`go.mod` pins `github.com/f1bonacc1/pg-manager v0.7.0`. MVS also raised `golang.org/x/text` to v0.41.0 (GO-2026-6629) and `golang.org/x/sync` to v0.22.0. The local `go.work` is gone, and the sibling checkout is at `main` = v0.7.0, so the test image builds from the tag. `PGMAN_SCALEOUT_UPSTREAM_015` was **not** set: the suite detected v0.7.0 from `go.mod`.
+
+- **Gates**: `make test lint grep-gates`, exit 0.
+- **`make integration`**: `ok ... tests/integration 118.999s`.
+- **`make scaleout`** (verbose, no skips):
+
+```text
+start-order seed 1792105101994306356
+--- PASS: TestExpandOneToThree (125.75s)          5/5; gaps 8.5, 8.4, 10.4, 14.1, 9.6 s (18-30 commits each)
+--- PASS: TestExpandWithoutPriorReplicationHBA (24.78s)
+--- PASS: TestSingleNodeFreshWritesAndRestart (11.80s)   first commit 82ms after primary; writable 4.7s after restart
+--- PASS: TestSingleNodeStaleSyncNamesUpgrade (13.99s)   writable 4.7s after restart with no manual step
+--- PASS: TestSoloInThreeNodeConfig (131.14s)            node-a exited 75 after 2m0s
+--- PASS: TestFreshClusterBootstrapsOnce (15.01s)
+--- PASS: TestDataNodeDownEmptyNodesWait (153.53s)
+--- PASS: TestRollbackToSingle (39.90s)                  writable 6.9s after rollback restart
+ok  	github.com/f1bonacc1/pgman-proxy/tests/scaleout	516.843s
+```
+
+**S1 across all runs on the 015 code**: 25/25. Write outage 7.6-14.1 s, median about 8.8 s, against the 30 s budget (SC-003). The 14.1 s gap (iteration 4, a-last) is the first above 10.8 s. Its cause is not investigated: the budget holds, but treat the upper end as noisy.
+
+- **`govulncheck`**: no module findings. Nine standard-library advisories in go1.26.7 are fixed in go1.26.9 (GO-2026-6603, 6605, 6607, 6608, 6610, 6611, 6612, 6613, 6617), and CI installs Go from the `go.mod` directive. Hence the toolchain bump that follows.

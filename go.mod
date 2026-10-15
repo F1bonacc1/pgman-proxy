@@ -22,9 +22,9 @@ go 1.26.7
 // provenance attestation.
 //
 // COUPLED BUMP: pg-manager's own go.mod pins github.com/jackc/pgx/v5,
-// and MVS raises this module's pgx to match. pg-manager main after
-// v0.6.1 (and so milestone 015) requires pgx v5.11.0 and nats.go
-// v1.53.1, which is what the require block below carries. A pg-manager
+// and MVS raises this module's pgx to match. pg-manager v0.7.0 requires
+// pgx v5.11.0, nats.go v1.53.1 and golang.org/x/text v0.41.0
+// (GO-2026-6629), which is what the require blocks below carry. A pg-manager
 // bump that moves pgx must raise it here in the SAME commit, or the
 // integration image fails to build with "missing go.sum entry for
 // ... pgx/v5 (imported by
@@ -32,7 +32,7 @@ go 1.26.7
 // a `replace` onto the sibling checkout (tests/integration/Dockerfile),
 // so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
-	github.com/f1bonacc1/pg-manager v0.6.1
+	github.com/f1bonacc1/pg-manager v0.7.0
 	github.com/fatih/color v1.19.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-isatty v0.0.22
@@ -69,9 +69,9 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 )

@@ -18,8 +18,8 @@ coordination store's fences, cooldowns and history) and the rollback
 are in `docs/scale-out-1-to-3/runbook.md`. It needs pg-manager v0.7.0,
 which this release pins.
 
-- **Write outage**: node-a restarts once. 7.6 to 10.8 s (median about
-  8.8 s) across 20 test expansions with the default 5 s lease.
+- **Write outage**: node-a restarts once. 7.6 to 14.1 s (median about
+  8.8 s) across 25 test expansions with the default 5 s lease.
 - **Identity check**: `pgmctl doctor` gains `cluster.identity`, which
   fails when a standby follows a primary with a different database
   identity. The new gauge `pgman_proxy_cluster_identity_mismatch` is 1
@@ -33,6 +33,32 @@ which this release pins.
   orders), rollback, single node, fresh-cluster bootstrap and
   data-node-down scenarios against real containers. A nightly job runs
   it.
+
+### Changed (deps): pg-manager pin bumped to v0.7.0
+
+`go.mod` now requires `github.com/f1bonacc1/pg-manager v0.7.0`
+(previously v0.6.1), milestone 015 (empty-peer safety). It carries the
+engine half of the scale-out entry above:
+- empty nodes defer while a peer holds data or has not reported;
+- data-state records;
+- empty peers are left out of the sync set, with a join window in
+  which only the data holder may promote;
+- the `''` render that clears stale sync values;
+- a clone retry when the source is promoted mid-copy;
+- `Status.IdentityMismatch`.
+
+`Manager.Switchover` now refuses a target that reported an empty or
+partial data directory. A brand-new cluster bootstraps once every
+configured peer has reported.
+
+The major-upgrade gate moved to v0.8.0. The feature-004 sentinel is
+re-pinned to `upgrade: major strategies wired but gated on v0.8.0`.
+
+Dependencies:
+- pgx v5.11.0 and nats.go v1.53.1 (coupled bump, see the `go.mod`
+  comment);
+- **security**: `golang.org/x/text` v0.41.0 for GO-2026-6629, a panic
+  in `x/text/secure/precis` reachable through pgx SCRAM authentication.
 
 ### Fixed (single node): commits no longer hang, and a restart no longer leaves the node read-only
 
@@ -56,18 +82,11 @@ failures were reproduced and verified fixed on a docker rig
 
 **Upgrade note: single nodes initialized by an earlier release.** Their
 `postgresql.conf` still holds the self-referential value from
-`initdb`, and the engine does not clear it yet (pg-manager 015). Writes
-on such a node keep hanging until you run this once on it as a
-superuser:
-
-```sql
-ALTER SYSTEM SET synchronous_standby_names = '';
-SELECT pg_reload_conf();
-```
-
-If the node is stuck read-only after a restart on an earlier release,
-upgrade first. It then promotes on its own, and you run the two
-statements above. Multi-peer clusters need no action.
+`initdb`. No manual step is needed: pg-manager v0.7.0, which this
+release pins, applies `''` on the node's first render as primary. A
+node stuck read-only after a restart on an earlier release promotes on
+its own after the upgrade and becomes writable (`tests/scaleout` S5b:
+writable 4.7 s after restart). Multi-peer clusters need no action.
 
 ### Changed (boot): a JetStream store written in the other mode is moved aside
 
@@ -135,7 +154,7 @@ empty nodes still bootstraps, because the gate is consulted again on
 every lease tick once the Manager is up.
 
 On its own this narrows the 1→3 expansion race but does not close it.
-That needs pg-manager 015's empty-node deference: see
+pg-manager v0.7.0's empty-node deference closes it: see
 `docs/scale-out-1-to-3/runbook.md`.
 
 ### Fixed (boot): one unanswered JetStream reply no longer kills a peer's cold start

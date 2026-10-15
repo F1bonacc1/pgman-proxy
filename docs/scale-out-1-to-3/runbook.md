@@ -8,7 +8,7 @@
 ## What changes, what is lost
 
 - **Changes**: node-a keeps its database and stays primary. node-b and node-c clone it.
-- **Restarts**: node-a restarts once. The write outage is measured in seconds: 7.6 to 10.8 s (median about 8.8 s) across 20 test expansions on a workstation with the default 5 s lease. The CI budget is 30 s.
+- **Restarts**: node-a restarts once. The write outage is measured in seconds: 7.6 to 14.1 s (median about 8.8 s) across 25 test expansions on a workstation with the default 5 s lease. The CI budget is 30 s.
 - **Lost**: everything in node-a's embedded coordination store (JetStream):
   - divergence and identity fences;
   - auto-demote and auto-rebootstrap cooldown history;
@@ -23,7 +23,7 @@
    - the cluster routes port (default 6222);
    - PostgreSQL (5432 or your `topology.port`);
    - the control plane, if you use it.
-3. **Single node initialized before feature 005**: run the one-time step from the CHANGELOG first (`ALTER SYSTEM SET synchronous_standby_names = ''; SELECT pg_reload_conf();`). With pg-manager v0.7.0 this is no longer needed.
+3. **Single node initialized before feature 005**: no manual step. Its stale `synchronous_standby_names` value is cleared on its first start as primary on this release.
 
 ## Configuration: one node → three
 
@@ -111,7 +111,7 @@ What happens next:
 - node-a moves the clustered store aside (`jetstream.clustered-<ts>`);
 - it runs asynchronous replication (single peer);
 - it becomes writable within 30 s;
-- with pg-manager v0.7.0 the stale sync value is cleared automatically. Without it, run the one-time `ALTER SYSTEM` step.
+- the stale sync value naming node-b and node-c is cleared automatically.
 
 node-b and node-c can then be wiped and reused.
 

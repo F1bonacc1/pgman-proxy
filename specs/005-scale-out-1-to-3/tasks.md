@@ -156,7 +156,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - nil manager + empty → false;
   - nil manager + stat error → false;
   - non-nil manager → delegates (true/false).
-- [X] T020 [P] [US2] Write `TestExpandOneToThree` (S1) in `tests/scaleout/expand_test.go`. **(needs 015)** *Status: green 15/15 against the pg-manager 015 sibling (2026-10-16, validation.md); re-run on the tag with T028.*
+- [X] T020 [P] [US2] Write `TestExpandOneToThree` (S1) in `tests/scaleout/expand_test.go`. **(needs 015)** *Status: 25/25 across runs, including 5/5 on the v0.7.0 tag (2026-10-16, validation.md).*
   - Iterations: `PGMAN_SCALEOUT_ITERATIONS` (default 5).
   - Start order: round-robin over {a-first, a-last, together}, shuffled with a logged seed.
   - Per iteration:
@@ -207,7 +207,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - Replace the closure at `start.go:174` with `func() bool { if mm := mgrRef.Load(); mm != nil { return mm.ShouldCampaign() }; return bootWindowCampaign(cfg.Postgres.DataDir, res.Logger) }`.
   - `bootWindowCampaign` logs `campaign: boot-window deferral` once (edge-triggered via `sync.Once`) when it returns false, with field `reason` = `pgdata_empty` or `pgdata_unreadable`.
   - Update the comment above `mgrRef` (it currently says the boot window "campaigns normally").
-- [ ] T028 [US2] **(needs 015)** Bump pg-manager (WI-C5).
+- [X] T028 [US2] **(needs 015)** Bump pg-manager (WI-C5). *Status: v0.7.0 pinned 2026-10-16; gates, integration and scaleout green on the tag (validation.md).*
   - Run `go get github.com/f1bonacc1/pg-manager@<015 tag>`, apply the coupled pgx bump if pg-manager moved pgx (update the go.mod comment), then `go mod tidy`.
   - Remove any temporary development `replace`.
   - Run `make test`, `make integration` and `make scaleout`.
@@ -315,7 +315,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - the one-time step for pre-005 single nodes (until 015);
   - a troubleshooting section: exit 75 after 120 s, deference logs, the identity-mismatch doctor check;
   - "config sanity", noting that `len(peers)` should equal `declared_size` (research R-001 note).
-- [ ] T042 [P] Extend the `CHANGELOG.md` Unreleased section (FR-021). *Status: Added (scale-out) and Changed entries written 2026-10-16; the pg-manager v0.7.0 pin entry and the single-node upgrade note land with the T028 bump.*
+- [X] T042 [P] Extend the `CHANGELOG.md` Unreleased section (FR-021). *Status: done 2026-10-16, including the v0.7.0 pin entry and the single-node upgrade note.*
   - **Added**: safe 1→3 expansion, the scaleout suite, the identity check and gauge.
   - **Changed**: stores are moved aside at boot (both directions); `hba_extras`/`conf_extras` are now managed blocks applied on every boot, legacy blocks are untouched, and reload happens when Postgres is running.
   - **Upgrade note**: list the new log events.
