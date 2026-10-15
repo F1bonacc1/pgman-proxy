@@ -55,9 +55,10 @@ import (
 )
 
 // upgradeGateSentinel is the pinned upstream refusal for
-// major-strategy execution (pg-manager v0.5.0
-// manager/backup_upgrade.go:103).
-const upgradeGateSentinel = "upgrade: major strategies wired but gated on v0.7.0"
+// major-strategy execution (manager/backup_upgrade.go). pg-manager
+// v0.7.0 shipped milestone 015 and moved the gate to v0.8.0; this pin
+// fails loudly when a later release lifts or rewords it.
+const upgradeGateSentinel = "upgrade: major strategies wired but gated on v0.8.0"
 
 // upgradePlanBody marshals the request body for the upgrade endpoints
 // using the typed plan so field names can never drift from the module

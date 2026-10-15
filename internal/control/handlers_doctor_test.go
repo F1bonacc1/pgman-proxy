@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"reflect"
@@ -366,5 +367,46 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	}{}
 	if !reflect.DeepEqual(calls, zero) {
 		t.Errorf("FR-027 read-only invariant violated: a check called an LCM mutator. Counts: %+v", calls)
+	}
+}
+
+// TestCheckClusterIdentity pins feature 005 WI-C4 (FR-016): the check
+// fails with both identities as evidence while pg-manager reports an
+// identity mismatch, and passes otherwise. fakeEngine injects the
+// mismatch (Constitution VI fault-injection carve-out); a real-server
+// run sees it absent in tests/scaleout.
+func TestCheckClusterIdentity(t *testing.T) {
+	ctx := context.Background()
+	mismatch := &fakeEngine{statusFn: func(context.Context) (pgmanager.Status, error) {
+		return pgmanager.Status{IdentityMismatch: &pgmanager.IdentityMismatch{
+			LocalSystemIdentifier: "111", LeaderSystemIdentifier: "222", LeaderNodeID: "node-a",
+		}}, nil
+	}}
+	sev, msg, ev := checkClusterIdentity(ctx, mismatch)
+	if sev != SeverityFail {
+		t.Fatalf("severity = %v (%s), want fail", sev, msg)
+	}
+	if ev["local_system_identifier"] != "111" || ev["leader_system_identifier"] != "222" || ev["leader_node_id"] != "node-a" {
+		t.Fatalf("evidence = %v", ev)
+	}
+
+	if sev, _, _ := checkClusterIdentity(ctx, &fakeEngine{}); sev != SeverityPass {
+		t.Fatalf("no mismatch: severity = %v, want pass", sev)
+	}
+	failing := &fakeEngine{statusFn: func(context.Context) (pgmanager.Status, error) {
+		return pgmanager.Status{}, errors.New("engine down")
+	}}
+	if sev, _, _ := checkClusterIdentity(ctx, failing); sev != SeverityUnknown {
+		t.Fatalf("status error: severity = %v, want unknown", sev)
+	}
+
+	found := false
+	for _, c := range DefaultDoctorChecks() {
+		if c.Name == "cluster.identity" {
+			found = c.SuggestedFix != nil && c.SuggestedFix.BlastRadius == BlastAdvisory
+		}
+	}
+	if !found {
+		t.Fatal("cluster.identity must be registered with an advisory suggested fix")
 	}
 }

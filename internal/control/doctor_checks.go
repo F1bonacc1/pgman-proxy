@@ -104,6 +104,22 @@ func DefaultDoctorChecks() []NamedCheck {
 			EvidenceSchema: "doctor.evidence.diagnose/v1",
 			Run:            checkEngineDiagnose,
 		},
+		{
+			// Feature 005 (WI-C4, FR-016): appended last so pgmctl's
+			// check-by-name order stays stable.
+			Name:           "cluster.identity",
+			Description:    "This node's database identity matches the one its leader publishes.",
+			EvidenceSchema: "doctor.evidence.cluster-identity/v1",
+			SuggestedFix: &SuggestedFix{
+				Name: "identify-acknowledged-writes",
+				Description: "Two unrelated databases exist in this cluster. Do not wipe either before " +
+					"identifying which one holds the acknowledged writes; see docs/scale-out-1-to-3/runbook.md.",
+				BlastRadius:    BlastAdvisory,
+				AppliesToCheck: "cluster.identity",
+				ApplyEndpoint:  "/v1/doctor/fix",
+			},
+			Run: checkClusterIdentity,
+		},
 	}
 }
 
@@ -332,6 +348,30 @@ func checkEngineDiagnose(ctx context.Context, e Engine) (Severity, string, map[s
 		"issues":      messages,
 	}
 	return worst, fmt.Sprintf("%d issue(s) reported", len(dg.Issues)), ev
+}
+
+// checkClusterIdentity reports pg-manager's identity-mismatch status
+// (milestone 015): a standby following a leader whose database system
+// identifier differs from its own means two unrelated databases exist
+// in one cluster. pg-manager reports nothing when the identities match
+// or either is unknown, so the check passes then. Read-only.
+func checkClusterIdentity(ctx context.Context, e Engine) (Severity, string, map[string]any) {
+	st, err := e.Status(ctx)
+	if err != nil {
+		return SeverityUnknown, "Status: " + err.Error(), nil
+	}
+	mm := st.IdentityMismatch
+	if mm == nil {
+		return SeverityPass, "no identity mismatch reported", map[string]any{"mismatch": false}
+	}
+	ev := map[string]any{
+		"mismatch":                 true,
+		"local_system_identifier":  mm.LocalSystemIdentifier,
+		"leader_system_identifier": mm.LeaderSystemIdentifier,
+		"leader_node_id":           string(mm.LeaderNodeID),
+	}
+	return SeverityFail, fmt.Sprintf("database identity %s differs from leader %s (%s)",
+		mm.LocalSystemIdentifier, mm.LeaderNodeID, mm.LeaderSystemIdentifier), ev
 }
 
 // runChecks executes the supplied check set against the engine,

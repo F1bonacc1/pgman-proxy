@@ -167,11 +167,21 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// switchover request names another node, and a crashed ex-primary
 	// sits it out until its Postgres is back. The Manager needs the
 	// leadership handle built here, so the gate reads a pointer
-	// published once manager.New returns. ShouldCampaign is
-	// nil-receiver-safe (true), so the boot window campaigns normally.
+	// published once manager.New returns. In the boot window before
+	// that, only a node with a complete database may campaign (feature
+	// 005, FR-006): pg-manager's nil-receiver ShouldCampaign returns
+	// true, which let an empty node win the lease and initialize a new
+	// database while node-a was still booting during a 1→3 expansion.
 	var mgrRef atomic.Pointer[manager.Manager]
+	bootGate := newBootWindowGate(cfg.Postgres.DataDir, res.Logger)
 	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger, cfg.Cluster.LeaseTTL,
-		func() bool { return mgrRef.Load().ShouldCampaign() })
+		func() bool {
+			var m campaigner // nil interface until the Manager is published
+			if mm := mgrRef.Load(); mm != nil {
+				m = mm
+			}
+			return campaignGate(m, bootGate.allow)
+		})
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: build handles: %w", err)}
 	}
@@ -273,6 +283,14 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("ensure standby.signal: %w", signalErr)}
 	}
 
+	// Gate #6.6 (feature 005, FR-013..FR-015): re-apply the managed
+	// postgres.conf_extras / postgres.hba_extras blocks on every boot of
+	// a node whose database exists, so rules added after initdb (e.g.
+	// replication access for new peers in a 1→3 expansion) take effect.
+	if blockErr := applyManagedConfAtBoot(ctx, cfg, pg, res.Logger); blockErr != nil {
+		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("managed postgres config blocks: %w", blockErr)}
+	}
+
 	// Gate #7: Manager constructed.
 	mgrCfg := manager.Config{
 		Leadership: handles.Leadership,
@@ -314,7 +332,13 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// embedded-NATS and leadership gauges current. Registered since
 	// 002 but previously had no writer.
 	startObservabilityGauges(ctx, res.Metrics, res.Embedded, &managerLeaderState{m: m},
-		replicaDecision.Effective(), replicaDecision.Overridden())
+		replicaDecision.Effective(), replicaDecision.Overridden(),
+		func() bool {
+			// Feature 005 (WI-C4): pg-manager 015 reports a standby that
+			// follows a leader with a different database identity.
+			st, err := m.Status(ctx)
+			return err == nil && st.IdentityMismatch != nil
+		})
 
 	// Feature 003 — per-peer status aggregation substrate. pg-manager's
 	// Manager.Status() returns per-peer scalars but does not populate
@@ -490,7 +514,8 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	}
 
 	res.Logger.Info("manager started",
-		pgmanager.Field{Key: "singleton_claim_attempts", Value: 1})
+		pgmanager.Field{Key: "singleton_claim_attempts", Value: 1},
+		pgmanager.Field{Key: "replication_policy", Value: policyLabel(mgrCfg.Policy.Replication)})
 	res.Health.SetManagerReady(true)
 	return res, nil
 }
@@ -652,12 +677,9 @@ func policyFromConfig(cfg config.Config) pgmanager.Policy {
 		PromoteTimeout:   cfg.Policy.PromoteTimeout,
 		LivenessInterval: cfg.Policy.LivenessInterval,
 		LivenessFailures: cfg.Policy.LivenessFailures,
-		Replication: pgmanager.QuorumSync{
-			MinSync: cfg.Policy.QuorumSync.MinSync,
-			Pool:    nodeIDs(cfg.Peers),
-		},
-		AutoDemote:      autoDemotePolicy(cfg.Policy.AutoDemote),
-		AutoRebootstrap: autoRebootstrapPolicy(cfg.Policy.AutoRebootstrap),
+		Replication:      replicationPolicy(cfg),
+		AutoDemote:       autoDemotePolicy(cfg.Policy.AutoDemote),
+		AutoRebootstrap:  autoRebootstrapPolicy(cfg.Policy.AutoRebootstrap),
 	}
 }
 
@@ -776,6 +798,25 @@ func bootEmbeddedNATS(ctx context.Context, cfg config.Config, logger *obs.Logger
 		return nil, &StartupError{Code: ExitConfig, Err: fmt.Errorf("build embedded NATS options: %w", err)}
 	}
 
+	// Feature 005 (FR-009..FR-012): a store written in the other mode
+	// (standalone before a 1→3 expansion, clustered before a rollback)
+	// is moved aside, never reused or deleted. The history stream does
+	// not exist yet at this point, so the event lands in logs only.
+	if to, archived, aerr := embedded.ArchiveIncompatibleStore(cc.JetStreamDir, routesEnabled, time.Now()); aerr != nil {
+		return nil, &StartupError{Code: ExitConfig, Err: fmt.Errorf("archive incompatible jetstream store in %q: %w", cc.JetStreamDir, aerr)}
+	} else if to != "" {
+		desired := embedded.StoreLayoutStandalone
+		if routesEnabled {
+			desired = embedded.StoreLayoutClustered
+		}
+		logger.Warn("embedded_nats.store_archived",
+			pgmanager.Field{Key: "from", Value: filepath.Join(cc.JetStreamDir, "jetstream")},
+			pgmanager.Field{Key: "to", Value: to},
+			pgmanager.Field{Key: "actual_layout", Value: string(archived)},
+			pgmanager.Field{Key: "desired_layout", Value: string(desired)},
+			pgmanager.Field{Key: "reason", Value: "layout_mismatch"})
+	}
+
 	emit := func(kind embedded.LifecycleEventKind, fields map[string]any) {
 		// Translate the lifecycle event into a structured log entry AND
 		// (when a history sink has been wired) append it to the cluster
@@ -834,51 +875,65 @@ func firstNonEmpty(a, b string) string {
 }
 
 // postInitDBHook returns the pg-manager PostInitDB callback that
-// patches postgresql.conf and pg_hba.conf with operator-supplied lines
-// after the elected bootstrap leader's initdb. Returns nil when no
-// extras are configured (pg-manager treats nil as a no-op).
+// writes the operator-supplied postgresql.conf and pg_hba.conf lines as
+// pgman-proxy-managed blocks after the elected bootstrap leader's
+// initdb. Returns nil when no extras are configured (pg-manager treats
+// nil as a no-op).
 //
-// The hook runs once on the leader; followers inherit the rewritten
-// files via pg_basebackup. Without HBA extras allowing replication
-// from peer hosts the cluster CANNOT reach Running state — operators
-// must supply at least one `host replication ...` rule.
+// Followers inherit the files via pg_basebackup; every node then
+// re-applies the blocks on each boot (applyManagedConfAtBoot), so a
+// node created before the rules were configured still gets them
+// (spec 005 FR-013). Without HBA extras allowing replication from peer
+// hosts the cluster CANNOT reach Running state: operators must supply
+// at least one `host replication ...` rule.
 func postInitDBHook(cfg config.Config, logger *obs.Logger) func(context.Context) error {
 	if len(cfg.Postgres.HBAExtras) == 0 && len(cfg.Postgres.ConfExtras) == 0 {
 		return nil
 	}
-	dataDir := cfg.Postgres.DataDir
-	confExtras := strings.Join(cfg.Postgres.ConfExtras, "\n")
-	hbaExtras := strings.Join(cfg.Postgres.HBAExtras, "\n")
 	return func(_ context.Context) error {
-		if confExtras != "" {
-			if err := appendLines(filepath.Join(dataDir, "postgresql.conf"),
-				"# pgman-proxy: postgres.conf_extras\n"+confExtras+"\n"); err != nil {
-				return fmt.Errorf("patch postgresql.conf: %w", err)
-			}
-			logger.Info("postgresql.conf patched",
-				pgmanager.Field{Key: "lines", Value: len(cfg.Postgres.ConfExtras)})
+		changes, err := applyManagedConf(cfg, cfg.Postgres.DataDir)
+		if err != nil {
+			return err
 		}
-		if hbaExtras != "" {
-			if err := appendLines(filepath.Join(dataDir, "pg_hba.conf"),
-				"# pgman-proxy: postgres.hba_extras\n"+hbaExtras+"\n"); err != nil {
-				return fmt.Errorf("patch pg_hba.conf: %w", err)
-			}
-			logger.Info("pg_hba.conf patched",
-				pgmanager.Field{Key: "lines", Value: len(cfg.Postgres.HBAExtras)})
-		}
+		logManagedChanges(logger, cfg.Node.ID, "post_init", changes, false)
 		return nil
 	}
 }
 
-func appendLines(path, body string) error {
-	// path is constructed from cfg.Postgres.DataDir which is operator-
-	// supplied at startup; we are running with the postgres user inside
-	// our own data directory, so the open is trusted.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec
+// applyManagedConfAtBoot re-applies the managed conf/HBA blocks on a
+// node whose database already exists, and reloads Postgres when it is
+// running and anything changed. Under systemd the postmaster can
+// outlive the proxy (spec 005 F16), so a boot may find it up. The
+// reload goes through pg-manager's executor (Constitution IV). Errors
+// are returned so startup fails closed rather than running with stale
+// replication rules that would only surface later, inside a new peer's
+// clone.
+func applyManagedConfAtBoot(ctx context.Context, cfg config.Config, pg pgmanager.PostgresExecutor, logger *obs.Logger) error {
+	complete, err := pgdataComplete(cfg.Postgres.DataDir)
+	if err != nil {
+		return fmt.Errorf("inspect data dir: %w", err)
+	}
+	if !complete {
+		return nil
+	}
+	changes, err := applyManagedConf(cfg, cfg.Postgres.DataDir)
 	if err != nil {
 		return err
 	}
-	defer f.Close() //nolint:errcheck
-	_, err = f.WriteString(body)
-	return err
+	if len(changes) == 0 {
+		return nil
+	}
+	reloaded := false
+	running, err := pg.IsRunning(ctx)
+	if err != nil {
+		return fmt.Errorf("check postmaster: %w", err)
+	}
+	if running {
+		if err := pg.Reload(ctx); err != nil {
+			return fmt.Errorf("reload after managed block change: %w", err)
+		}
+		reloaded = true
+	}
+	logManagedChanges(logger, cfg.Node.ID, "boot", changes, reloaded)
+	return nil
 }

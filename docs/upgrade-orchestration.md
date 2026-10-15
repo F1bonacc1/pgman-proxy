@@ -40,8 +40,8 @@ host provides the binaries and the conductor.
 | Strategy (`UpgradeStrategy`) | Identifier | Status |
 |---|---|---|
 | `UpgradeMinor` | `minor_rolling` | **Implemented** — rolling restart across patch versions, zero data loss, bounded outage. |
-| `UpgradeMajorInPlace` | `major_in_place` | **Wired but gated on v0.7.0.** `ExecuteUpgrade` returns `"upgrade: major strategies wired but gated on v0.7.0"`. |
-| `UpgradeMajorLogicalBridge` | `major_logical_bridge` | **Wired but gated on v0.7.0.** Same gate. |
+| `UpgradeMajorInPlace` | `major_in_place` | **Wired but gated on v0.8.0.** `ExecuteUpgrade` returns `"upgrade: major strategies wired but gated on v0.8.0"`. |
+| `UpgradeMajorLogicalBridge` | `major_logical_bridge` | **Wired but gated on v0.8.0.** Same gate. |
 
 This guide focuses on the supported **minor rolling** upgrade. See
 [Major-version upgrades](#major-version-upgrades-gated) for the gated
@@ -318,8 +318,8 @@ Postgres back up).
 `UpgradeMajorInPlace` (`pg_upgrade` per node) and
 `UpgradeMajorLogicalBridge` (logical-replication bridge to a
 new-major replica) are **defined, validated, and sequenced** but
-**gated on the v0.7.0 release-hardening pass**: `ExecuteUpgrade`
-returns `"upgrade: major strategies wired but gated on v0.7.0"`
+**gated on the v0.8.0 release-hardening pass**: `ExecuteUpgrade`
+returns `"upgrade: major strategies wired but gated on v0.8.0"`
 (`../pg-manager/manager/backup_upgrade.go:101`). Plan and
 `EffectiveOrder`/`EstimateDuration` work today; execution does not.
 Do not attempt a major upgrade through this surface until that gate

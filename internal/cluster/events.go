@@ -80,6 +80,12 @@ func SubscribeCoordinationEvents(
 		"auto_demote",
 		"divergence",
 		"conninfo",
+		// pg-manager milestone 015 (feature 005): empty-peer deference,
+		// initdb refusals and sync-set changes during a 1→3 expansion,
+		// and a standby following a leader with a different database
+		// identity (identity.mismatch / identity.mismatch_cleared).
+		"empty_peer",
+		"identity",
 	}
 
 	subs := make([]*nats.Subscription, 0, len(exactTopics)+len(wildcardFamilies))

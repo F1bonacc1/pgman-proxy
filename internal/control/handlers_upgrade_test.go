@@ -313,7 +313,7 @@ func TestUpgrade_ForwardedToLeader(t *testing.T) {
 		nc := startUpgradeTestNATS(t)
 		leaderReply := `{"operation":"ExecuteUpgrade","request_id":"leader-req-2",` +
 			`"outcome":"failed","error":{"code":"engine_error",` +
-			`"message":"upgrade: major strategies wired but gated on v0.7.0"}}`
+			`"message":"upgrade: major strategies wired but gated on v0.8.0"}}`
 		sub, err := nc.Subscribe("pgman_proxy.test-cluster.lcm.request.ExecuteUpgrade",
 			func(m *nats.Msg) { _ = m.Respond([]byte(leaderReply)) })
 		if err != nil {

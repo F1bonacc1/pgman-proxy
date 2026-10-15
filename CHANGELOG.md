@@ -7,6 +7,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (scale-out): expanding a single node to three keeps its data
+
+A single node can now be expanded to three nodes by pushing the 3-node
+config, starting two empty nodes and restarting node-a. node-a keeps
+its database and stays primary; the new nodes clone it. Before, the
+same steps ended with a new, empty database as primary in 3 of 3 rig
+runs, and clients were routed to it. The procedure, what is lost (the
+coordination store's fences, cooldowns and history) and the rollback
+are in `docs/scale-out-1-to-3/runbook.md`. It needs pg-manager v0.7.0,
+which this release pins.
+
+- **Write outage**: node-a restarts once. 7.6 to 14.1 s (median about
+  8.8 s) across 25 test expansions with the default 5 s lease.
+- **Identity check**: `pgmctl doctor` gains `cluster.identity`, which
+  fails when a standby follows a primary with a different database
+  identity. The new gauge `pgman_proxy_cluster_identity_mismatch` is 1
+  while that holds. Neither takes any action: do not wipe either node
+  before you know which one holds the acknowledged writes.
+- **Events**: pg-manager's `empty_peer.*` and `identity.*` families
+  (deference armed and released, initdb refused, sync set changed,
+  identity mismatch and cleared) are logged, counted and kept in
+  `pgmctl history`.
+- **Tests**: `make scaleout` runs the expansion (S1, three start
+  orders), rollback, single node, fresh-cluster bootstrap and
+  data-node-down scenarios against real containers. A nightly job runs
+  it.
+
+### Security: Go toolchain bumped to 1.26.9 (go1.26.9 stdlib batch)
+
+`govulncheck` flagged nine reachable standard-library advisories in
+go1.26.7, all fixed in go1.26.9:
+- `net/http`: GO-2026-6603, 6605, 6610, 6611, 6612, 6613, 6617. These
+  are reached from the control-plane HTTP server, the pgmctl SSE client
+  and header handling under `manager.New`.
+- `net/textproto`: GO-2026-6608, a MIME header memory-limit bypass,
+  reached through `multipart` form parsing in the control-plane server.
+- `crypto/tls`: GO-2026-6607, malformed ECH extensions, reached through
+  NATS cluster TLS.
+
+No source changes. The `go.mod` `go` directive, which every workflow's
+`setup-go` installs from, now requires 1.26.9.
+`deploy/docker/Dockerfile.bundle` and `tests/integration/Dockerfile`
+track it in lockstep (`golang:1.26.9-bookworm`).
+
+### Changed (deps): pg-manager pin bumped to v0.7.0
+
+`go.mod` now requires `github.com/f1bonacc1/pg-manager v0.7.0`
+(previously v0.6.1), milestone 015 (empty-peer safety). It carries the
+engine half of the scale-out entry above:
+- empty nodes defer while a peer holds data or has not reported;
+- data-state records;
+- empty peers are left out of the sync set, with a join window in
+  which only the data holder may promote;
+- the `''` render that clears stale sync values;
+- a clone retry when the source is promoted mid-copy;
+- `Status.IdentityMismatch`.
+
+`Manager.Switchover` now refuses a target that reported an empty or
+partial data directory. A brand-new cluster bootstraps once every
+configured peer has reported.
+
+The major-upgrade gate moved to v0.8.0. The feature-004 sentinel is
+re-pinned to `upgrade: major strategies wired but gated on v0.8.0`.
+
+Dependencies:
+- pgx v5.11.0 and nats.go v1.53.1 (coupled bump, see the `go.mod`
+  comment);
+- **security**: `golang.org/x/text` v0.41.0 for GO-2026-6629, a panic
+  in `x/text/secure/precis` reachable through pgx SCRAM authentication.
+
+### Fixed (single node): commits no longer hang, and a restart no longer leaves the node read-only
+
+A single-peer pgman-proxy handed pg-manager a `QuorumSync` policy whose
+pool was the node itself. Two failures followed:
+
+- **Every commit hung.** `initdb` rendered
+  `synchronous_standby_names = 'ANY 1 ("node-a")'`, so commits waited
+  in `SyncRep` forever.
+- **A restarted node never became writable.** After any restart the
+  node came back as a standby, as it does on every boot with PGDATA.
+  Promotion was then refused with `missing_quorum_snapshot` forever,
+  because a one-peer pool never publishes that snapshot.
+
+Single-peer configs now run pg-manager's `AsyncOnly` policy, derived
+from `len(peers) == 1` with no new config key. Configs with two or more
+peers are unchanged. The startup line `manager started` carries a new
+`replication_policy` field (`async` or `quorum(min_sync=N)`). Both
+failures were reproduced and verified fixed on a docker rig
+(`docs/scale-out-1-to-3/plan.md` F1-F3, `tests/scaleout` S5).
+
+**Upgrade note: single nodes initialized by an earlier release.** Their
+`postgresql.conf` still holds the self-referential value from
+`initdb`. No manual step is needed: pg-manager v0.7.0, which this
+release pins, applies `''` on the node's first render as primary. A
+node stuck read-only after a restart on an earlier release promotes on
+its own after the upgrade and becomes writable (`tests/scaleout` S5b:
+writable 4.7 s after restart). Multi-peer clusters need no action.
+
+### Changed (boot): a JetStream store written in the other mode is moved aside
+
+A store created by a single node (standalone) and reused by a clustered
+node, or the reverse on rollback, gave undefined results: in a
+reproduction the clustered server adopted the old history stream but
+started a fresh KV bucket. At boot, before the embedded server starts,
+pgman-proxy now compares the layout of `<cluster.jetstream_dir>/jetstream`
+with the mode it is about to run in. It decides "clustered" exactly as
+the server does: routes enabled and `declared_size > 1`. On a mismatch
+it renames the store to `jetstream.<standalone|clustered>-<UTC timestamp>`.
+
+- The configured directory itself is never renamed, since it is often
+  a mount point.
+- Nothing is deleted. The archived store keeps the old KV state and
+  history for forensics; delete it once the cluster is verified.
+- A Warn-level `embedded_nats.store_archived` event names both paths.
+- If the rename fails, startup fails (exit `ExitConfig`).
+
+### Changed (postgres): `hba_extras` / `conf_extras` are managed blocks applied on every boot
+
+These lines used to be appended once, by the post-initialization hook
+on the node that created the database. A single node deployed without
+a replication rule therefore never gained one. Its new peers could not
+clone it, even after the rule was added to the config.
+
+The lines are now written as marked blocks:
+
+```text
+# BEGIN pgman-proxy managed: postgres.hba_extras
+...
+# END pgman-proxy managed: postgres.hba_extras
+```
+
+How the blocks behave:
+- **When**: they are written when the database is created, and again on
+  every boot of a node whose database exists.
+- **Edits**: a block is rewritten in place, and removed when the list is
+  emptied. Everything outside the markers is untouched.
+- **Reload**: when Postgres is already running, pgman-proxy reloads it
+  through pg-manager's executor.
+- **Events**: changes emit `postgres.managed_block_applied` (`file`,
+  `block`, `action`, `lines`, `phase`, `reloaded`).
+- **Failures**: malformed markers or a failed write or reload fail
+  startup (`ExitDeps`).
+- **Legacy**: blocks appended by earlier releases
+  (`# pgman-proxy: postgres.hba_extras`) are left as they are. Duplicate
+  HBA lines are harmless, and in `postgresql.conf` the later managed
+  block wins.
+
+### Changed (leadership): an empty node does not campaign during the boot window
+
+Until `manager.New` returns, pg-manager's campaign gate answers "yes"
+for every node. That let a node with an empty data directory win the
+leadership lease while it booted. It then initialized a new, empty
+database, even though another peer held the real data.
+
+Before the Manager exists, pgman-proxy now lets only a node with a
+complete data directory campaign. Complete means `PG_VERSION` and
+`global/pg_control` are both present; a clone interrupted mid-copy has
+the first but not the second. A node that is held back logs
+`campaign: boot-window deferral` with a `reason`. After the Manager
+exists, its `ShouldCampaign` decides as before. A fresh cluster of
+empty nodes still bootstraps, because the gate is consulted again on
+every lease tick once the Manager is up.
+
+On its own this narrows the 1→3 expansion race but does not close it.
+pg-manager v0.7.0's empty-node deference closes it: see
+`docs/scale-out-1-to-3/runbook.md`.
+
 ### Fixed (boot): one unanswered JetStream reply no longer kills a peer's cold start
 
 `PreCreateClusterKV` handed its 60 s context straight to every

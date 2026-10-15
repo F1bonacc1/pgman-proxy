@@ -356,3 +356,27 @@ func TestHandleCoordinationEvent_MalformedPayloadIsTolerated(t *testing.T) {
 		t.Errorf("payload field should be absent when body fails to parse")
 	}
 }
+
+// TestHandleCoordinationEvent_Feature005Families pins that the
+// pg-manager 015 event families are logged like the other families.
+// All of them classify as "delivered": classifyOutcome keys on a
+// ".refused" or ".failed" leaf, and empty_peer.initdb_refused ends in
+// "_refused".
+func TestHandleCoordinationEvent_Feature005Families(t *testing.T) {
+	cases := map[string]string{
+		"pgmanager.pgman-pc.empty_peer.initdb_refused":   "delivered",
+		"pgmanager.pgman-pc.empty_peer.deference_armed":  "delivered",
+		"pgmanager.pgman-pc.empty_peer.sync_set_changed": "delivered",
+		"pgmanager.pgman-pc.identity.mismatch":           "delivered",
+		"pgmanager.pgman-pc.identity.mismatch_cleared":   "delivered",
+	}
+	for subject, want := range cases {
+		rec := captureEvent(t, subject, map[string]any{"node_id": "node-b"})
+		if got := rec["subject"]; got != subject {
+			t.Errorf("subject = %v, want %s", got, subject)
+		}
+		if got := rec["outcome"]; got != want {
+			t.Errorf("%s outcome = %v, want %s", subject, got, want)
+		}
+	}
+}

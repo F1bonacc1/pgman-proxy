@@ -1,17 +1,18 @@
 module github.com/f1bonacc1/pgman-proxy
 
-// Go 1.26.7 minimum — earlier versions hit the stdlib findings
+// Go 1.26.9 minimum. Earlier versions hit the stdlib findings
 // surfaced by `.github/workflows/govulncheck.yml`: GO-2026-5037
 // (crypto/x509) and GO-2026-5039 (net/textproto) fixed in go1.26.4,
 // GO-2026-5856 (crypto/tls) fixed in go1.26.5, and the go1.26.6 batch
 // — GO-2026-6218 (net/url), GO-2026-6090 (crypto/tls), GO-2026-6089
 // (net/http), GO-2026-6088 (encoding/xml), GO-2026-5972
-// (encoding/asn1), GO-2026-5026 (net/http via x/net/idna). 1.26.7 is
-// the current patch of that line and carries no further advisories.
-// Bump in lockstep with new govulncheck stdlib findings. setup-go in
-// CI uses this directive as the install version, so a `toolchain`
-// line would be redundant.
-go 1.26.7
+// (encoding/asn1), GO-2026-5026 (net/http via x/net/idna), and the
+// go1.26.9 batch: GO-2026-6603, 6605, 6610, 6611, 6612, 6613, 6617
+// (net/http), GO-2026-6608 (net/textproto) and GO-2026-6607
+// (crypto/tls). Bump in lockstep with new govulncheck stdlib
+// findings. setup-go in CI uses this directive as the install version,
+// so a `toolchain` line would be redundant.
+go 1.26.9
 
 // The wrapped pg-manager engine is pinned to a tagged release. pg-manager is
 // a PRIVATE repo, so every build fetches it with GOPRIVATE + token auth:
@@ -22,8 +23,9 @@ go 1.26.7
 // provenance attestation.
 //
 // COUPLED BUMP: pg-manager's own go.mod pins github.com/jackc/pgx/v5,
-// and MVS raises this module's pgx to match. v0.6.1 requires pgx
-// v5.10.0, which is what the require block below carries. A pg-manager
+// and MVS raises this module's pgx to match. pg-manager v0.7.0 requires
+// pgx v5.11.0, nats.go v1.53.1 and golang.org/x/text v0.41.0
+// (GO-2026-6629), which is what the require blocks below carry. A pg-manager
 // bump that moves pgx must raise it here in the SAME commit, or the
 // integration image fails to build with "missing go.sum entry for
 // ... pgx/v5 (imported by
@@ -31,12 +33,12 @@ go 1.26.7
 // a `replace` onto the sibling checkout (tests/integration/Dockerfile),
 // so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
-	github.com/f1bonacc1/pg-manager v0.6.1
+	github.com/f1bonacc1/pg-manager v0.7.0
 	github.com/fatih/color v1.19.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/nats-io/nats-server/v2 v2.14.0
-	github.com/nats-io/nats.go v1.51.0
+	github.com/nats-io/nats.go v1.53.1
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2
@@ -68,9 +70,9 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 )

@@ -1,0 +1,4 @@
+# scratch outputs from scenarios.sh / monitor.sh
+*.mon
+*.log
+none.env
