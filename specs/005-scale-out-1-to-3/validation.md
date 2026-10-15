@@ -147,3 +147,5 @@ ok  	github.com/f1bonacc1/pgman-proxy/tests/scaleout	516.843s
 **S1 across all runs on the 015 code**: 25/25. Write outage 7.6-14.1 s, median about 8.8 s, against the 30 s budget (SC-003). The 14.1 s gap (iteration 4, a-last) is the first above 10.8 s. Its cause is not investigated: the budget holds, but treat the upper end as noisy.
 
 - **`govulncheck`**: no module findings. Nine standard-library advisories in go1.26.7 are fixed in go1.26.9 (GO-2026-6603, 6605, 6607, 6608, 6610, 6611, 6612, 6613, 6617), and CI installs Go from the `go.mod` directive. Hence the toolchain bump that follows.
+
+**After the go1.26.9 toolchain bump**: `govulncheck ./...` reports 0 affecting vulnerabilities. `make test lint grep-gates` is green and `make integration` passes (`ok 154.451s`). The test image's binary reports `go1.26.9`, `pg-manager v0.7.0` (sibling at the tag) and `golang.org/x/text v0.41.0`.

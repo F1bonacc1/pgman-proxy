@@ -34,6 +34,23 @@ which this release pins.
   data-node-down scenarios against real containers. A nightly job runs
   it.
 
+### Security: Go toolchain bumped to 1.26.9 (go1.26.9 stdlib batch)
+
+`govulncheck` flagged nine reachable standard-library advisories in
+go1.26.7, all fixed in go1.26.9:
+- `net/http`: GO-2026-6603, 6605, 6610, 6611, 6612, 6613, 6617. These
+  are reached from the control-plane HTTP server, the pgmctl SSE client
+  and header handling under `manager.New`.
+- `net/textproto`: GO-2026-6608, a MIME header memory-limit bypass,
+  reached through `multipart` form parsing in the control-plane server.
+- `crypto/tls`: GO-2026-6607, malformed ECH extensions, reached through
+  NATS cluster TLS.
+
+No source changes. The `go.mod` `go` directive, which every workflow's
+`setup-go` installs from, now requires 1.26.9.
+`deploy/docker/Dockerfile.bundle` and `tests/integration/Dockerfile`
+track it in lockstep (`golang:1.26.9-bookworm`).
+
 ### Changed (deps): pg-manager pin bumped to v0.7.0
 
 `go.mod` now requires `github.com/f1bonacc1/pg-manager v0.7.0`
