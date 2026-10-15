@@ -278,19 +278,19 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 **Independent Test**: `go test -race -run 'Identity' ./internal/control/... ./internal/runtime/...` (fault injection), plus the S1/S6 real-server runs, which must report no mismatch.
 
-- [ ] T035 [P] [US5] Write a contract test in `internal/control/handlers_doctor_test.go`. **(needs 015 for the Status field)**
+- [X] T035 [P] [US5] Write a contract test in `internal/control/handlers_doctor_test.go`. **(needs 015 for the Status field)**
   - Extend `fakeEngine` to return a `Status` with the upstream identity-mismatch field set and unset, and unknown.
   - Assert that `cluster.identity` returns fail / pass / warn with evidence `doctor.evidence.cluster-identity/v1` and both identifiers.
   - Assert that the check stays in the read-only test's coverage (it calls `Status` only).
-- [ ] T036 [US5] Add the `cluster.identity` check to `DefaultDoctorChecks` in `internal/control/doctor_checks.go`. **(needs 015)**
+- [X] T036 [US5] Add the `cluster.identity` check to `DefaultDoctorChecks` in `internal/control/doctor_checks.go`. **(needs 015)**
   - Append it at the end, keeping the catalogue order stable for pgmctl.
   - Use the suggested-fix text from contracts/observability.md.
-- [ ] T037 [US5] Add the gauge `IdentityMismatch prometheus.Gauge` (`pgman_proxy_cluster_identity_mismatch`) to `internal/obs/metrics.go` and register it. Set it from the observability gauge loop in `startObservabilityGauges` (`internal/runtime`), reading `Manager.Status()`. **(needs 015)**
+- [X] T037 [US5] Add the gauge `IdentityMismatch prometheus.Gauge` (`pgman_proxy_cluster_identity_mismatch`) to `internal/obs/metrics.go` and register it. Set it from the observability gauge loop in `startObservabilityGauges` (`internal/runtime`), reading `Manager.Status()`. **(needs 015)**
 - [X] T038 [US5] Make sure the upstream `identity_mismatch` topic reaches logs and history. *Status: `empty_peer` and `identity` families subscribed (8c4952f); final subjects are `identity.mismatch` / `identity.mismatch_cleared`.* **(needs 015)**
   - Check whether `internal/cluster` `SubscribeCoordinationEvents` subscribes by wildcard or by an explicit topic list.
   - Add the topic if it is a list.
   - Add a unit test in the cluster package's existing event-subscription test file.
-- [ ] T039 [US5] In `tests/scaleout/expand_test.go` `assertExpanded`, also assert that the `pgman_proxy_cluster_identity_mismatch` gauge reads 0 on all three nodes. Read it by `docker exec` scraping of `:9090/metrics` with `wget -qO-` or `curl` (whichever the image has; else use the control-plane doctor endpoint). **(needs 015)**
+- [X] T039 [US5] In `tests/scaleout/expand_test.go` `assertExpanded`, also assert that the `pgman_proxy_cluster_identity_mismatch` gauge reads 0 on all three nodes. Read it by `docker exec` scraping of `:9090/metrics` with `wget -qO-` or `curl` (whichever the image has; else use the control-plane doctor endpoint). **(needs 015)**
 
 **Checkpoint**: a silent split becomes an alert.
 

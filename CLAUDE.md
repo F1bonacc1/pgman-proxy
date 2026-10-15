@@ -36,7 +36,7 @@ Prior features still apply:
 - 001 `specs/001-active-active-pg-proxy/`: base proxy + control plane.
 - 002 `specs/002-embedded-nats-cluster/`: embedded NATS cluster (US2 scenario 2 amended by 005).
 - 003 `specs/003-pgmctl-cli/`: pgmctl operator CLI (client-only).
-- 004 `specs/004-upgrade-tests/`: upgrade test coverage; its major-gate sentinel pins a string that names v0.7.0 (see 005 research R-013).
+- 004 `specs/004-upgrade-tests/`: upgrade test coverage; its major-gate sentinel pins `upgrade: major strategies wired but gated on v0.8.0` (pg-manager v0.7.0 is milestone 015; see 005 research R-013).
 
 Non-negotiable principles live in `.specify/memory/constitution.md`
 (v1.3.0). The wrapped engine is `../pg-manager`; reference assembly is

@@ -95,6 +95,28 @@ func assertExpanded(tp *topo, g golden, budget time.Duration) {
 		!strings.Contains(logs, `"actual_layout":"standalone"`) {
 		tp.t.Error("node-a did not move its standalone JetStream store aside")
 	}
+	// WI-C4: no node reports an identity mismatch (one database).
+	for _, n := range []string{"a", "b", "c"} {
+		if v, ok := tp.identityMismatchGauge(n); !ok || v != "0" {
+			tp.t.Errorf("node-%s pgman_proxy_cluster_identity_mismatch = %q (found %v), want 0", n, v, ok)
+		}
+	}
+}
+
+// identityMismatchGauge scrapes node's metrics endpoint and returns the
+// value of pgman_proxy_cluster_identity_mismatch.
+func (tp *topo) identityMismatchGauge(node string) (string, bool) {
+	out, err := tp.exec(node, 10*time.Second, "curl", "-sf", "http://127.0.0.1:9090/metrics")
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "pgman_proxy_cluster_identity_mismatch{") || strings.HasPrefix(line, "pgman_proxy_cluster_identity_mismatch ") {
+			f := strings.Fields(line)
+			return f[len(f)-1], true
+		}
+	}
+	return "", false
 }
 
 // startWriteProbe runs a client container that commits through node's

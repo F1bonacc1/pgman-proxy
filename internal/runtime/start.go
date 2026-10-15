@@ -332,7 +332,13 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// embedded-NATS and leadership gauges current. Registered since
 	// 002 but previously had no writer.
 	startObservabilityGauges(ctx, res.Metrics, res.Embedded, &managerLeaderState{m: m},
-		replicaDecision.Effective(), replicaDecision.Overridden())
+		replicaDecision.Effective(), replicaDecision.Overridden(),
+		func() bool {
+			// Feature 005 (WI-C4): pg-manager 015 reports a standby that
+			// follows a leader with a different database identity.
+			st, err := m.Status(ctx)
+			return err == nil && st.IdentityMismatch != nil
+		})
 
 	// Feature 003 — per-peer status aggregation substrate. pg-manager's
 	// Manager.Status() returns per-peer scalars but does not populate

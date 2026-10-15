@@ -163,7 +163,7 @@ The env var is for local development against a sibling checkout that already car
 
 **Rationale**: the suite runs for about 20-25 minutes (S1 runs 5 iterations, S4 waits 120 s, S6 waits 180 s), and Constitution VI's real-server requirement is satisfied nightly, as for `make integration`.
 
-## R-013: The v0.7.0 version number is already spoken for upstream [Verified / Open]
+## R-013: The v0.7.0 version number is already spoken for upstream [Verified / Decided 2026-10-16]
 
 **Finding**: pg-manager already earmarks v0.7.0 in three places:
 - **The major-upgrade gate**: `manager/backup_upgrade.go:104` returns `"upgrade: major strategies wired but gated on v0.7.0"`.
@@ -179,3 +179,10 @@ pgman-proxy's feature 004 pins the gate string as a sentinel (`tests/integration
 - updating `specs/004-upgrade-tests` references.
 
 **Raise with the maintainer before tagging 015**: either 015 takes v0.7.0 and the hardening pass moves to v0.8.0 (reword the gate and docs), or 015 waits to ship inside the hardening release.
+
+**Decision (2026-10-16, maintainer)**: milestone 015 is tagged **v0.7.0**, and the major-upgrade gate moves to **v0.8.0**. Upstream changes:
+- the gate message now reads `upgrade: major strategies wired but gated on v0.8.0`;
+- `docs/upgrade.md` and the `Spec.md` roadmap are updated;
+- B-017's `OnSyncStandbyLoss` removal is rescheduled to v0.8.0, so the deprecation comments stay true.
+
+pgman-proxy re-pins the 004 sentinel to the v0.8.0 string as part of the bump.

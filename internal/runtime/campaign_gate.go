@@ -4,49 +4,36 @@
 package runtime
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
+	"context"
 	"sync"
 
 	pgmanager "github.com/f1bonacc1/pg-manager"
+	"github.com/f1bonacc1/pg-manager/adapters/osfs"
 
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
 
 // pgdataComplete reports whether dataDir holds a complete PostgreSQL
-// cluster directory: both PG_VERSION and global/pg_control exist as
-// regular files.
+// cluster directory, using pg-manager's own rule (milestone 015,
+// pgmanager.ClassifyDataDir): PG_VERSION and global/pg_control both
+// present. A clone interrupted by a crash has PG_VERSION but not
+// pg_control, which the base backup protocol sends last (spec 005
+// research R-003), so it does not count. One rule on both sides: the
+// boot-window gate here and pg-manager's data-state records agree on
+// what "holds data" means.
 //
-// PG_VERSION alone is not enough. A clone interrupted by a process
-// crash leaves a directory that already has PG_VERSION, but the base
-// backup protocol sends global/pg_control last, so its absence marks
-// the clone as incomplete (specs/005-scale-out-1-to-3/research.md
-// R-003). Orderly clone failures already remove the target directory
-// inside pg-manager's executor.
-//
-// A missing file means "not complete" with a nil error; any other stat
-// failure is returned, and callers treat it as not complete
-// (fail-closed, FR-006). pg-manager has an equivalent internal check;
-// contracts/upstream-015.md asks for it to be exported so this
-// function can be deleted.
+// An unset data dir is "not complete" with a nil error; any other
+// inspection failure is returned and callers treat it as not complete
+// (fail-closed, FR-006).
 func pgdataComplete(dataDir string) (bool, error) {
 	if dataDir == "" {
 		return false, nil
 	}
-	for _, rel := range []string{"PG_VERSION", filepath.Join("global", "pg_control")} {
-		fi, err := os.Stat(filepath.Join(dataDir, rel))
-		if err != nil {
-			if os.IsNotExist(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("stat %s: %w", rel, err)
-		}
-		if !fi.Mode().IsRegular() {
-			return false, nil
-		}
+	st, err := pgmanager.ClassifyDataDir(context.Background(), osfs.New(), dataDir)
+	if err != nil {
+		return false, err
 	}
-	return true, nil
+	return st == pgmanager.DataStateComplete, nil
 }
 
 // campaigner is the part of *manager.Manager the lease gate consults.

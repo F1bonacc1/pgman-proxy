@@ -56,7 +56,7 @@ pgman-proxy does not upgrade PostgreSQL itself — it forwards
 `PrepareUpgrade` / `ExecuteUpgrade` to `pg-manager` and leaves binary
 swapping and the cross-node loop to the **host**. Minor (patch-level)
 rolling upgrades are supported today; major-version strategies are
-gated on v0.7.0.
+gated on pg-manager v0.8.0.
 
 See **[`docs/upgrade-orchestration.md`](docs/upgrade-orchestration.md)**
 for the step-by-step host orchestration guide.

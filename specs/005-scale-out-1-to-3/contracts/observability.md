@@ -42,7 +42,7 @@ Emitted when a managed configuration block is inserted, updated or removed (FR-0
 | `phase` | string | `post_init` or `boot` |
 | `reloaded` | bool | `true` iff a configuration reload was issued because the postmaster was running |
 
-### `identity_mismatch` (pass-through from pg-manager 015; subject `pgmanager.<cluster>.identity_mismatch`)
+### `identity.mismatch` / `identity.mismatch_cleared` (pass-through from pg-manager v0.7.0; subjects `pgmanager.<cluster>.identity.mismatch[_cleared]`)
 
 Forwarded through the existing coordination-event subscription into logs and the history stream. pgman-proxy adds no fields. The upstream payload (local and leader system identifiers, leader node id) is documented in [upstream-015.md](upstream-015.md).
 
@@ -63,7 +63,7 @@ Forwarded through the existing coordination-event subscription into logs and the
 | Property | Value |
 |---|---|
 | Description | This node's database identity matches the current leader's. |
-| Evidence schema | `doctor.evidence.cluster-identity/v1`: `{local_system_identifier, leader_system_identifier, leader_node_id, mismatch}` |
-| Severity | `fail` on mismatch; `pass` when identities match; `warn` when either identity is unknown (for example, a node still empty or bootstrapping) |
+| Evidence schema | `doctor.evidence.cluster-identity/v1`: `{mismatch}` plus, on mismatch, `{local_system_identifier, leader_system_identifier, leader_node_id}` |
+| Severity | `fail` while pg-manager reports a mismatch (`Status.IdentityMismatch` non-nil); `pass` otherwise. pg-manager reports nothing when identities match or either is unknown, so there is no separate `warn` case. `unknown` when `Status` errors |
 | Suggested fix | Advisory only (`BlastAdvisory`): "Two unrelated databases exist in this cluster. Do not wipe either before identifying which one holds the acknowledged writes; see docs/scale-out-1-to-3/runbook.md." |
 | Read-only | Yes: calls `Engine.Status` only (enforced by the existing read-only test) |

@@ -51,6 +51,11 @@ type MetricSet struct {
 	EmbeddedNATSRouteAuthFailures    *prometheus.CounterVec
 	EmbeddedNATSReloadOutcomes       *prometheus.CounterVec
 
+	// Feature 005 (contracts/observability.md): 1 while pg-manager reports
+	// that this standby follows a leader with a different database
+	// identity, 0 otherwise.
+	ClusterIdentityMismatch prometheus.Gauge
+
 	// Watch SSE metrics (feature 003 T088 / contracts/control-plane-extensions.md § 1).
 	WatchStreamsActive      *prometheus.GaugeVec
 	WatchEventsEmittedTotal *prometheus.CounterVec
@@ -211,6 +216,12 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		ConstLabels: constLabels,
 	}, []string{"topic", "reason"})
 
+	m.ClusterIdentityMismatch = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "pgman_proxy_cluster_identity_mismatch",
+		Help:        "1 iff this standby follows a leader whose database identity differs from its own (pg-manager Status.IdentityMismatch).",
+		ConstLabels: constLabels,
+	})
+
 	reg.MustRegister(
 		m.ConnectionsOpen, m.ConnectionsAcceptedTot, m.ConnectionsClosedTot, m.ConnectionDuration,
 		m.QueryLatency, m.ErrorsTotal,
@@ -222,6 +233,7 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		m.EmbeddedNATSStorageBytes, m.EmbeddedNATSStorageDegraded,
 		m.EmbeddedNATSLifecycleEventsTotal, m.EmbeddedNATSRouteAuthFailures, m.EmbeddedNATSReloadOutcomes,
 		m.WatchStreamsActive, m.WatchEventsEmittedTotal, m.WatchGapsTotal,
+		m.ClusterIdentityMismatch,
 	)
 	return m
 }

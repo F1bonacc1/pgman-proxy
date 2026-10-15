@@ -26,6 +26,7 @@ import (
 // no I/O per tick.
 func startObservabilityGauges(ctx context.Context, m *obs.MetricSet, emb *embedded.Server,
 	leader interface{ IsLeader() bool }, replicas int, overridden bool,
+	identityMismatch func() bool,
 ) {
 	if m == nil || emb == nil || leader == nil {
 		return
@@ -42,6 +43,9 @@ func startObservabilityGauges(ctx context.Context, m *obs.MetricSet, emb *embedd
 		isLeader := leader.IsLeader()
 		m.LeadershipState.WithLabelValues("leader").Set(boolGauge(isLeader))
 		m.LeadershipState.WithLabelValues("follower").Set(boolGauge(!isLeader))
+		if identityMismatch != nil {
+			m.ClusterIdentityMismatch.Set(boolGauge(identityMismatch()))
+		}
 	}
 	update()
 	go func() {
