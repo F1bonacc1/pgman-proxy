@@ -8,7 +8,7 @@
 ## What changes, what is lost
 
 - **Changes**: node-a keeps its database and stays primary. node-b and node-c clone it.
-- **Restarts**: node-a restarts once. The write outage is measured in seconds (about 9 s on a workstation with the default 5 s lease; the CI budget is 30 s).
+- **Restarts**: node-a restarts once. The write outage is measured in seconds: 7.6 to 10.7 s (median about 8.3 s) across 15 test expansions on a workstation with the default 5 s lease. The CI budget is 30 s.
 - **Lost**: everything in node-a's embedded coordination store (JetStream):
   - divergence and identity fences;
   - auto-demote and auto-rebootstrap cooldown history;

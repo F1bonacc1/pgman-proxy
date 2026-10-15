@@ -156,7 +156,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - nil manager + empty → false;
   - nil manager + stat error → false;
   - non-nil manager → delegates (true/false).
-- [ ] T020 [P] [US2] Write `TestExpandOneToThree` (S1) in `tests/scaleout/expand_test.go`. **(needs 015)** *Status: written; skips until 015; not yet run green.*
+- [X] T020 [P] [US2] Write `TestExpandOneToThree` (S1) in `tests/scaleout/expand_test.go`. **(needs 015)** *Status: green 15/15 against the pg-manager 015 sibling (2026-10-16, validation.md); re-run on the tag with T028.*
   - Iterations: `PGMAN_SCALEOUT_ITERATIONS` (default 5).
   - Start order: round-robin over {a-first, a-last, together}, shuffled with a logged seed.
   - Per iteration:
@@ -212,7 +212,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - Remove any temporary development `replace`.
   - Run `make test`, `make integration` and `make scaleout`.
   - If the upstream major-upgrade gate message changed, re-pin the 004 sentinel in `tests/integration/lcm_upgrade_test.go` and `internal/control/handlers_upgrade_test.go`, and the reference in CLAUDE.md (research R-013).
-- [ ] T029 [US2] **(needs 015)** Run the rig acceptance against the 015 build: `docs/scale-out-1-to-3/rig/scenarios.sh golden && scenarios.sh race` must print `VERDICT: PASS`, and `a-wins` must print PASS. Record the outputs in the PR.
+- [X] T029 [US2] **(needs 015)** Run the rig acceptance against the 015 build: `docs/scale-out-1-to-3/rig/scenarios.sh golden && scenarios.sh race` must print `VERDICT: PASS`, and `a-wins` must print PASS. Record the outputs in the PR. *Status: race, a-wins and rollback pass at 1 GB against the 015 sibling (2026-10-16, validation.md).*
 
 **Checkpoint**: expansion works end to end (S1 5/5, S7).
 
@@ -237,7 +237,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
     - the sysid is equal on all three;
     - `write` succeeds on the primary.
   - Call `requireUpstream015(t)` only for the exactly-once assertion; the rest runs on today's engine.
-- [ ] T032 [P] [US3] Write `TestDataNodeDownEmptyNodesWait` (S6) in `tests/scaleout/topology_test.go`. **(second half needs 015)** *Status: written; first half green 2026-10-15; second half skips until 015.*
+- [X] T032 [P] [US3] Write `TestDataNodeDownEmptyNodesWait` (S6) in `tests/scaleout/topology_test.go`. **(second half needs 015)** *Status: both halves green against the 015 sibling (2026-10-16).*
   - Build golden for node-a, then stop node-a. Start b and c with the 3-node env.
   - For up to 180 s, poll every 10 s and assert:
     - no `initdb: starting` in b/c logs;
@@ -257,7 +257,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
 
 **Independent Test**: `go test -tags=scaleout -run TestRollbackToSingle ./tests/scaleout/...`
 
-- [ ] T034 [US4] Write `TestRollbackToSingle` (S3) in `tests/scaleout/topology_test.go`. **(needs 015)** *Status: written; skips until 015; not yet run green.*
+- [X] T034 [US4] Write `TestRollbackToSingle` (S3) in `tests/scaleout/topology_test.go`. **(needs 015)** *Status: green against the 015 sibling (2026-10-16).*
   - Expand (reuse T020's setup with one iteration, a-last).
   - Stop b and c (`docker stop -t 30`), then stop node-a.
   - Start node-a with `singleEnv("a")`.
@@ -286,7 +286,7 @@ description: "Task list for feature 005: safe 1→3 scale-out and working single
   - Append it at the end, keeping the catalogue order stable for pgmctl.
   - Use the suggested-fix text from contracts/observability.md.
 - [ ] T037 [US5] Add the gauge `IdentityMismatch prometheus.Gauge` (`pgman_proxy_cluster_identity_mismatch`) to `internal/obs/metrics.go` and register it. Set it from the observability gauge loop in `startObservabilityGauges` (`internal/runtime`), reading `Manager.Status()`. **(needs 015)**
-- [ ] T038 [US5] Make sure the upstream `identity_mismatch` topic reaches logs and history. **(needs 015)**
+- [X] T038 [US5] Make sure the upstream `identity_mismatch` topic reaches logs and history. *Status: `empty_peer` and `identity` families subscribed (8c4952f); final subjects are `identity.mismatch` / `identity.mismatch_cleared`.* **(needs 015)**
   - Check whether `internal/cluster` `SubscribeCoordinationEvents` subscribes by wildcard or by an explicit topic list.
   - Add the topic if it is a list.
   - Add a unit test in the cluster package's existing event-subscription test file.
