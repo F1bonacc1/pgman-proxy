@@ -109,25 +109,36 @@ default `GITHUB_TOKEN` cannot read other private repos.
 The proxy hop adds <1 ms p99 to a `SELECT 1` round-trip vs. direct PG
 on the same host. The benchmark lives at
 `tests/integration/perf_test.go` and runs as part of `make integration`.
-It records p50 / p99 / sample count via `t.Logf`. The test times the
-full client round-trip through the proxy and has no direct-PG leg, so
-the recorded p99 is an upper bound on the hop overhead, not the
-overhead itself.
+It waits for a stable primary, then interleaves 10,000 samples on each
+of three paths to that primary's Postgres and logs p50 / p99 per path
+via `t.Logf`:
+
+- **direct**: the primary's Postgres port, skipping the proxy (baseline)
+- **local**: the primary's own proxy, the hop SC-003 budgets
+- **forwarded**: a standby's proxy, which forwards to the primary
+
+Hop overhead is local minus direct, as a difference of percentiles. In
+this harness every container shares one host bridge, so forwarding
+costs only a few µs more than the local hop; on separate hosts add one
+network round-trip.
 
 **How to record a baseline:**
 
 ```bash
-make integration  # full suite
-go test -tags=integration -run=TestPerf_ProxyHopOverhead -v ./tests/integration/...
+go test -tags=integration -count=3 -run=TestPerf_ProxyHopOverhead -v ./tests/integration/...
 ```
 
-Update this section with the measured number whenever you cut a tag.
-The constitutional gate (`.specify/memory/constitution.md`) flags any
-deviation > 10% from the recorded baseline as a regression.
+Record the median of the three runs whenever you cut a tag. The
+constitutional gate (`.specify/memory/constitution.md`) flags any
+deviation > 10% from the recorded baseline as a regression. Gate on
+**local p99**: it moved about 5% between back-to-back runs, while the
+hop overhead (a difference of two noisy percentiles) moved 8 to 10%,
+too close to the threshold to gate on alone.
 
-| Date       | Hardware            | p50    | p99    | Notes |
-|------------|---------------------|--------|--------|-------|
-| 2026-10-16 | AMD Ryzen 9 5900HX (16 threads), linux/amd64, docker compose 3-node harness | 86.2 µs | 161.7 µs | `SELECT 1` via node-a, 1000 samples after 50 warm-up, single run on `v0.3.0` (`72ff4f5`). |
+| Date       | Hardware | Version | Direct p50 / p99 | Local p50 / p99 | Hop overhead p50 / p99 | Forwarded p50 / p99 | Notes |
+|------------|----------|---------|------------------|-----------------|------------------------|---------------------|-------|
+| 2026-10-16 | AMD Ryzen 9 5900HX (16 threads), linux/amd64, docker compose 3-node harness | `v0.3.0` | 67.7 / 118.5 µs | 99.9 / 166.2 µs | 32.2 / 50.5 µs | 104.4 / 176.6 µs | Median of 3 runs, 10k interleaved samples per leg, primary node-a. Ranges: local p99 165.3 to 173.1 µs, overhead p99 46.7 to 50.5 µs. |
+| 2026-10-16 | same | `v0.3.0` | n/a | 86.2 / 161.7 µs | n/a | n/a | Superseded. Earlier test version: proxy leg only, via node-a (primary or not unrecorded), 1000 samples, single run. |
 
 ## pgmctl — operator CLI
 

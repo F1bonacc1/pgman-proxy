@@ -32,6 +32,7 @@ import (
 type Peer struct {
 	Name      string // compose service name (e.g. "node-a")
 	PsqlPort  int    // host port mapped to the peer's :6432
+	PGPort    int    // host port mapped to the peer's Postgres :5432 (bypasses the proxy)
 	HealthURL string // "http://127.0.0.1:<port>/" — append /healthz, /readyz, /metrics
 }
 
@@ -39,9 +40,9 @@ type Peer struct {
 // compose file. The slice order is stable so tests can index by role.
 func Peers() []Peer {
 	return []Peer{
-		{Name: "node-a", PsqlPort: 16432, HealthURL: "http://127.0.0.1:19090"},
-		{Name: "node-b", PsqlPort: 16433, HealthURL: "http://127.0.0.1:19091"},
-		{Name: "node-c", PsqlPort: 16434, HealthURL: "http://127.0.0.1:19092"},
+		{Name: "node-a", PsqlPort: 16432, PGPort: 15432, HealthURL: "http://127.0.0.1:19090"},
+		{Name: "node-b", PsqlPort: 16433, PGPort: 15433, HealthURL: "http://127.0.0.1:19091"},
+		{Name: "node-c", PsqlPort: 16434, PGPort: 15434, HealthURL: "http://127.0.0.1:19092"},
 	}
 }
 
@@ -52,6 +53,16 @@ func (p Peer) DSN() string {
 	return fmt.Sprintf(
 		"host=127.0.0.1 port=%d user=postgres dbname=postgres sslmode=disable connect_timeout=5",
 		p.PsqlPort,
+	)
+}
+
+// DirectDSN is DSN aimed at the peer's Postgres itself, skipping the
+// proxy. Only the SC-003 perf test uses it, as the baseline leg; every
+// functional test goes through the proxy.
+func (p Peer) DirectDSN() string {
+	return fmt.Sprintf(
+		"host=127.0.0.1 port=%d user=postgres dbname=postgres sslmode=disable connect_timeout=5",
+		p.PGPort,
 	)
 }
 

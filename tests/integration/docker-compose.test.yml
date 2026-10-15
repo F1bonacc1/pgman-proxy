@@ -6,7 +6,9 @@
 # initdb / pg_basebackup / pg_ctl). The compose file is reachable only
 # through the per-project Docker network and from the host via the
 # explicit port bindings below; the host bindings make psql probing
-# from Go integration tests trivial.
+# from Go integration tests trivial. Each peer's Postgres :5432 is
+# bound too (1543x) so the SC-003 perf test can time a direct-PG leg
+# next to the proxy leg; nothing else dials it.
 #
 # Usage (handled automatically by tests/integration/compose_main_test.go):
 #
@@ -140,6 +142,7 @@ services:
       PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR: node-a:5432
     ports:
       - "16432:6432"
+      - "15432:5432"
       - "19090:9090"
 
   node-b:
@@ -154,6 +157,7 @@ services:
         condition: service_started
     ports:
       - "16433:6432"
+      - "15433:5432"
       - "19091:9090"
 
   node-c:
@@ -168,4 +172,5 @@ services:
         condition: service_started
     ports:
       - "16434:6432"
+      - "15434:5432"
       - "19092:9090"
