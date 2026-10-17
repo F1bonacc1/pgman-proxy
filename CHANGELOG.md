@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (engine): pg-manager v0.7.1, a fresh cluster no longer wedges with no primary
+
+pg-manager v0.7.0 could leave a brand-new three-node cluster with no
+primary until an operator cleared every node. The elected leader
+refused initdb because a peer's data-state record had briefly gone
+stale, and resigned after the other nodes had started cloning from it.
+Their clones failed against a server that never started, and they
+parked in pg-manager's operator-sticky `StateFailed`. pg-manager
+v0.7.1 fixes both halves:
+
+- data-state records are rewritten on every tick, so a healthy peer no
+  longer reads as unreported between ticks;
+- a clone whose source never accepted a connection, with the data
+  directory still empty, returns to Init instead of `StateFailed`, and
+  the node clones from the next leader or initializes.
+
+Behavior change: a joining node that cannot reach its clone source at
+all (including a host name that does not resolve) now cycles through
+Init about every 24 s and logs `bootstrap: clone source never answered
+and nothing was copied; returning to init` each round. `pgmctl doctor`'s
+"no peer in StateFailed" check no longer fires for it; `pgmctl
+topology` still shows it down, because Postgres is not up.
+
+No pgman-proxy code or config changes. Dependencies are unchanged
+apart from the pg-manager pin.
+
 ### Added (scale-out): expanding a single node to three keeps its data
 
 A single node can now be expanded to three nodes by pushing the 3-node
