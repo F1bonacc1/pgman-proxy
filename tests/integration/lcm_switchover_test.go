@@ -57,7 +57,12 @@ func TestLCM_Switchover_ToPeerB(t *testing.T) {
 	// This also strengthens the test: previously it asserted only that
 	// the request was accepted and audited, never that leadership
 	// actually moved to the requested target.
-	primary, err := waitForConvergence(ctx, time.Now().Add(2*time.Minute))
+	//
+	// Wait for convergence ON the target: while its promotion is
+	// refused and retried, the old primary briefly looks converged.
+	// A switchover that is abandoned still fails here, once the budget
+	// runs out with the old primary in place.
+	primary, err := waitForConvergenceOn(ctx, time.Now().Add(2*time.Minute), "node-b")
 	if err != nil {
 		t.Fatalf("cluster did not converge after switchover: %v", err)
 	}

@@ -157,6 +157,28 @@ func retryLCM(t *testing.T, ctx context.Context, peer string, method, path, body
 	}
 }
 
+// waitForConvergenceOn is waitForConvergence for a requested leadership
+// move: it keeps waiting until the cluster converges on want, and
+// returns the last converged primary when the deadline passes first.
+// A switchover is accepted before it completes. While the target's
+// promotion is refused and retried (pg-manager B-022: target still
+// catching up), the old primary stays the only writable node with both
+// standbys streaming, which waitForConvergence alone reports as
+// converged.
+func waitForConvergenceOn(ctx context.Context, deadline time.Time, want string) (string, error) {
+	for {
+		primary, err := waitForConvergence(ctx, deadline)
+		if err != nil || primary == want || time.Now().After(deadline) {
+			return primary, err
+		}
+		select {
+		case <-ctx.Done():
+			return primary, ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
 // waitForConvergence blocks until the cluster reports exactly one
 // primary (same node across three consecutive polls, filtering the
 // transient windows where a demoting ex-primary briefly answers
