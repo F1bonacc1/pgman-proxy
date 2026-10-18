@@ -60,10 +60,31 @@ func singleEnv(node string) map[string]string {
 	return env
 }
 
+// Node letters of the 3- and 5-peer presets. node-a is the original
+// single node in every expansion.
+var (
+	threeNodes = []string{"a", "b", "c"}
+	fiveNodes  = []string{"a", "b", "c", "d", "e"}
+)
+
 // threeEnv is node's config in the a/b/c 3-peer cluster (rig three-x.env).
 func threeEnv(node string) map[string]string {
+	return clusterEnv(node, threeNodes)
+}
+
+// fiveEnv is node's config in the a..e 5-peer cluster.
+func fiveEnv(node string) map[string]string {
+	return clusterEnv(node, fiveNodes)
+}
+
+// clusterEnv is node's config in the cluster of peers: every peer
+// listed, the declared size equal to the peer count, and routes to
+// every other peer.
+func clusterEnv(node string, peers []string) map[string]string {
+	ids := make([]string, 0, len(peers))
 	var routes []string
-	for _, n := range []string{"a", "b", "c"} {
+	for _, n := range peers {
+		ids = append(ids, "node-"+n)
 		if n != node {
 			routes = append(routes, "node-"+n+":6222")
 		}
@@ -71,8 +92,8 @@ func threeEnv(node string) map[string]string {
 	env := commonEnv()
 	maps.Copy(env, map[string]string{
 		"PGMAN_PROXY_NODE_ID":                "node-" + node,
-		"PGMAN_PROXY_PEERS":                  "node-a,node-b,node-c",
-		"PGMAN_PROXY_CLUSTER_DECLARED_SIZE":  "3",
+		"PGMAN_PROXY_PEERS":                  strings.Join(ids, ","),
+		"PGMAN_PROXY_CLUSTER_DECLARED_SIZE":  strconv.Itoa(len(peers)),
 		"PGMAN_PROXY_CLUSTER_ROUTE_PEERS":    strings.Join(routes, ","),
 		"PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR": "node-" + node + ":5432",
 	})

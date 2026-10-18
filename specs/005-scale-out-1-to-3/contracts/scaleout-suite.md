@@ -20,7 +20,7 @@ make scaleout       # go test -trimpath -count=1 -timeout=40m -tags=scaleout ./t
 - **Isolation**: every test uses a unique prefix `pgso-<scenario>-<6 hex>` for its docker network, volumes (`<prefix>-<node>-data`, `<prefix>-<node>-js`) and containers (`<prefix>-node-<x>`). Containers get the network alias `node-<x>`, so peer ids resolve as DNS names (the same convention as compose).
 - **Cleanup**: `t.Cleanup` removes everything unless `PGMAN_SCALEOUT_KEEP=1`. On failure, every container's logs are attached to the test output before removal.
 - **Image**: `TestMain` builds `tests/integration/Dockerfile` with the parent directory of the repo as context (same as compose), once per run.
-- **Node configs**: env presets equivalent to `docs/scale-out-1-to-3/rig/{common,single-a,three-x}.env`. Credentials are test-only literals (the same pattern as the compose file).
+- **Node configs**: env presets equivalent to `docs/scale-out-1-to-3/rig/{common,single-a,three-x}.env`, plus a five-peer preset (node-a..node-e, declared size 5) built the same way for S8-S11. Credentials are test-only literals (the same pattern as the compose file).
 
 ## Probes (all via `docker exec`, local socket)
 
@@ -47,6 +47,13 @@ make scaleout       # go test -trimpath -count=1 -timeout=40m -tags=scaleout ./t
 | S2 | yes (for "exactly once") | three empty nodes, 3-node config | exactly one node logs `initdb: starting`; the others clone from it; one sysid; writes succeed | 4 min |
 | S3 | yes | after S1-style expansion: stop b, c; node-a single-node config | node-a primary and writable ≤ 30 s; `ssn = ''`; `embedded_nats.store_archived` (clustered) logged; rows intact | 3 min |
 | S6 | partial | golden volume for node-a but node-a **stopped**; b, c empty, 3-node config | over 180 s: no `initdb: starting` on b/c, no `PG_VERSION` on b/c, no node accepts writes; b and c exit 75 (route mesh needs every peer, F15; this part runs today). **With 015**: start node-a, restart b and c (as a supervisor would) → S1 assertions hold | 8 min |
+| S8 | yes | golden node-a (50 k rows) + empty b..e; 5-node config; each start order once | S1 assertions for five nodes: same sysid and golden rows on all five; node-a primary; `streaming(node-a) == 4`; final `ssn` names node-b..node-e; no `initdb: starting` on b..e; `embedded_nats.store_archived` on node-a; longest write gap through node-a < 30 s | 3 × 4 min |
+| S9 | partial | S6 with five peers: node-a **stopped**, b..e empty (four of five coordination votes) | over 180 s: no `initdb: starting`, no `PG_VERSION`, no writes on b..e; b..e exit 75. **With 015**: start all five → S8 assertions hold | 9 min |
+| S10 | no | golden node-a restarted into the 5-node config with b, c, d started and e **never** started | no `initdb: starting`, no `PG_VERSION`, no writes on b..d; node-a, b, c, d all exit 75; node-a back on its single-node config is primary and writable ≤ 30 s with the golden sysid and rows | 6 min |
+| S11 | yes | after an S8-style expansion: stop b..e, node-a single-node config | node-a primary and writable ≤ 30 s; `ssn = ''`; rows intact | 4 min |
+
+S1, S8, S9 and S11 also require `pgman_proxy_embedded_nats_routes_meshed`
+to equal the number of other peers on every node (runbook "Verify").
 
 `make integration` (unchanged) remains the regression test that a fresh
 3-node bootstrap from empty volumes works (FR-018). S2 adds the
