@@ -28,46 +28,68 @@ const (
 // node-a restarts, in the given order.
 func expand(tp *topo, order string) {
 	tp.t.Helper()
-	tp.ensureVolumes("b")
-	tp.ensureVolumes("c")
+	expandTo(tp, order, threeNodes[1:], threeEnv)
+}
+
+// expandTo pushes the config env builds: newNodes start empty and
+// node-a restarts, in the given order.
+func expandTo(tp *topo, order string, newNodes []string, env func(node string) map[string]string) {
+	tp.t.Helper()
+	for _, n := range newNodes {
+		tp.ensureVolumes(n)
+	}
 	restartA := func() {
 		tp.stop("a", 30*time.Second)
-		tp.start("a", threeEnv("a"))
+		tp.start("a", env("a"))
 	}
-	startBC := func() {
-		tp.start("b", threeEnv("b"))
-		tp.start("c", threeEnv("c"))
+	startNew := func() {
+		for _, n := range newNodes {
+			tp.start(n, env(n))
+		}
 	}
 	switch order {
 	case orderAFirst:
 		restartA()
-		startBC()
+		startNew()
 	case orderALast:
-		startBC()
+		startNew()
 		time.Sleep(time.Second)
 		restartA()
 	case orderTogether:
 		tp.stop("a", 30*time.Second)
-		tp.start("a", threeEnv("a"))
-		startBC()
+		tp.start("a", env("a"))
+		startNew()
 	default:
 		tp.t.Fatalf("unknown start order %q", order)
 	}
 }
 
 // assertExpanded checks the end state of a 1→3 expansion from g
-// (spec 005 US2 AS-1/AS-3, SC-002, FR-008): one database identity,
-// every golden row everywhere, node-a primary with both new nodes
-// streaming and named in its sync set, and no new database created on
-// the new nodes.
+// (spec 005 US2 AS-1/AS-3, SC-002, FR-008).
 func assertExpanded(tp *topo, g golden, budget time.Duration) {
 	tp.t.Helper()
-	waitFor(tp.t, budget, 2*time.Second, "node-a primary with node-b and node-c streaming", func() (bool, string) {
-		ra, rb, rc, s := tp.role("a"), tp.role("b"), tp.role("c"), tp.streaming("a")
-		obs := fmt.Sprintf("roles a=%s b=%s c=%s, streaming(a)=%d", ra, rb, rc, s)
-		return ra == "primary" && rb == "standby" && rc == "standby" && s == 2, obs
+	assertExpandedTo(tp, g, threeNodes, budget)
+}
+
+// assertExpandedTo checks the end state of an expansion of node-a to
+// nodes: one database identity, every golden row everywhere, node-a
+// primary with every new node streaming and named in its sync set, a
+// complete route mesh, and no new database created on the new nodes.
+func assertExpandedTo(tp *topo, g golden, nodes []string, budget time.Duration) {
+	tp.t.Helper()
+	newNodes := nodes[1:]
+	waitFor(tp.t, budget, 2*time.Second, fmt.Sprintf("node-a primary with %d streaming standbys", len(newNodes)), func() (bool, string) {
+		roles := make([]string, 0, len(nodes))
+		ok := true
+		for _, n := range nodes {
+			r := tp.role(n)
+			roles = append(roles, n+"="+r)
+			ok = ok && (r == "primary") == (n == "a") && r != "down"
+		}
+		s := tp.streaming("a")
+		return ok && s == len(newNodes), fmt.Sprintf("roles %s, streaming(a)=%d", strings.Join(roles, " "), s)
 	})
-	for _, n := range []string{"a", "b", "c"} {
+	for _, n := range nodes {
 		if id := tp.sysid(n); id != g.sysid {
 			tp.t.Errorf("node-%s system identifier = %q, want golden %q (a second database exists)", n, id, g.sysid)
 		}
@@ -75,14 +97,24 @@ func assertExpanded(tp *topo, g golden, budget time.Duration) {
 	// A standby replays asynchronously until the sync set settles;
 	// poll rather than read once.
 	waitFor(tp.t, time.Minute, 2*time.Second, "golden rows on every node", func() (bool, string) {
-		ra, rb, rc := tp.rows("a", "bulk"), tp.rows("b", "bulk"), tp.rows("c", "bulk")
-		return ra == g.rows && rb == g.rows && rc == g.rows, fmt.Sprintf("bulk rows a=%d b=%d c=%d want %d", ra, rb, rc, g.rows)
+		obs := make([]string, 0, len(nodes))
+		ok := true
+		for _, n := range nodes {
+			r := tp.rows(n, "bulk")
+			obs = append(obs, fmt.Sprintf("%s=%d", n, r))
+			ok = ok && r == g.rows
+		}
+		return ok, fmt.Sprintf("bulk rows %s want %d", strings.Join(obs, " "), g.rows)
 	})
-	waitFor(tp.t, time.Minute, 2*time.Second, "node-a sync set names node-b and node-c", func() (bool, string) {
+	waitFor(tp.t, time.Minute, 2*time.Second, "node-a sync set names every new node", func() (bool, string) {
 		ssn, err := tp.ssn("a")
-		return err == nil && strings.Contains(ssn, "node-b") && strings.Contains(ssn, "node-c"), "synchronous_standby_names=" + ssn
+		ok := err == nil
+		for _, n := range newNodes {
+			ok = ok && strings.Contains(ssn, "node-"+n)
+		}
+		return ok, "synchronous_standby_names=" + ssn
 	})
-	for _, n := range []string{"b", "c"} {
+	for _, n := range newNodes {
 		logs := tp.allLogs(n)
 		if strings.Contains(logs, "initdb: starting") {
 			tp.t.Errorf("node-%s initialized its own database during the expansion", n)
@@ -95,8 +127,20 @@ func assertExpanded(tp *topo, g golden, budget time.Duration) {
 		!strings.Contains(logs, `"actual_layout":"standalone"`) {
 		tp.t.Error("node-a did not move its standalone JetStream store aside")
 	}
+	// Runbook "Verify": every node meshes with every other node.
+	meshed := strconv.Itoa(len(newNodes))
+	waitFor(tp.t, time.Minute, 2*time.Second, "a complete route mesh on every node", func() (bool, string) {
+		obs := make([]string, 0, len(nodes))
+		ok := true
+		for _, n := range nodes {
+			v, _ := tp.metric(n, "pgman_proxy_embedded_nats_routes_meshed")
+			obs = append(obs, n+"="+v)
+			ok = ok && v == meshed
+		}
+		return ok, fmt.Sprintf("routes_meshed %s want %s", strings.Join(obs, " "), meshed)
+	})
 	// WI-C4: no node reports an identity mismatch (one database).
-	for _, n := range []string{"a", "b", "c"} {
+	for _, n := range nodes {
 		if v, ok := tp.identityMismatchGauge(n); !ok || v != "0" {
 			tp.t.Errorf("node-%s pgman_proxy_cluster_identity_mismatch = %q (found %v), want 0", n, v, ok)
 		}
@@ -106,12 +150,18 @@ func assertExpanded(tp *topo, g golden, budget time.Duration) {
 // identityMismatchGauge scrapes node's metrics endpoint and returns the
 // value of pgman_proxy_cluster_identity_mismatch.
 func (tp *topo) identityMismatchGauge(node string) (string, bool) {
+	return tp.metric(node, "pgman_proxy_cluster_identity_mismatch")
+}
+
+// metric scrapes node's metrics endpoint and returns the value of the
+// first sample of name.
+func (tp *topo) metric(node, name string) (string, bool) {
 	out, err := tp.exec(node, 10*time.Second, "curl", "-sf", "http://127.0.0.1:9090/metrics")
 	if err != nil {
 		return "", false
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "pgman_proxy_cluster_identity_mismatch{") || strings.HasPrefix(line, "pgman_proxy_cluster_identity_mismatch ") {
+		if strings.HasPrefix(line, name+"{") || strings.HasPrefix(line, name+" ") {
 			f := strings.Fields(line)
 			return f[len(f)-1], true
 		}

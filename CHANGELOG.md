@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Tests: 1→5 scale-out scenarios
+
+`tests/scaleout` now also expands a single node to five (S8-S11 in
+`specs/005-scale-out-1-to-3/contracts/scaleout-suite.md`): every start
+order, the data holder down while four empty nodes wait, one new node
+never starting, and rollback to one node. The runbook procedure is
+unchanged; only the peer count differs. Expansion checks also require a
+complete route mesh on every node.
+
 ### Fixed (engine): pg-manager v0.7.1, a fresh cluster no longer wedges with no primary
 
 pg-manager v0.7.0 could leave a brand-new three-node cluster with no
