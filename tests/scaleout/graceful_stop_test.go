@@ -88,6 +88,7 @@ func assertStoppedPostgres(tp *topo, node string) {
 	logs := tp.logs(node)
 	for _, line := range strings.Split(logs, "\n") {
 		if strings.Contains(line, `"msg":"postgres stopped"`) {
+			tp.t.Logf("node-%s drain: %s", node, strings.TrimSpace(line))
 			if !strings.Contains(line, `"mode":"fast"`) {
 				tp.t.Errorf("node-%s stopped Postgres in a degraded mode: %s", node, line)
 			}
@@ -197,6 +198,49 @@ done`
 			t.Errorf("node-%s needed a repair to rejoin (log has %q); a clean stop must not", old, marker)
 		}
 	}
+}
+
+// TestGracefulOperatorRestart is S9c (pgman-proxy issue #11): POST
+// /v1/restart target=proxy must drain like a stop signal. Before the
+// fix the self-terminator called os.Exit(0) right after the response,
+// skipping the drain, so Postgres died with the container.
+func TestGracefulOperatorRestart(t *testing.T) {
+	tp := newTopo(t, "s9c")
+	primary, standbys := formThree(tp)
+	s := standbys[0]
+
+	// The restart pre-flight refuses without a detectable supervisor.
+	// The test container has none, and assume_supervised has no env
+	// override, so mimic process-compose, which detection reads from
+	// PC_PROC_NAME.
+	tp.stop(s, gracefulStopTimeout)
+	env := threeEnv(s)
+	env["PC_PROC_NAME"] = "scaleout"
+	tp.start(s, env)
+	waitFor(t, 2*time.Minute, 2*time.Second, "node-"+s+" streaming", func() (bool, string) {
+		n := tp.streaming(primary)
+		return n == 2, fmt.Sprintf("streaming(%s)=%d", primary, n)
+	})
+
+	code, err := tp.exec(s, 30*time.Second, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+		"-X", "POST", "-H", "Authorization: Bearer "+commonEnv()["PGMAN_PROXY_CONTROL_TOKEN"],
+		"-H", "Content-Type: application/json",
+		"-d", `{"target":"proxy","target_node":"node-`+s+`"}`,
+		"http://127.0.0.1:9091/v1/restart")
+	if err != nil || strings.TrimSpace(code) != "200" {
+		t.Fatalf("POST /v1/restart = %q (%v), want 200", code, err)
+	}
+	exit, err := tp.wait(s, gracefulStopTimeout)
+	if err != nil {
+		t.Fatalf("waiting for node-%s to exit: %v", s, err)
+	}
+	if exit != 0 {
+		t.Errorf("node-%s exited %d after an operator restart, want 0", s, exit)
+	}
+	if st := tp.clusterState(s); st != "shut down in recovery" {
+		t.Fatalf("node-%s cluster state = %q after an operator restart, want %q", s, st, "shut down in recovery")
+	}
+	assertStoppedPostgres(tp, s)
 }
 
 // ackedIDs parses the writer's "ok <id>" lines.

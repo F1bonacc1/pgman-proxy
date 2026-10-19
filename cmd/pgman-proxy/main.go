@@ -153,10 +153,16 @@ func run(args []string) int {
 	}()
 
 	logger := obs.NewLogger(os.Stderr, cfg.Obs.LogLevel, cfg.Cluster.ID, cfg.Node.ID, "main")
-	ctx, cancelSignals := runtime.SignalContext(context.Background(), logger)
+	sigCtx, cancelSignals := runtime.SignalContext(context.Background(), logger)
 	defer cancelSignals()
+	// shutdown starts the graceful shutdown without a signal (operator
+	// restart, Manager.Start returning). Unlike cancelSignals it keeps
+	// the signal handlers installed, so a SIGTERM that arrives during
+	// the drain cannot kill the process while Postgres is shutting down.
+	ctx, shutdown := context.WithCancel(sigCtx)
+	defer shutdown()
 
-	res, startErr := runtime.Start(ctx, cfg, version, cancelSignals)
+	res, startErr := runtime.Start(ctx, cfg, version, shutdown)
 	if startErr != nil {
 		logger.Error("startup failed",
 			pgmanager.Field{Key: "code", Value: startErr.Code},
@@ -211,7 +217,7 @@ func run(args []string) int {
 		// Manager.Start returned BEFORE shutdown — singleton-claim
 		// budget exhausted, setup failure, or similar. Cancel ctx so
 		// downstream goroutines wind down.
-		cancelSignals()
+		shutdown()
 	}
 
 	exitCode := runtime.ExitOK
