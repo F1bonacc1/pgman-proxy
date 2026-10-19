@@ -53,10 +53,11 @@ type ProxySelfTerminator interface {
 	// validate the request body's target_node before draining.
 	LocalNodeID() string
 	// SelfTerminate is invoked AFTER the 200 envelope has been
-	// flushed to the client. It MUST drain the data plane, close
-	// every listener, and call os.Exit(0). Returning from this
-	// method without exiting leaves the cluster with a half-dead
-	// peer.
+	// flushed to the client. It MUST start the process's graceful
+	// shutdown (the SIGTERM path: drain, stop Postgres, release the
+	// lease) after which the process exits 0. It may return before
+	// the process exits; it must not skip the drain with a bare
+	// os.Exit.
 	SelfTerminate(ctx context.Context, reason string)
 }
 

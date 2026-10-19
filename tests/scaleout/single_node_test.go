@@ -38,6 +38,10 @@ func TestSingleNodeFreshWritesAndRestart(t *testing.T) {
 	}
 
 	tp.stop("a", 30*time.Second)
+	// Issue #11: the drain stops Postgres, so no crash recovery follows.
+	if st := tp.clusterState("a"); st != "shut down" {
+		t.Errorf("cluster state = %q after docker stop, want %q", st, "shut down")
+	}
 	restart := time.Now()
 	tp.start("a", singleEnv("a"))
 	tp.waitPrimary("a", 30*time.Second)

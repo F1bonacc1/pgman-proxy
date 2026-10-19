@@ -36,6 +36,7 @@ type StartupResult struct {
 	Embedded             *embedded.Server // feature 002: in-process NATS server (replaces external NATS)
 	Cluster              *cluster.Handles
 	Manager              *manager.Manager
+	Postgres             pgmanager.PostgresExecutor // issue #11: the drain stops Postgres through it
 	Conn                 *nats.Conn
 	EventSub             []*nats.Subscription
 	Control              *control.Server
@@ -65,10 +66,15 @@ func (e *StartupError) Unwrap() error { return e.Err }
 // is responsible for tearing down whatever was already constructed
 // (StartupResult fields are populated incrementally).
 //
+// shutdown starts the process's graceful shutdown (main passes the
+// cancel of its signal context). The control plane's /v1/restart
+// target=proxy handler calls it, so an operator restart drains like a
+// SIGTERM does.
+//
 // Note: gate #10 (control-plane bind) and #11 (initial LCM-audit emit)
 // will be wired by the US4 phase; this function returns the populated
 // StartupResult through gate #9 today and the LCM phase will extend it.
-func Start(ctx context.Context, cfg config.Config, version string) (*StartupResult, *StartupError) {
+func Start(ctx context.Context, cfg config.Config, version string, shutdown func()) (*StartupResult, *StartupError) {
 	res := &StartupResult{}
 
 	// Gate #1: Argument parsing — caller already did this.
@@ -172,6 +178,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	// 005, FR-006): pg-manager's nil-receiver ShouldCampaign returns
 	// true, which let an empty node win the lease and initialize a new
 	// database while node-a was still booting during a 1→3 expansion.
+	// Once shutdown starts, no node campaigns (issue #11).
 	var mgrRef atomic.Pointer[manager.Manager]
 	bootGate := newBootWindowGate(cfg.Postgres.DataDir, res.Logger)
 	handles, err := cluster.BuildHandles(ctx, conn, cfg.Cluster.ID, cfg.Node.ID, res.Logger, cfg.Cluster.LeaseTTL,
@@ -180,7 +187,9 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			if mm := mgrRef.Load(); mm != nil {
 				m = mm
 			}
-			return campaignGate(m, bootGate.allow)
+			// ctx is cancelled when shutdown starts (signal,
+			// operator restart, or the Manager returning).
+			return campaignGate(ctx.Err() != nil, m, bootGate.allow)
 		})
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("phase1: build handles: %w", err)}
@@ -267,6 +276,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 	if err != nil {
 		return res, &StartupError{Code: ExitDeps, Err: fmt.Errorf("postgres executor: %w", err)}
 	}
+	res.Postgres = pg
 
 	// Gate #6.5: Honor pg-manager's "assume standby until proven primary"
 	// startup_with_pgdata contract at the postgres level. Without this,
@@ -410,6 +420,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			localNodeID: cfg.Node.ID,
 			presence:    string(supervisor),
 			logger:      res.Logger,
+			shutdown:    shutdown,
 		}
 		ctrl, err := control.NewServer(control.Config{
 			Addr:                 cfg.Control.ListenAddr,
@@ -435,7 +446,7 @@ func Start(ctx context.Context, cfg config.Config, version string) (*StartupResu
 			// cluster's history JetStream via this watcher.
 			Watch: historyWatcher,
 			// Feature 003 / US6: self-terminator for /v1/restart
-			// target=proxy. Drain + os.Exit handled in shutdown.go.
+			// target=proxy. It cancels ctx; main then drains and exits.
 			Proxy: selfTerm,
 			// Reloader currently unwired — POST /v1/config/set will
 			// return engine_error until the SIGHUP plumbing exposes

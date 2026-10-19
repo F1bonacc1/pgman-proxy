@@ -51,6 +51,12 @@ func SignalContext(parent context.Context, logger *obs.Logger) (context.Context,
 	}
 }
 
+// ErrDrainDegraded marks a drain step that finished only by forcing its
+// way through, such as a Postgres fast shutdown escalated to immediate.
+// Drain keeps going after such a step and reports the drain as timed
+// out (EX_DRAIN_TIMEOUT), not as an internal error.
+var ErrDrainDegraded = errors.New("drain step degraded")
+
 // DrainResult records the outcome of a graceful-shutdown attempt.
 type DrainResult struct {
 	Duration   time.Duration
@@ -80,7 +86,8 @@ func (r DrainResult) ExitCode() int {
 //  2. data-plane proxy listener
 //  3. proxy.Stop() (per switch policy)
 //  4. manager.Stop()
-//  5. NATS Drain
+//  5. Postgres fast shutdown (StopPostgres), while the lease is held
+//  6. NATS Drain, which releases the lease
 //
 // Each step receives a context whose deadline is the remaining budget,
 // so a slow step doesn't starve later ones.
@@ -101,6 +108,13 @@ func Drain(parent context.Context, budget time.Duration, steps []DrainStep, logg
 		stepCtx, cancel := context.WithDeadline(parent, deadline)
 		err := step.Stop(stepCtx)
 		cancel()
+		if errors.Is(err, ErrDrainDegraded) {
+			res.TimedOut = true
+			logger.Warn("shutdown step degraded",
+				pgmanager.Field{Key: "step", Value: step.Name},
+				pgmanager.Field{Key: "error", Value: err.Error()})
+			continue
+		}
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			res.StopErrors = append(res.StopErrors, err)
 			logger.Warn("shutdown step error",
