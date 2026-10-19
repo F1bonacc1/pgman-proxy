@@ -2,7 +2,7 @@
 #
 # Targets:
 #   build         - go build cmd/pgman-proxy
-#   test          - go test ./internal/...  (unit tests, no docker)
+#   test          - go test ./internal/... ./cmd/...  (unit tests, no docker)
 #   lint          - go vet + staticcheck + golangci-lint
 #   integration   - go test ./tests/integration/...  (requires docker compose)
 #   smoke         - go test ./tests/smoke/...        (requires docker compose)
@@ -55,7 +55,7 @@ pgmctl-release:
 	done
 
 test:
-	$(GO) test $(GOFLAGS) -race ./internal/...
+	$(GO) test $(GOFLAGS) -race ./internal/... ./cmd/...
 
 lint:
 	$(GO) vet ./...

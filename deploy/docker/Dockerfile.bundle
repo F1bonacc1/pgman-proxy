@@ -65,8 +65,13 @@ LABEL org.opencontainers.image.revision="${COMMIT}"
 
 COPY --from=build /out/pgman-proxy /usr/local/bin/pgman-proxy
 
-# tini reaps the postgres process group when pgman-proxy exits, so a
-# fast peer restart doesn't leave a dangling postmaster.
+# tini (PID 1) forwards the stop signal to pgman-proxy and reaps
+# orphans. It does not stop PostgreSQL: pgman-proxy's drain does, in
+# fast mode while the node still holds the leadership lease (issue #11),
+# and the container exits right after. Give the container a stop timeout
+# above shutdown.drain_budget (default 30s; docker's own default is
+# 10s), e.g. `docker run --stop-timeout 45`, or the runtime SIGKILLs
+# the postmaster mid-drain.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
          tini \

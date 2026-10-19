@@ -51,7 +51,7 @@ jobs:
 
       - name: test (race + coverage)
         working-directory: pgman-proxy
-        run: go test -race -count=1 -coverprofile=coverage.out ./internal/...
+        run: go test -race -count=1 -coverprofile=coverage.out ./internal/... ./cmd/...
 
       - name: smoke
         working-directory: pgman-proxy

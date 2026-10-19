@@ -98,22 +98,26 @@ func TestCampaignGate(t *testing.T) {
 	partial := mkPGDATA(t, true, false)
 
 	cases := []struct {
-		name string
-		m    campaigner
-		dir  string
-		want bool
+		name     string
+		stopping bool
+		m        campaigner
+		dir      string
+		want     bool
 	}{
-		{"boot window, complete PGDATA", nil, complete, true},
-		{"boot window, empty PGDATA", nil, t.TempDir(), false},
-		{"boot window, interrupted clone", nil, partial, false},
-		{"boot window, data dir unset", nil, "", false},
-		{"manager says campaign", fakeCampaigner(true), t.TempDir(), true},
-		{"manager says defer despite PGDATA", fakeCampaigner(false), complete, false},
+		{"boot window, complete PGDATA", false, nil, complete, true},
+		{"boot window, empty PGDATA", false, nil, t.TempDir(), false},
+		{"boot window, interrupted clone", false, nil, partial, false},
+		{"boot window, data dir unset", false, nil, "", false},
+		{"manager says campaign", false, fakeCampaigner(true), t.TempDir(), true},
+		{"manager says defer despite PGDATA", false, fakeCampaigner(false), complete, false},
+		// Issue #11: a node that is shutting down never campaigns.
+		{"shutting down, manager says campaign", true, fakeCampaigner(true), complete, false},
+		{"shutting down, boot window, complete PGDATA", true, nil, complete, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			g := newBootWindowGate(c.dir, nil)
-			if got := campaignGate(c.m, g.allow); got != c.want {
+			if got := campaignGate(c.stopping, c.m, g.allow); got != c.want {
 				t.Fatalf("campaignGate = %v, want %v", got, c.want)
 			}
 		})

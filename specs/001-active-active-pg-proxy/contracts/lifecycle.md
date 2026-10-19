@@ -56,10 +56,42 @@ Once Ready, the process serves traffic until a signal is received.
      `shutdown.drain_budget`.
    - `pause`: same as drain for shutdown purposes.
 5. `manager.Stop(context.Background())` is invoked.
-6. NATS `conn.Drain()` is invoked (best-effort).
-7. Process exits `EX_OK` (0) if all six steps succeeded within budget;
-   `EX_DRAIN_TIMEOUT` (79) if the drain budget was exceeded; non-zero
-   downstream-specific code if `manager.Stop` returned an error.
+6. **PostgreSQL is shut down** (amended for pgman-proxy issue #11).
+   pg-manager's `Manager.Stop` leaves Postgres running and hands its
+   shutdown to the host, and in the bundled image the container exits
+   with pgman-proxy, so this step is the only thing standing between a
+   stop and a SIGKILLed postmaster.
+   - Fast mode, through pg-manager's `PostgresExecutor.Stop`. The node
+     still holds the leadership lease, so on a primary the walsenders
+     ship every remaining WAL record, the shutdown checkpoint included,
+     before any standby can promote, and the old primary can rejoin as
+     a standby without a rewind or a clone.
+   - Fast mode gets the drain budget's remaining time minus 5 s. If it
+     overruns, the step escalates to immediate mode (no shutdown
+     checkpoint; WAL not yet streamed stays on this node only) and the
+     process exits `EX_DRAIN_TIMEOUT`.
+   - Skipped when Postgres is not running, when `Manager.Start` failed
+     on a singleton conflict (another Manager owns this node), and on a
+     startup failure.
+7. NATS `conn.Drain()` is invoked (best-effort). This releases the
+   leadership lease, after Postgres has stopped. Nothing may release it
+   earlier: in particular, the lease adapter's `WithHealthCheck` option
+   (which stops renewal when local Postgres goes down) must not be wired
+   without revisiting this order.
+8. Process exits `EX_OK` (0) if all steps succeeded within budget;
+   `EX_DRAIN_TIMEOUT` (79) if the drain budget was exceeded or Postgres
+   needed immediate mode; non-zero downstream-specific code if
+   `manager.Stop` or the Postgres shutdown returned an error.
+
+Once shutdown starts (a signal, an operator restart, or `Manager.Start`
+returning), the node no longer campaigns for the leadership lease; it
+still renews a lease it holds. An operator restart (`POST /v1/restart`
+target=proxy) runs this same flow and exits 0.
+
+Orchestrator stop timeouts MUST exceed `shutdown.drain_budget`, or the
+runtime kills the process mid-drain: `docker stop -t` / `docker run
+--stop-timeout` (docker's default is 10 s), Compose `stop_grace_period`,
+systemd `TimeoutStopSec`. With the default 30 s budget, use 45 s.
 
 ---
 

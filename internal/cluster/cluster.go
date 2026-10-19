@@ -120,6 +120,12 @@ func BuildHandles(ctx context.Context, conn *nats.Conn, clusterID, nodeID string
 	if campaignGate != nil {
 		ldOpts = append(ldOpts, natsadapter.WithCampaignGate(campaignGate))
 	}
+	// Do not add natsadapter.WithHealthCheck here without revisiting the
+	// shutdown order (issue #11). It stops renewing the lease when local
+	// Postgres goes down, so a primary would lose its lease while the
+	// drain's postgres step is still shipping WAL, and a standby could
+	// promote on a fork point short of the shutdown checkpoint. The
+	// drain relies on renewal lasting until Handles.Close.
 	leadership, err := natsadapter.NewLeadership(
 		ctx, conn, clusterID, pgmanager.NodeID(nodeID),
 		ldOpts...,

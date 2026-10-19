@@ -153,10 +153,16 @@ func run(args []string) int {
 	}()
 
 	logger := obs.NewLogger(os.Stderr, cfg.Obs.LogLevel, cfg.Cluster.ID, cfg.Node.ID, "main")
-	ctx, cancelSignals := runtime.SignalContext(context.Background(), logger)
+	sigCtx, cancelSignals := runtime.SignalContext(context.Background(), logger)
 	defer cancelSignals()
+	// shutdown starts the graceful shutdown without a signal (operator
+	// restart, Manager.Start returning). Unlike cancelSignals it keeps
+	// the signal handlers installed, so a SIGTERM that arrives during
+	// the drain cannot kill the process while Postgres is shutting down.
+	ctx, shutdown := context.WithCancel(sigCtx)
+	defer shutdown()
 
-	res, startErr := runtime.Start(ctx, cfg, version)
+	res, startErr := runtime.Start(ctx, cfg, version, shutdown)
 	if startErr != nil {
 		logger.Error("startup failed",
 			pgmanager.Field{Key: "code", Value: startErr.Code},
@@ -211,7 +217,7 @@ func run(args []string) int {
 		// Manager.Start returned BEFORE shutdown — singleton-claim
 		// budget exhausted, setup failure, or similar. Cancel ctx so
 		// downstream goroutines wind down.
-		cancelSignals()
+		shutdown()
 	}
 
 	exitCode := runtime.ExitOK
@@ -228,8 +234,12 @@ func run(args []string) int {
 			pgmanager.Field{Key: "error", Value: managerErr.Error()})
 	}
 
+	// Issue #11: stop Postgres in the drain, except after a singleton
+	// conflict. Then another Manager owns this node, and the running
+	// Postgres may be its.
+	stopPostgres := !isSingletonError(managerErr)
 	drain := runtime.Drain(context.Background(), cfg.Shutdown.DrainBudget,
-		buildShutdownSteps(res),
+		buildShutdownSteps(res, stopPostgres),
 		logger,
 	)
 	// Drain errors only get to set the exit code when we don't already
@@ -247,15 +257,18 @@ func run(args []string) int {
 
 // teardownPartial runs the shutdown steps in best-effort mode for a
 // startup failure. We may have a partially-constructed StartupResult;
-// each step guards against nil receivers.
+// each step guards against nil receivers. It leaves Postgres alone:
+// this process never got as far as starting it.
 func teardownPartial(ctx context.Context, res *runtime.StartupResult, logger *obs.Logger, budget time.Duration) {
 	if res == nil {
 		return
 	}
-	_ = runtime.Drain(ctx, budget, buildShutdownSteps(res), logger)
+	_ = runtime.Drain(ctx, budget, buildShutdownSteps(res, false), logger)
 }
 
-func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
+// buildShutdownSteps returns the drain steps in order. stopPostgres
+// adds the step that shuts the local Postgres down (issue #11).
+func buildShutdownSteps(res *runtime.StartupResult, stopPostgres bool) []runtime.DrainStep {
 	steps := []runtime.DrainStep{}
 	// FR-021..FR-034 + contracts/lifecycle.md § Graceful shutdown flow:
 	// the control plane MUST stop FIRST so no new mutating LCM call
@@ -295,6 +308,20 @@ func buildShutdownSteps(res *runtime.StartupResult) []runtime.DrainStep {
 		steps = append(steps, runtime.DrainStep{
 			Name: "manager",
 			Stop: func(ctx context.Context) error { return res.Manager.Stop(ctx) },
+		})
+	}
+	// Issue #11: pg-manager leaves Postgres running on Manager.Stop, and
+	// the bundled image's tini exits with us, so without this step the
+	// runtime SIGKILLs the postmaster. It runs after the manager step, so
+	// the reconciler can no longer start Postgres behind it, and before
+	// the cluster step, which releases the leadership lease. A primary
+	// therefore keeps the lease until its walsenders have shipped every
+	// WAL record, including the shutdown checkpoint; only then may a
+	// standby promote.
+	if stopPostgres && res.Postgres != nil {
+		steps = append(steps, runtime.DrainStep{
+			Name: "postgres",
+			Stop: func(ctx context.Context) error { return runtime.StopPostgres(ctx, res.Postgres, res.Logger) },
 		})
 	}
 	// Event subscriptions MUST be unsubscribed BEFORE the cluster step

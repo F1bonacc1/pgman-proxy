@@ -42,15 +42,25 @@ type campaigner interface {
 }
 
 // campaignGate decides whether this node may contest the leadership
-// lease. Once the Manager exists its ShouldCampaign is final (switchover
-// deference, crashed-ex-primary health, and from pg-manager 015 the
-// empty-node deference). Before that, during the boot window, boot
-// decides: pg-manager's nil-receiver ShouldCampaign returns true, which
-// let an empty node win the lease and initialize a new database while
-// node-a, the only node with data, was still booting (spec 005 F4,
-// F12). Callers MUST pass a nil interface, not a typed nil pointer,
+// lease. A node that is shutting down never does (issue #11): its lease
+// loop runs until the drain's cluster step closes it, and a standby
+// winning a freed lease in that window would hold it, with its
+// Postgres stopping and nobody to promote, until it let go. The gate
+// never affects renewing a lease already held, so a primary keeps its
+// lease while its Postgres shuts down.
+//
+// Otherwise, once the Manager exists its ShouldCampaign is final
+// (switchover deference, crashed-ex-primary health, and from pg-manager
+// 015 the empty-node deference). Before that, during the boot window,
+// boot decides: pg-manager's nil-receiver ShouldCampaign returns true,
+// which let an empty node win the lease and initialize a new database
+// while node-a, the only node with data, was still booting (spec 005
+// F4, F12). Callers MUST pass a nil interface, not a typed nil pointer,
 // while the Manager is unset.
-func campaignGate(m campaigner, boot func() bool) bool {
+func campaignGate(stopping bool, m campaigner, boot func() bool) bool {
+	if stopping {
+		return false
+	}
 	if m != nil {
 		return m.ShouldCampaign()
 	}
