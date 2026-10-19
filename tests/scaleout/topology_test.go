@@ -161,7 +161,7 @@ func TestRollbackToSingle(t *testing.T) {
 	requireUpstream015(t)
 	tp := newTopo(t, "s3")
 	g := buildGolden(tp, 1000, singleEnv("a"))
-	expand(tp, orderALast)
+	expand(tp, orderALast, threeEnv)
 	assertExpanded(tp, g, 4*time.Minute)
 	if err := tp.write("a"); err != nil {
 		t.Fatalf("write before rollback: %v", err)

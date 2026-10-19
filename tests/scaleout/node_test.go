@@ -20,6 +20,19 @@ import (
 // splits (internal/config loader parseLines).
 const replHBA = `host replication all 0.0.0.0/0 trust\nhost all all 0.0.0.0/0 trust`
 
+// probeRole is the non-superuser role the write probe commits as
+// (buildGolden creates it).
+const probeRole = "scaleout_probe"
+
+// replOnlyHBA is the least-privilege HBA extras preset (pgman-proxy
+// issue #9): peers may open replication connections only, probeRole
+// may reach database postgres (through the proxy, whose sessions
+// arrive from a node address), and every other TCP session is
+// rejected, pg-manager's own postgres-user SQL sessions to a peer
+// included. The harness itself uses the local socket.
+const replOnlyHBA = `host replication all 0.0.0.0/0 trust\nhost postgres ` + probeRole +
+	` 0.0.0.0/0 trust\nhost all all 0.0.0.0/0 reject\nhost all all ::/0 reject`
+
 // commonEnv mirrors docs/scale-out-1-to-3/rig/common.env. The
 // credentials are test-only literals, as in the compose topology.
 func commonEnv() map[string]string {
@@ -84,6 +97,13 @@ func threeEnv(node string) map[string]string {
 func withoutReplHBA(env map[string]string) map[string]string {
 	out := maps.Clone(env)
 	out["PGMAN_PROXY_POSTGRES_HBA_EXTRAS"] = `host all all 0.0.0.0/0 trust`
+	return out
+}
+
+// withReplOnlyHBA swaps env's HBA extras for replOnlyHBA.
+func withReplOnlyHBA(env map[string]string) map[string]string {
+	out := maps.Clone(env)
+	out["PGMAN_PROXY_POSTGRES_HBA_EXTRAS"] = replOnlyHBA
 	return out
 }
 

@@ -7,6 +7,7 @@ package scaleout
 
 import (
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"strconv"
@@ -24,19 +25,19 @@ const (
 	orderTogether = "together" // stop node-a, then start all three back to back
 )
 
-// expand pushes the 3-node config: node-b and node-c start empty and
-// node-a restarts, in the given order.
-func expand(tp *topo, order string) {
+// expand pushes the 3-node config env builds for each node: node-b
+// and node-c start empty and node-a restarts, in the given order.
+func expand(tp *topo, order string, env func(node string) map[string]string) {
 	tp.t.Helper()
 	tp.ensureVolumes("b")
 	tp.ensureVolumes("c")
 	restartA := func() {
 		tp.stop("a", 30*time.Second)
-		tp.start("a", threeEnv("a"))
+		tp.start("a", env("a"))
 	}
 	startBC := func() {
-		tp.start("b", threeEnv("b"))
-		tp.start("c", threeEnv("c"))
+		tp.start("b", env("b"))
+		tp.start("c", env("c"))
 	}
 	switch order {
 	case orderAFirst:
@@ -48,7 +49,7 @@ func expand(tp *topo, order string) {
 		restartA()
 	case orderTogether:
 		tp.stop("a", 30*time.Second)
-		tp.start("a", threeEnv("a"))
+		tp.start("a", env("a"))
 		startBC()
 	default:
 		tp.t.Fatalf("unknown start order %q", order)
@@ -119,13 +120,13 @@ func (tp *topo) identityMismatchGauge(node string) (string, bool) {
 	return "", false
 }
 
-// startWriteProbe runs a client container that commits through node's
-// proxy port every 250 ms and prints "ok <unix-ms>" or "fail <unix-ms>".
-// `timeout` bounds a commit stuck in SyncRep.
+// startWriteProbe runs a client container that commits as probeRole
+// through node's proxy port every 250 ms and prints "ok <unix-ms>" or
+// "fail <unix-ms>". `timeout` bounds a commit stuck in SyncRep.
 func (tp *topo) startWriteProbe(node string) {
 	tp.t.Helper()
 	script := `while true; do
-  if timeout 5 psql "host=node-` + node + ` port=6432 user=postgres dbname=postgres connect_timeout=2" -XAtqc "insert into probe(src) values ('probe')" >/dev/null 2>&1
+  if timeout 5 psql "host=node-` + node + ` port=6432 user=` + probeRole + ` dbname=postgres connect_timeout=2" -XAtqc "insert into probe(src) values ('probe')" >/dev/null 2>&1
   then echo "ok $(date +%s%3N)"; else echo "fail $(date +%s%3N)"; fi
   sleep 0.25
 done`
@@ -181,27 +182,61 @@ func TestExpandOneToThree(t *testing.T) {
 	}
 	for i, order := range orders[:iterations] {
 		t.Run(fmt.Sprintf("%d-%s", i+1, order), func(t *testing.T) {
-			tp := newTopo(t, "s1")
-			g := buildGolden(tp, goldenRows, singleEnv("a"))
-			tp.startWriteProbe("a")
-			time.Sleep(2 * time.Second) // a baseline of successful commits before the restart
-			expandAt := time.Now()
-			expand(tp, order)
-			assertExpanded(tp, g, 4*time.Minute)
-			// The gap only spans successful commits, so also require one
-			// after the expansion began: writes must have come back.
-			var gap time.Duration
-			var oks int
-			waitFor(t, 30*time.Second, time.Second, "a probe commit after the expansion", func() (bool, string) {
-				var lastOK time.Time
-				gap, oks, lastOK = tp.longestWriteGap()
-				return oks >= 10 && lastOK.After(expandAt), fmt.Sprintf("%d commits, last at %s", oks, lastOK.Format(time.RFC3339Nano))
-			})
-			t.Logf("longest write gap through node-a: %s (%d commits)", gap.Round(time.Millisecond), oks)
-			if gap >= 30*time.Second {
-				t.Errorf("write outage %s, want < 30s (SC-003)", gap)
+			runExpansion(newTopo(t, "s1"), order, maps.Clone)
+		})
+	}
+}
+
+// TestExpandOneToThreeReplicationOnlyHBA is S1r (pgman-proxy issue #9):
+// S1 under replOnlyHBA, once per start order. Peers reach each other
+// over replication connections only, so the clone's drop of the slot
+// the new leader pre-created, and the engine's other peer checks, must
+// not need a SQL session.
+func TestExpandOneToThreeReplicationOnlyHBA(t *testing.T) {
+	requireUpstream015(t)
+	for i, order := range []string{orderALast, orderAFirst, orderTogether} {
+		t.Run(fmt.Sprintf("%d-%s", i+1, order), func(t *testing.T) {
+			tp := newTopo(t, "s1r")
+			runExpansion(tp, order, withReplOnlyHBA)
+			// The preset must bite: a SQL session from a peer is refused.
+			out, err := tp.exec("b", 15*time.Second, "psql",
+				"host=node-a user=postgres dbname=postgres connect_timeout=5", "-XAtqc", "select 1")
+			if err == nil || !strings.Contains(out, "pg_hba.conf rejects connection") {
+				t.Errorf("SQL session node-b -> node-a: err=%v output=%q, want a pg_hba.conf rejection", err, out)
+			}
+			for _, n := range []string{"b", "c"} {
+				if logs := tp.allLogs(n); strings.Contains(logs, "drop pre-existing slot from leader failed") {
+					t.Errorf("node-%s could not drop its slot on the leader", n)
+				}
 			}
 		})
+	}
+}
+
+// runExpansion is one S1 iteration: a live golden node-a under the
+// write probe, expanded to three nodes in the given start order, with
+// hba applied to every node's config.
+func runExpansion(tp *topo, order string, hba func(map[string]string) map[string]string) {
+	t := tp.t
+	t.Helper()
+	g := buildGolden(tp, goldenRows, hba(singleEnv("a")))
+	tp.startWriteProbe("a")
+	time.Sleep(2 * time.Second) // a baseline of successful commits before the restart
+	expandAt := time.Now()
+	expand(tp, order, func(node string) map[string]string { return hba(threeEnv(node)) })
+	assertExpanded(tp, g, 4*time.Minute)
+	// The gap only spans successful commits, so also require one
+	// after the expansion began: writes must have come back.
+	var gap time.Duration
+	var oks int
+	waitFor(t, 30*time.Second, time.Second, "a probe commit after the expansion", func() (bool, string) {
+		var lastOK time.Time
+		gap, oks, lastOK = tp.longestWriteGap()
+		return oks >= 10 && lastOK.After(expandAt), fmt.Sprintf("%d commits, last at %s", oks, lastOK.Format(time.RFC3339Nano))
+	})
+	t.Logf("longest write gap through node-a: %s (%d commits)", gap.Round(time.Millisecond), oks)
+	if gap >= 30*time.Second {
+		t.Errorf("write outage %s, want < 30s (SC-003)", gap)
 	}
 }
 
@@ -221,7 +256,7 @@ func TestExpandWithoutPriorReplicationHBA(t *testing.T) {
 		t.Fatal("golden node already has the replication rule; the scenario needs a node without it")
 	}
 
-	expand(tp, orderALast)
+	expand(tp, orderALast, threeEnv)
 	waitFor(t, 3*time.Minute, 2*time.Second, "node-a applied the managed HBA block at boot", func() (bool, string) {
 		logs := tp.logs("a")
 		return strings.Contains(logs, "postgres.managed_block_applied") && strings.Contains(logs, `"phase":"boot"`),
