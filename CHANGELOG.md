@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (engine): pg-manager v0.7.2, expansion works when peers have replication access only
+
+A 1→3 expansion stalled when `postgres.hba_extras` gave peers
+`host replication` rules and rejected every other TCP session (issue
+#9). The new leader reserves a replication slot for each peer. A new
+node drops "its" slot before cloning, but pg-manager v0.7.1 did that
+over a superuser SQL session, which such an HBA rejects. Every clone
+attempt then failed with `replication slot "pgmgr_<id>" already
+exists`, and the new nodes stayed empty. pg-manager v0.7.2 drops the
+slot, checks the leader and probes it over replication connections, so
+peers need no SQL access to each other for expansion, re-clone or
+auto-demote.
+
+- `pg_rewind` still opens a SQL session to the leader; a deployment
+  that relies on it after a failover needs a rule for it.
+- `tests/scaleout` gains S1r: S1 under an HBA preset that gives peers
+  replication access only, once per start order. It fails on v0.7.1
+  (both new nodes log `drop pre-existing slot from leader failed` and
+  never stream) and passes on v0.7.2. The write probe now commits as a
+  non-superuser role, `scaleout_probe`, in every scenario.
+- Only the pg-manager lines move in go.mod/go.sum; v0.7.2 keeps
+  v0.7.1's dependencies.
+
 ### Fixed (engine): pg-manager v0.7.1, a fresh cluster no longer wedges with no primary
 
 pg-manager v0.7.0 could leave a brand-new three-node cluster with no
