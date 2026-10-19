@@ -48,6 +48,11 @@ phase. Tests assert presence by `msg` value.
 | `shutdown signal`              | INFO  | shutdown                            | `signal`, `drain_budget_ms`                   |
 | `shutdown drain timeout`       | WARN  | shutdown                            | `in_flight`                                   |
 | `shutdown complete`            | INFO  | shutdown                            | `duration_ms`                                 |
+| `shutdown step degraded`       | WARN  | shutdown                            | `step`, `error`; the drain exits `EX_DRAIN_TIMEOUT` |
+| `postgres stopped`             | INFO  | shutdown                            | `mode` (`fast`; WARN when `immediate`), `duration_ms` |
+| `postgres already stopped`     | INFO  | shutdown                            | none                                          |
+| `postgres stop escalated`      | WARN  | shutdown                            | `from`, `to`, `error`                         |
+| `postgres stop failed`         | ERROR | shutdown                            | `fast_error`, `immediate_error`, `duration_ms` |
 
 `coordination event` MUST NOT log message payload by default; debug-
 level logging may include payloads but the field schema for those

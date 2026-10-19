@@ -77,8 +77,15 @@ The result is stored in the proxy's runtime state as
    stream.
 8. **Drain**: invoke the proxy's normal shutdown path (data-plane
    listener stops accepting; in-flight queries drain under the 001
-   FR-014 budget; embedded NATS stops cleanly per 002 FR-012).
-9. **Exit**: call `os.Exit(0)` with a clean shutdown code.
+   FR-014 budget; PostgreSQL shuts down while the leadership lease is
+   held, per 001 lifecycle.md § Graceful shutdown flow; embedded NATS
+   stops cleanly per 002 FR-012). The self-terminator cancels the
+   process's root context, exactly as SIGTERM does.
+9. **Exit**: the process exits 0 once the drain finishes. It MUST NOT
+   exit before the drain: until pgman-proxy issue #11 the
+   self-terminator called `os.Exit(0)` right away, which skipped step
+   8, SIGKILLed PostgreSQL with the container and left the lease to
+   expire.
 10. **Supervisor respawns** the process; pgmctl re-discovers the peer
     via its next request.
 
@@ -97,7 +104,7 @@ treats post-202-response read errors as success, not failure.
 | Bearer-auth missing / invalid | Standard 401 / 403 from the auth middleware. |
 | `target_node != self` | `400 wrong_peer`. pgmctl is supposed to resolve the right peer first; this is mostly a developer-error guard. |
 | Supervisor present but respawn fails (e.g., systemd unit disabled) | Out of pgmctl's scope — the peer is gone; the operator deals with their supervisor. |
-| Proxy hangs in drain | The supervisor's standard kill-after-timeout handles this (`systemd TimeoutStopSec`, k8s `terminationGracePeriodSeconds`). pgman-proxy's own drain budget is shorter than typical supervisor budgets so the supervisor never needs to escalate. |
+| Proxy hangs in drain | The supervisor's standard kill-after-timeout handles this (`systemd TimeoutStopSec`, k8s `terminationGracePeriodSeconds`, `docker stop -t`). The supervisor's timeout MUST exceed `shutdown.drain_budget` (default 30 s); docker's default of 10 s does not, so set it explicitly (001 lifecycle.md § Graceful shutdown flow). |
 
 ---
 

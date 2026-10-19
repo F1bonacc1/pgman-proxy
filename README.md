@@ -201,8 +201,28 @@ docker run --rm \
     # …+ the rest of the config (see process-compose.yaml for the full env)
     -p 6432:6432 -p 9090:9090 -p 9091:9091 \
     -v node-a-data:/var/lib/postgresql/data \
+    --stop-timeout 45 \
     ghcr.io/f1bonacc1/pgman-proxy:latest
 ```
+
+### Stopping a peer
+
+A stop signal (SIGINT, the image's `STOPSIGNAL`, or SIGTERM) starts
+pgman-proxy's drain, which shuts PostgreSQL down in fast mode before it
+releases the leadership lease. A stopped standby is left `shut down in
+recovery`; a stopped primary first ships all its WAL, so the promoted
+standby has every record and the old primary rejoins as a standby with
+no rewind or clone. `pgmctl restart --target=proxy` runs the same drain.
+
+The orchestrator's stop timeout must exceed `shutdown.drain_budget`
+(default 30 s), or the runtime kills PostgreSQL mid-drain and the node
+needs crash recovery on its next start:
+
+| Orchestrator | Setting (for the default budget) |
+|---|---|
+| `docker run` / `docker stop` | `--stop-timeout 45` / `docker stop -t 45` (docker's default is 10 s) |
+| Docker Compose | `stop_grace_period: 45s` |
+| systemd unit running `docker run` | `docker stop -t 45` in `ExecStop`, and `TimeoutStopSec=60` |
 
 Both images **MUST run unprivileged**; `--user 0:0` is rejected at
 the orchestrator level (FR-013). The bundled image's default user is

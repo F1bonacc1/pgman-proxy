@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (shutdown): stopping a node shuts PostgreSQL down cleanly
+
+pgman-proxy's drain never stopped PostgreSQL (issue #11). pg-manager's
+`Manager.Stop` leaves Postgres to the host, and the bundled image's
+tini exits with pgman-proxy, so every `docker stop` SIGKILLed the
+postmaster. The next start ran crash recovery. On a primary the drain
+also released the leadership lease while Postgres still took local
+writes, so WAL that no standby had received stayed on the old primary,
+which then could not follow the new timeline (#12).
+
+- The drain gains a `postgres` step after `manager` and before the
+  lease release. It stops Postgres in fast mode through pg-manager's
+  executor while the node still holds the lease, so a primary's
+  walsenders ship every record, the shutdown checkpoint included,
+  before any standby promotes. A stopped standby reads `shut down in
+  recovery`, a stopped primary `shut down`, and the old primary rejoins
+  as a standby with no rewind or clone.
+- Fast mode gets the drain budget minus 5 s. If it overruns, the step
+  escalates to immediate mode, logs `postgres stop escalated`, and the
+  process exits 79 (`EX_DRAIN_TIMEOUT`).
+- `pgmctl restart --target=proxy` used to `os.Exit(0)` without draining.
+  It now runs the same drain as SIGTERM.
+- A node that is shutting down no longer campaigns for the lease.
+
+**Operator action**: the orchestrator's stop timeout must exceed
+`shutdown.drain_budget` (default 30 s). Docker's default is 10 s: use
+`docker stop -t 45` / `docker run --stop-timeout 45`, Compose
+`stop_grace_period: 45s`, or systemd `TimeoutStopSec` above the docker
+stop timeout. See README § Stopping a peer.
+
+**Behavior changes**:
+- Stopping a primary takes longer by its fast-shutdown time. That is
+  usually well under a second, but it can reach `wal_sender_timeout` if
+  a connected standby stalls.
+- Where PostgreSQL used to outlive a pgman-proxy restart (process-compose,
+  systemd `KillMode=process`), a proxy restart now restarts PostgreSQL
+  too, and on the primary a failover follows. Before, the restarted
+  proxy released the lease while the old primary kept running.
+
+**Tests**: `tests/scaleout` gains three scenarios, and S5 now also
+asserts `shut down` after its stop:
+- S9a stops a streaming standby.
+- S9b stops the primary while a writer commits to it directly.
+- S9c restarts a standby through `POST /v1/restart`.
+
+All four fail on v0.3.2. The stopped or restarted standbys read
+`in archive recovery`; the stopped primary and the single node read
+`in production`. Unit tests cover the step, its place in the drain,
+the restart path and the gate. `make test` and CI now run `./cmd/...`
+too.
+
 ### Fixed (engine): pg-manager v0.7.2, expansion works when peers have replication access only
 
 A 1→3 expansion stalled when `postgres.hba_extras` gave peers

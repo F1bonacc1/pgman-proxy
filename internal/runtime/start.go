@@ -66,8 +66,9 @@ func (e *StartupError) Unwrap() error { return e.Err }
 // is responsible for tearing down whatever was already constructed
 // (StartupResult fields are populated incrementally).
 //
-// shutdown starts the process's graceful shutdown (main passes the
-// cancel of its signal context). The control plane's /v1/restart
+// shutdown starts the process's graceful shutdown: main passes a
+// cancel for ctx that leaves its signal handlers installed. The
+// control plane's /v1/restart
 // target=proxy handler calls it, so an operator restart drains like a
 // SIGTERM does.
 //

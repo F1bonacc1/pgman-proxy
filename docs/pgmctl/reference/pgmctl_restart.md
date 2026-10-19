@@ -16,7 +16,9 @@ Two modes:
     Restarts the pgman-proxy process itself on the target peer. The
     peer MUST be running under a process supervisor (tini / systemd /
     k8s / process-compose) that will bring it back; otherwise the
-    server returns 412 supervisor_not_detected.
+    server returns 412 supervisor_not_detected. The process drains
+    as on SIGTERM, which shuts the peer's PostgreSQL down too; on the
+    primary a failover follows.
 
 Cluster-affecting in both modes; requires typed cluster name (or
 --force --cluster <name>).

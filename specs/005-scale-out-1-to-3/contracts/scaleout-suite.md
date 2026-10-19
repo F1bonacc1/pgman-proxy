@@ -39,7 +39,7 @@ make scaleout       # go test -trimpath -count=1 -timeout=40m -tags=scaleout ./t
 
 | ID | Needs 015 | Setup | Must hold | Budget |
 |---|---|---|---|---|
-| S5 | no | fresh single node | write commits ≤ 10 s after primary; `ssn = ''`; `replication_policy=async` logged; restart → primary + write ≤ 30 s; all rows kept | 2 min |
+| S5 | no | fresh single node | write commits ≤ 10 s after primary; `ssn = ''`; `replication_policy=async` logged; control file `shut down` after the stop (issue #11); restart → primary + write ≤ 30 s; all rows kept | 2 min |
 | S5b | flips | single node with the old initdb `ssn` line appended to `postgresql.conf`, restarted | **pre-015**: after the documented ALTER SYSTEM step, write ≤ 30 s. **015**: write ≤ 30 s with no step | 2 min |
 | S4 | no | golden node-a alone with the 3-node config | exit code 75 after 110-180 s; restored golden sysid and rows unchanged | 4 min |
 | S7 | partial | golden created **without** replication HBA; 3-node config **with** it | node-a `pg_hba.conf` has the managed block; `postgres.managed_block_applied` logged on node-a. **With 015**, also: b and c cloned (`bootstrap: starting basebackup source=node-a`) and streaming | 6 min |
@@ -47,6 +47,9 @@ make scaleout       # go test -trimpath -count=1 -timeout=40m -tags=scaleout ./t
 | S1r | yes | S1 with HBA extras that give peers `replication` access only (`host replication all 0.0.0.0/0 trust`, the probe role on database `postgres`, every other TCP session rejected); one iteration per start order (issue #9, pg-manager ≥ v0.7.2) | the S1 assertions; a SQL session from node-b to node-a is rejected by `pg_hba.conf`; no `drop pre-existing slot from leader failed` in b/c logs | 3 × 4 min |
 | S2 | yes (for "exactly once") | three empty nodes, 3-node config | exactly one node logs `initdb: starting`; the others clone from it; one sysid; writes succeed | 4 min |
 | S3 | yes | after S1-style expansion: stop b, c; node-a single-node config | node-a primary and writable ≤ 30 s; `ssn = ''`; `embedded_nats.store_archived` (clustered) logged; rows intact | 3 min |
+| S9a | no | three empty nodes, 3-node config; `docker stop -t 45` one streaming standby (pgman-proxy issue #11) | the standby's control file reads `shut down in recovery`; its log has `postgres stopped` with `mode=fast`; restarted, it streams again | 5 min |
+| S9b | no | three empty nodes, 3-node config; a writer commits to the primary's port 5432 directly every 50 ms; `docker stop -t 45` the primary (issue #11) | old primary's control file reads `shut down`; `postgres stopped` with `mode=fast` logged; a standby promotes and holds every commit the writer saw acknowledged; restarted, the old primary is a standby with WAL receiver `streaming` and the new primary streams to 2; no `bootstrap: starting basebackup` and no `"to":"rewinding"` in its log | 6 min |
+| S9c | no | three empty nodes, 3-node config; a standby restarted with `PC_PROC_NAME` set (so supervisor detection passes); `POST /v1/restart` target=proxy on it (issue #11) | 200 response; the process exits 0; its control file reads `shut down in recovery`; `postgres stopped` with `mode=fast` logged | 5 min |
 | S6 | partial | golden volume for node-a but node-a **stopped**; b, c empty, 3-node config | over 180 s: no `initdb: starting` on b/c, no `PG_VERSION` on b/c, no node accepts writes; b and c exit 75 (route mesh needs every peer, F15; this part runs today). **With 015**: start node-a, restart b and c (as a supervisor would) → S1 assertions hold | 8 min |
 
 `make integration` (unchanged) remains the regression test that a fresh
