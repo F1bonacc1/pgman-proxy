@@ -59,9 +59,13 @@ func formThree(tp *topo) (string, []string) {
 	for _, n := range nodes {
 		tp.start(n, threeEnv(n))
 	}
+	// streaming(primary) alone is not enough: a clone's pg_basebackup
+	// WAL stream also shows as a streaming walsender, so each standby
+	// must answer as one with its WAL receiver streaming.
 	var primary string
 	waitFor(tp.t, 4*time.Minute, 2*time.Second, "one primary with two streaming standbys", func() (bool, string) {
 		roles := map[string]string{}
+		receivers := map[string]string{}
 		primary = ""
 		for _, n := range nodes {
 			roles[n] = tp.role(n)
@@ -69,7 +73,15 @@ func formThree(tp *topo) (string, []string) {
 				primary = n
 			}
 		}
-		return primary != "" && tp.streaming(primary) == 2, fmt.Sprintf("roles=%v", roles)
+		ok := primary != "" && tp.streaming(primary) == 2
+		for _, n := range nodes {
+			if n == primary {
+				continue
+			}
+			receivers[n] = tp.walReceiver(n)
+			ok = ok && roles[n] == "standby" && receivers[n] == "streaming"
+		}
+		return ok, fmt.Sprintf("roles=%v wal_receivers=%v", roles, receivers)
 	})
 	tp.waitWritable(primary, 30*time.Second)
 	var standbys []string
