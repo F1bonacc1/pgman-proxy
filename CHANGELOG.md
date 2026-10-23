@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (engine): pg-manager v0.7.4, an expansion no longer moves the primary to a fresh clone
+
+During a 1→3 expansion, node-a (the node with the data) could end up
+a standby while a node that had just cloned from it became primary.
+This broke spec 005 SC-002: the original node must stay primary. The
+scale-out suite caught it in nightly run 39225669516, where S6 ended
+`roles a=standby b=standby c=primary`.
+
+The sequence:
+- A new node records "complete" as soon as `pg_basebackup` finishes,
+  before its Postgres is up, so pg-manager named it as node-a's sync
+  standby while it had no WAL position yet.
+- node-a's promotion gate refused (`sync_peer_silent`).
+- pg-manager v0.7.3 resigned the lease on that first refusal, and the
+  fresh clone often won the next round.
+
+No data was lost (the clone promoted at the same LSN), but the primary
+moved and the write outage grew by a lease round.
+
+pg-manager v0.7.4 (B-027) keeps the lease for up to 3 ticks
+(`PGMAN_PROXY_POLICY_LIVENESS_INTERVAL` × 3, 6 s by default) while
+such a peer has not published a position, retrying the unchanged gate
+each tick. A peer whose position is stale (a dead node) still costs
+the lease at once. The new log line on the leader is `promote: holding
+lease for a sync peer that has not reported a position`.
+
+- Verified against pg-manager's branch with `tests/scaleout` S6 ×3 and
+  S1 ×3 (15 expansions), all passing. One S6 run hit the race: node-a
+  held the lease and promoted 2.1 s after the refusal, with no resign.
+- Only the pg-manager lines move in go.mod/go.sum; v0.7.4 keeps
+  v0.7.3's dependencies. No pgman-proxy code or config changes.
+
 ### Security: Go toolchain bumped to 1.26.10 (GO-2026-6809, crypto/x509)
 
 `govulncheck` flagged GO-2026-6809 in go1.26.9: `crypto/x509` did not

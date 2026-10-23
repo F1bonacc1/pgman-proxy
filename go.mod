@@ -24,7 +24,7 @@ go 1.26.10
 // provenance attestation.
 //
 // COUPLED BUMP: pg-manager's own go.mod pins github.com/jackc/pgx/v5,
-// and MVS raises this module's pgx to match. pg-manager v0.7.3 requires
+// and MVS raises this module's pgx to match. pg-manager v0.7.4 requires
 // pgx v5.11.0, nats.go v1.53.1 and golang.org/x/text v0.41.0
 // (GO-2026-6629), which is what the require blocks below carry. A pg-manager
 // bump that moves pgx must raise it here in the SAME commit, or the
@@ -34,7 +34,7 @@ go 1.26.10
 // a `replace` onto the sibling checkout (tests/integration/Dockerfile),
 // so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
-	github.com/f1bonacc1/pg-manager v0.7.3
+	github.com/f1bonacc1/pg-manager v0.7.4
 	github.com/fatih/color v1.19.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-isatty v0.0.22
