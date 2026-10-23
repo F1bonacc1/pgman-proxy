@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security: Go toolchain bumped to 1.26.10 (GO-2026-6809, crypto/x509)
+
+`govulncheck` flagged GO-2026-6809 in go1.26.9: `crypto/x509` did not
+distrust compromised intermediate certificates. It is reached through
+the embedded NATS server's TLS (`embedded.NewServer` →
+`x509.Certificate.Verify`). go1.26.10 fixes it.
+
+No source changes. The `go.mod` `go` directive, which every workflow's
+`setup-go` installs from, now requires 1.26.10.
+`deploy/docker/Dockerfile.bundle` and `tests/integration/Dockerfile`
+track it in lockstep (`golang:1.26.10-bookworm`).
+
 ### Fixed (engine): pg-manager v0.7.3, a diverged ex-primary is detected and re-cloned
 
 After a failover, an old primary that kept WAL no standby had received

@@ -30,7 +30,7 @@ ARG POSTGRES_VERSION=17
 # survived only as long as the tag happened to track the directive: it
 # breaks on the first directive bump made before docker-library
 # publishes that patch, and the nightly suite is where that lands.
-FROM golang:1.26.9-bookworm AS build
+FROM golang:1.26.10-bookworm AS build
 WORKDIR /src
 
 # Pull both modules into the build context. go.mod pins pg-manager to a
