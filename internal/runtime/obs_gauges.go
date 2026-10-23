@@ -7,6 +7,8 @@ import (
 	"context"
 	"time"
 
+	pgmanager "github.com/f1bonacc1/pg-manager"
+
 	"github.com/f1bonacc1/pgman-proxy/internal/embedded"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
 )
@@ -23,10 +25,12 @@ import (
 // Values are set once synchronously so a scrape immediately after
 // startup sees them, then refreshed on the same 2 s cadence the
 // RouteWatcher uses. Snapshot() and IsLeader() are in-process reads —
-// no I/O per tick.
+// no I/O per tick. localStatus is pg-manager's Manager.Status, read
+// once per tick for the identity-mismatch and timeline-divergence
+// gauges; a read error reads as 0 on both.
 func startObservabilityGauges(ctx context.Context, m *obs.MetricSet, emb *embedded.Server,
 	leader interface{ IsLeader() bool }, replicas int, overridden bool,
-	identityMismatch func() bool,
+	localStatus func() (pgmanager.Status, error),
 ) {
 	if m == nil || emb == nil || leader == nil {
 		return
@@ -43,8 +47,10 @@ func startObservabilityGauges(ctx context.Context, m *obs.MetricSet, emb *embedd
 		isLeader := leader.IsLeader()
 		m.LeadershipState.WithLabelValues("leader").Set(boolGauge(isLeader))
 		m.LeadershipState.WithLabelValues("follower").Set(boolGauge(!isLeader))
-		if identityMismatch != nil {
-			m.ClusterIdentityMismatch.Set(boolGauge(identityMismatch()))
+		if localStatus != nil {
+			st, err := localStatus()
+			m.ClusterIdentityMismatch.Set(boolGauge(err == nil && st.IdentityMismatch != nil))
+			m.TimelineDiverged.Set(boolGauge(err == nil && st.TimelineDivergence != nil))
 		}
 	}
 	update()

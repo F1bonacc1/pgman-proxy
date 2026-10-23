@@ -162,6 +162,24 @@ type PeerAggregator interface {
 	EnrichStatus(ctx context.Context, local pgmanager.Status) pgmanager.Status
 }
 
+// PeerTimelineReader is an optional PeerAggregator extension
+// (pgman-proxy issue #12): every peer's own timeline-divergence report,
+// so the replication.timeline-consistent doctor check covers the whole
+// cluster from whichever node serves it. Implemented in
+// internal/runtime over the same SliceStatus fan-out as EnrichStatus.
+type PeerTimelineReader interface {
+	PeerTimelines(ctx context.Context) ([]PeerTimeline, error)
+}
+
+// PeerTimeline is one peer's answer. Answered is false when the peer
+// did not reply. Divergence is nil when it reports none; peers older
+// than pgman-proxy v0.3.3 never report one.
+type PeerTimeline struct {
+	NodeID     pgmanager.NodeID
+	Answered   bool
+	Divergence *pgmanager.TimelineDivergence
+}
+
 // NewServer wires a Server. Returns an error when the supplied TLS
 // material cannot be parsed; loopback-vs-TLS validation is the config
 // validator's job (config.Validate).

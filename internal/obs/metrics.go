@@ -55,6 +55,10 @@ type MetricSet struct {
 	// that this standby follows a leader with a different database
 	// identity, 0 otherwise.
 	ClusterIdentityMismatch prometheus.Gauge
+	// pgman-proxy issue #12: 1 while pg-manager reports that this
+	// standby's WAL runs past the end of its timeline in the cluster
+	// history, so it cannot stream; 0 otherwise.
+	TimelineDiverged prometheus.Gauge
 
 	// Watch SSE metrics (feature 003 T088 / contracts/control-plane-extensions.md § 1).
 	WatchStreamsActive      *prometheus.GaugeVec
@@ -221,6 +225,11 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		Help:        "1 iff this standby follows a leader whose database identity differs from its own (pg-manager Status.IdentityMismatch).",
 		ConstLabels: constLabels,
 	})
+	m.TimelineDiverged = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "pgman_proxy_timeline_diverged",
+		Help:        "1 iff this standby's WAL runs past the end of its timeline in the cluster history, so it cannot stream (pg-manager Status.TimelineDivergence).",
+		ConstLabels: constLabels,
+	})
 
 	reg.MustRegister(
 		m.ConnectionsOpen, m.ConnectionsAcceptedTot, m.ConnectionsClosedTot, m.ConnectionDuration,
@@ -233,7 +242,7 @@ func NewMetrics(clusterID, nodeID string) *MetricSet {
 		m.EmbeddedNATSStorageBytes, m.EmbeddedNATSStorageDegraded,
 		m.EmbeddedNATSLifecycleEventsTotal, m.EmbeddedNATSRouteAuthFailures, m.EmbeddedNATSReloadOutcomes,
 		m.WatchStreamsActive, m.WatchEventsEmittedTotal, m.WatchGapsTotal,
-		m.ClusterIdentityMismatch,
+		m.ClusterIdentityMismatch, m.TimelineDiverged,
 	)
 	return m
 }

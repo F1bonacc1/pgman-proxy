@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 
+	"github.com/f1bonacc1/pgman-proxy/internal/control"
 	"github.com/f1bonacc1/pgman-proxy/internal/fanout"
 )
 
@@ -309,5 +311,90 @@ func TestEnrichStatus_NilClientReturnsInputUnchanged(t *testing.T) {
 	}
 	if got.Instances != nil {
 		t.Errorf("Instances should remain nil, got %+v", got.Instances)
+	}
+}
+
+// registerStatusResponder is registerPeerResponder for a full Status.
+func registerStatusResponder(t *testing.T, nc *nats.Conn, st pgmanager.Status) {
+	t.Helper()
+	srv := fanout.NewServer(nc, aggTestCluster, string(st.LocalNodeID))
+	stub := func(_ context.Context) (pgmanager.Status, error) { return st, nil }
+	if err := srv.Register(fanout.SliceStatus, statusResponderHandler(stub)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := srv.Serve(); err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+}
+
+// TestPeerTimelines_CarriesEachPeersDivergence pins the issue #12
+// fan-out: a peer's own TimelineDivergence crosses the SliceStatus
+// reply intact, a clean peer answers with none, and a silent peer is
+// reported as not answering.
+func TestPeerTimelines_CarriesEachPeersDivergence(t *testing.T) {
+	nc := startEmbeddedNATSForAgg(t)
+	since := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	div := &pgmanager.TimelineDivergence{
+		LocalTimeline:   2,
+		LocalEndLSN:     0x5063878,
+		ClusterTimeline: 3,
+		SwitchLSN:       0x50637C8,
+		Evidence:        pgmanager.DivergenceEvidenceSource,
+		SourceNodeID:    "node-c",
+		Since:           since,
+	}
+	registerStatusResponder(t, nc, pgmanager.Status{LocalNodeID: "node-a", LocalRole: pgmanager.RoleStandby, TimelineDivergence: div})
+	registerStatusResponder(t, nc, pgmanager.Status{LocalNodeID: "node-c", LocalRole: pgmanager.RolePrimary})
+
+	agg := newStatusAggregator(fanout.NewClient(nc, aggTestCluster), []string{"node-a", "node-b", "node-c"}, time.Second, nil)
+	got, err := agg.PeerTimelines(context.Background())
+	if err != nil {
+		t.Fatalf("PeerTimelines: %v", err)
+	}
+	byNode := map[pgmanager.NodeID]control.PeerTimeline{}
+	for _, p := range got {
+		byNode[p.NodeID] = p
+	}
+	if a := byNode["node-a"]; !a.Answered || a.Divergence == nil || *a.Divergence != *div {
+		t.Errorf("node-a = %+v, want answered with %+v", a, div)
+	}
+	if c := byNode["node-c"]; !c.Answered || c.Divergence != nil {
+		t.Errorf("node-c = %+v, want answered without divergence", c)
+	}
+	if b, ok := byNode["node-b"]; !ok || b.Answered {
+		t.Errorf("node-b = %+v (present %v), want listed as not answering", b, ok)
+	}
+
+	if _, err := newStatusAggregator(nil, []string{"node-a"}, time.Second, nil).PeerTimelines(context.Background()); err == nil {
+		t.Error("PeerTimelines without a fan-out client must fail, not report a clean cluster")
+	}
+}
+
+// TestPeerSliceStatus_TimelineWireShape pins the reply's JSON: the
+// divergence travels under snake_case keys, is omitted when absent, and
+// a reply from a peer that predates it decodes with no divergence.
+func TestPeerSliceStatus_TimelineWireShape(t *testing.T) {
+	b, err := json.Marshal(peerSliceStatus{NodeID: "node-a", TimelineDivergence: wireTimelineDivergence(&pgmanager.TimelineDivergence{
+		LocalTimeline: 2, LocalEndLSN: 7, ClusterTimeline: 3, SwitchLSN: 5, Evidence: "source", SourceNodeID: "node-c",
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"timeline_divergence":{`, `"local_timeline":2`, `"local_end_lsn":7`, `"cluster_timeline":3`, `"switch_lsn":5`, `"evidence":"source"`, `"source_node_id":"node-c"`} {
+		if !strings.Contains(string(b), key) {
+			t.Errorf("reply %s lacks %s", b, key)
+		}
+	}
+	clean, _ := json.Marshal(peerSliceStatus{NodeID: "node-a"})
+	if strings.Contains(string(clean), "timeline_divergence") {
+		t.Errorf("clean reply %s carries timeline_divergence", clean)
+	}
+	var old peerSliceStatus
+	if err := json.Unmarshal([]byte(`{"node_id":"node-a","role":2,"state":3,"reachable":true}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if old.TimelineDivergence.engine() != nil {
+		t.Error("a pre-v0.3.3 reply must decode with no divergence")
 	}
 }

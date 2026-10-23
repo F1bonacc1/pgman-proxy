@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed (engine): pg-manager v0.7.3, a diverged ex-primary is detected and re-cloned
+### Security: Go toolchain bumped to 1.26.10 (GO-2026-6809, crypto/x509)
+
+`govulncheck` flagged GO-2026-6809 in go1.26.9: `crypto/x509` did not
+distrust compromised intermediate certificates. It is reached through
+the embedded NATS server's TLS (`embedded.NewServer` →
+`x509.Certificate.Verify`). go1.26.10 fixes it.
+
+No source changes. The `go.mod` `go` directive, which every workflow's
+`setup-go` installs from, now requires 1.26.10.
+`deploy/docker/Dockerfile.bundle` and `tests/integration/Dockerfile`
+track it in lockstep (`golang:1.26.10-bookworm`).
+
+### Fixed (engine): pg-manager v0.7.3, a diverged ex-primary is detected, reported and re-cloned
 
 After a failover, an old primary that kept WAL no standby had received
 came back as a standby that never streamed (issue #12). Its walreceiver
@@ -35,15 +47,39 @@ re-cloned after the persistence window. The ex-primary's unreplicated
 WAL is discarded; under quorum sync those commits were never
 acknowledged.
 
-What operators see in this release:
-- `/v1/status` carries the engine's new `TimelineDivergence` field while
-  a node is diverged.
-- `pgmctl doctor` fails `engine.diagnose-clean` with a Critical
-  `timeline` issue on that node, with auto-rebootstrap enabled or not.
-- Not yet wired: the `timeline.*` engine events are not logged, counted
-  or kept in `pgmctl history`; there is no dedicated gauge or doctor
-  check; and `tests/scaleout` has no diverged-ex-primary scenario. These
-  follow in a later release.
+What operators see while a node is diverged, with auto-rebootstrap
+enabled or not:
+- **Doctor**: the new check `replication.timeline-consistent` fails on
+  whichever node `pgmctl doctor` asks. It names the diverged node, its
+  timeline, how far its WAL goes and where that timeline ended. Its
+  advisory fix explains the re-clone. `engine.diagnose-clean` also fails,
+  with a Critical `timeline` issue, but only on the diverged node.
+- **Gauge**: `pgman_proxy_timeline_diverged` reads 1 on that node.
+- **Status**: `/v1/status` on that node carries the engine's
+  `TimelineDivergence` field.
+- **Events**: `timeline.diverged`, `timeline.divergence_cleared` and
+  `timeline.fork_conflict` are logged, counted in
+  `pgman_proxy_coordination_events_total` and kept in `pgmctl history`.
+- `/readyz` is unchanged: a diverged standby's proxy still routes
+  clients to the primary.
+
+Each node's reply to the status fan-out now carries its own divergence
+under `timeline_divergence`. During a rolling upgrade, peers still on
+v0.3.2 send no such field and count as clean; they run pg-manager v0.7.2,
+which cannot detect the condition anyway.
+
+**Tests**: `tests/scaleout` S10a and S10b build the divergence
+deterministically. Every node shares one last checkpoint and the primary
+writes past it. Then the primary is cut off the network, commits locally
+and is SIGKILLed. `pg_waldump` confirms its WAL runs past the new
+timeline's switch point. The old primary then restarts:
+- S10a, auto-rebootstrap off: it reports the divergence with evidence
+  from the new primary's history, its gauge reads 1, the doctor check
+  fails on the new primary, and it is not wiped;
+- S10b, auto-rebootstrap on, the issue's setup: it is re-cloned through
+  the divergence-confirmed stale-WAL path, not a failed Postgres start,
+  and streams. The commits only it held are gone, and every signal
+  clears.
 
 While a standby is not streaming, pg-manager opens one replication
 connection per tick to the leader, which counts against the leader's

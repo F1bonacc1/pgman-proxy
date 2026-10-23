@@ -93,6 +93,25 @@ func formThree(tp *topo) (string, []string) {
 	return primary, standbys
 }
 
+// waitPromoted waits until one of candidates answers as a primary and
+// returns it.
+func (tp *topo) waitPromoted(candidates []string, budget time.Duration) string {
+	tp.t.Helper()
+	var promoted string
+	waitFor(tp.t, budget, time.Second, "a standby promoted", func() (bool, string) {
+		roles := map[string]string{}
+		for _, n := range candidates {
+			roles[n] = tp.role(n)
+			if roles[n] == "primary" {
+				promoted = n
+				return true, ""
+			}
+		}
+		return false, fmt.Sprintf("roles=%v", roles)
+	})
+	return promoted
+}
+
 // assertStoppedPostgres checks node's log for the drain's postgres step
 // in fast mode.
 func assertStoppedPostgres(tp *topo, node string) {
@@ -181,18 +200,7 @@ done`
 	}
 	assertStoppedPostgres(tp, old)
 
-	var promoted string
-	waitFor(t, 2*time.Minute, time.Second, "a standby promoted", func() (bool, string) {
-		roles := map[string]string{}
-		for _, n := range standbys {
-			roles[n] = tp.role(n)
-			if roles[n] == "primary" {
-				promoted = n
-				return true, ""
-			}
-		}
-		return false, fmt.Sprintf("roles=%v", roles)
-	})
+	promoted := tp.waitPromoted(standbys, 2*time.Minute)
 	tp.waitWritable(promoted, 30*time.Second)
 	if missing := missingIDs(tp, promoted, acked); len(missing) > 0 {
 		t.Errorf("node-%s lacks %d acknowledged commits, e.g. ids %v", promoted, len(missing), missing[:min(len(missing), 10)])

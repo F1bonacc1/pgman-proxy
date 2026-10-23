@@ -410,3 +410,140 @@ func TestCheckClusterIdentity(t *testing.T) {
 		t.Fatal("cluster.identity must be registered with an advisory suggested fix")
 	}
 }
+
+// timelineAggregator is a fakeAggregator that also answers peer
+// timelines, as the runtime status aggregator does.
+type timelineAggregator struct {
+	fakeAggregator
+	peers []PeerTimeline
+	err   error
+}
+
+func (a *timelineAggregator) PeerTimelines(context.Context) ([]PeerTimeline, error) {
+	return a.peers, a.err
+}
+
+// issue12Divergence is the state pgman-proxy issue #12 observed on
+// node-a: timeline 2 WAL to 0/5063878, while timeline 2 ended at
+// 0/50637C8 in the history of node-c's timeline 3.
+func issue12Divergence() *pgmanager.TimelineDivergence {
+	return &pgmanager.TimelineDivergence{
+		LocalTimeline:   2,
+		LocalEndLSN:     0x5063878,
+		ClusterTimeline: 3,
+		SwitchLSN:       0x50637C8,
+		Evidence:        pgmanager.DivergenceEvidenceSource,
+		SourceNodeID:    "node-c",
+	}
+}
+
+// TestCheckTimelineConsistent pins pgman-proxy issue #12: the check
+// fails while any node reports a timeline divergence, from whichever
+// node serves it, and lists peers that did not answer without failing
+// on them. fakeEngine injects the divergence (Constitution VI
+// fault-injection carve-out); scaleout S10 produces a real one.
+func TestCheckTimelineConsistent(t *testing.T) {
+	ctx := context.Background()
+	statusOf := func(st pgmanager.Status, err error) *fakeEngine {
+		return &fakeEngine{statusFn: func(context.Context) (pgmanager.Status, error) { return st, err }}
+	}
+
+	// A plain engine reports only this node.
+	sev, msg, ev := checkTimelineConsistent(ctx, statusOf(pgmanager.Status{LocalNodeID: "node-a", TimelineDivergence: issue12Divergence()}, nil))
+	if sev != SeverityFail {
+		t.Fatalf("diverged local node: severity = %v (%s), want fail", sev, msg)
+	}
+	if want := "node-a holds timeline 2 WAL to 0/5063878, past its end at 0/50637C8 in the cluster's timeline 3"; msg != want {
+		t.Errorf("message = %q, want %q", msg, want)
+	}
+	d := ev["diverged"].([]map[string]any)
+	if len(d) != 1 || d[0]["node_id"] != "node-a" || d[0]["local_end_lsn"] != "0/5063878" ||
+		d[0]["switch_lsn"] != "0/50637C8" || d[0]["evidence"] != "source" || d[0]["source_node_id"] != "node-c" {
+		t.Errorf("evidence = %v", ev)
+	}
+	if sev, msg, _ := checkTimelineConsistent(ctx, statusOf(pgmanager.Status{LocalNodeID: "node-a"}, nil)); sev != SeverityPass {
+		t.Errorf("clean local node: severity = %v (%s), want pass", sev, msg)
+	}
+	if sev, _, _ := checkTimelineConsistent(ctx, statusOf(pgmanager.Status{}, errors.New("engine down"))); sev != SeverityUnknown {
+		t.Errorf("status error: severity = %v, want unknown", sev)
+	}
+
+	// The doctor handler's engine asks every peer, so a healthy serving
+	// node still fails the check for a diverged peer.
+	notAncestor := &pgmanager.TimelineDivergence{LocalTimeline: 4, LocalEndLSN: 0x6000000, ClusterTimeline: 3, Evidence: pgmanager.DivergenceEvidenceForkRecord}
+	healthy := statusOf(pgmanager.Status{LocalNodeID: "node-b"}, nil)
+	cluster := &enrichedEngine{Engine: healthy, agg: &timelineAggregator{peers: []PeerTimeline{
+		{NodeID: "node-c", Answered: false},
+		{NodeID: "node-b", Answered: true},
+		{NodeID: "node-a", Answered: true, Divergence: issue12Divergence()},
+		{NodeID: "node-d", Answered: true, Divergence: notAncestor},
+	}}}
+	sev, msg, ev = checkTimelineConsistent(ctx, cluster)
+	if sev != SeverityFail {
+		t.Fatalf("diverged peers: severity = %v (%s), want fail", sev, msg)
+	}
+	if want := "node-a holds timeline 2 WAL to 0/5063878, past its end at 0/50637C8 in the cluster's timeline 3; " +
+		"node-d is on timeline 4, which is not in the history of the cluster's timeline 3"; msg != want {
+		t.Errorf("message = %q, want %q", msg, want)
+	}
+	if ev["checked"] != 3 || !reflect.DeepEqual(ev["unanswered"], []string{"node-c"}) || len(ev["diverged"].([]map[string]any)) != 2 {
+		t.Errorf("evidence = %v", ev)
+	}
+
+	cleanPeers := &enrichedEngine{Engine: healthy, agg: &timelineAggregator{peers: []PeerTimeline{
+		{NodeID: "node-a", Answered: true}, {NodeID: "node-b", Answered: true}, {NodeID: "node-c"},
+	}}}
+	if sev, msg, _ := checkTimelineConsistent(ctx, cleanPeers); sev != SeverityPass || msg != "no divergence reported by 2 node(s); not answering: node-c" {
+		t.Errorf("clean peers: %v %q, want pass naming node-c as not answering", sev, msg)
+	}
+	failing := &enrichedEngine{Engine: healthy, agg: &timelineAggregator{err: errors.New("no responders")}}
+	if sev, _, _ := checkTimelineConsistent(ctx, failing); sev != SeverityUnknown {
+		t.Errorf("fan-out error: severity = %v, want unknown", sev)
+	}
+
+	catalog := DefaultDoctorChecks()
+	last := catalog[len(catalog)-1]
+	if last.Name != "replication.timeline-consistent" || last.SuggestedFix == nil || last.SuggestedFix.BlastRadius != BlastAdvisory {
+		t.Fatalf("replication.timeline-consistent must be registered last with an advisory suggested fix, got %+v", last)
+	}
+}
+
+// TestDoctorRun_TimelineConsistentAsksPeers pins that POST
+// /v1/doctor/run reaches the aggregator's peer timelines, so `pgmctl
+// doctor` against any node reports a diverged peer (issue #12).
+func TestDoctorRun_TimelineConsistentAsksPeers(t *testing.T) {
+	rawEngine := &fakeEngine{statusFn: func(context.Context) (pgmanager.Status, error) {
+		return pgmanager.Status{ClusterID: "test-cluster", LocalNodeID: "node-c", LocalRole: pgmanager.RolePrimary}, nil
+	}}
+	agg := &timelineAggregator{peers: []PeerTimeline{
+		{NodeID: "node-a", Answered: true, Divergence: issue12Divergence()},
+		{NodeID: "node-c", Answered: true},
+	}}
+	logger := obs.NewLogger(io.Discard, "info", "test-cluster", "test-node", "control")
+	metrics := obs.NewMetrics("test-cluster", "test-node")
+	auth := NewAuthenticator("PGMAN_PROXY_TEST_TOKEN", "", false)
+	auth.getEnv = func(_ string) string { return "secret-token" }
+	srv, err := NewServer(Config{
+		Addr:       "127.0.0.1:0",
+		Auth:       auth,
+		Audit:      NewAudit("test-cluster", logger, &fakeNATS{}, metrics),
+		Router:     NewLeaderRouter("redirect", time.Second, "test-cluster", nil, &fakeLeader{leader: true}),
+		Engine:     rawEngine,
+		Aggregator: agg,
+		Logger:     logger,
+		Metrics:    metrics,
+		ClusterID:  "test-cluster",
+		NodeID:     "test-node",
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/doctor/run", `{"check":"replication.timeline-consistent"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	rep := readReportFromEnvelope(t, w.Body.Bytes())
+	if len(rep.Checks) != 1 || rep.Checks[0].Status != SeverityFail || rep.Checks[0].SuggestedFix == nil {
+		t.Fatalf("report = %+v, want one failing check with its suggested fix", rep.Checks)
+	}
+}

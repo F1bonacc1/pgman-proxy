@@ -8,7 +8,8 @@
 // into the snapshot returned by GET /v1/status.
 //
 // Wire payload is `peerSliceStatus` (NodeID + Role + State + Reachable
-// + Timestamp). It is intentionally minimal so a single fan-out call
+// + Timestamp, plus the peer's timeline divergence when it reports
+// one). It is intentionally minimal so a single fan-out call
 // has a tight RTT budget; LSN / lag fields stay zero until pg-manager
 // exposes them in a stable cross-peer API.
 
@@ -22,6 +23,7 @@ import (
 
 	pgmanager "github.com/f1bonacc1/pg-manager"
 
+	"github.com/f1bonacc1/pgman-proxy/internal/control"
 	"github.com/f1bonacc1/pgman-proxy/internal/embedded"
 	"github.com/f1bonacc1/pgman-proxy/internal/fanout"
 	"github.com/f1bonacc1/pgman-proxy/internal/obs"
@@ -35,6 +37,61 @@ type peerSliceStatus struct {
 	State     int       `json:"state"`
 	Reachable bool      `json:"reachable"`
 	Timestamp time.Time `json:"timestamp"`
+	// TimelineDivergence is the peer's own pg-manager report (pgman-proxy
+	// issue #12). Absent when it reports none or predates v0.3.3.
+	TimelineDivergence *peerTimelineDivergence `json:"timeline_divergence,omitempty"`
+}
+
+// peerTimelineDivergence is the wire form of pgmanager.TimelineDivergence,
+// tagged like pg-manager's timeline.diverged event payload so the
+// fan-out schema does not follow the engine struct's Go field names.
+type peerTimelineDivergence struct {
+	LocalTimeline   uint32    `json:"local_timeline"`
+	LocalEndLSN     uint64    `json:"local_end_lsn"`
+	ClusterTimeline uint32    `json:"cluster_timeline"`
+	SwitchLSN       uint64    `json:"switch_lsn"`
+	Evidence        string    `json:"evidence"`
+	SourceNodeID    string    `json:"source_node_id,omitempty"`
+	Since           time.Time `json:"since"`
+}
+
+func wireTimelineDivergence(d *pgmanager.TimelineDivergence) *peerTimelineDivergence {
+	if d == nil {
+		return nil
+	}
+	return &peerTimelineDivergence{
+		LocalTimeline:   d.LocalTimeline,
+		LocalEndLSN:     d.LocalEndLSN,
+		ClusterTimeline: d.ClusterTimeline,
+		SwitchLSN:       d.SwitchLSN,
+		Evidence:        d.Evidence,
+		SourceNodeID:    string(d.SourceNodeID),
+		Since:           d.Since,
+	}
+}
+
+func (w *peerTimelineDivergence) engine() *pgmanager.TimelineDivergence {
+	if w == nil {
+		return nil
+	}
+	return &pgmanager.TimelineDivergence{
+		LocalTimeline:   w.LocalTimeline,
+		LocalEndLSN:     w.LocalEndLSN,
+		ClusterTimeline: w.ClusterTimeline,
+		SwitchLSN:       w.SwitchLSN,
+		Evidence:        w.Evidence,
+		SourceNodeID:    pgmanager.NodeID(w.SourceNodeID),
+		Since:           w.Since,
+	}
+}
+
+// peerReply is one decoded fan-out reply. ok is false when the peer
+// did not answer with a decodable SliceStatus payload.
+type peerReply struct {
+	nodeID      string
+	respondedAt time.Time
+	status      peerSliceStatus
+	ok          bool
 }
 
 // statusAggregator implements control.PeerAggregator using
@@ -67,13 +124,7 @@ func (a *statusAggregator) EnrichStatus(ctx context.Context, local pgmanager.Sta
 	if a == nil || a.client == nil || len(a.peers) == 0 {
 		return local
 	}
-	callCtx, cancel := context.WithTimeout(ctx, a.timeout)
-	defer cancel()
-	replies, err := a.client.Broadcast(callCtx, fanout.SliceStatus, nil, fanout.CallOptions{
-		PerSliceTimeout: a.timeout,
-		ExpectedNodes:   a.peers,
-		OperatorActor:   "system:status_aggregator",
-	})
+	replies, err := a.collect(ctx)
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Warn("status aggregator broadcast failed",
@@ -86,28 +137,21 @@ func (a *statusAggregator) EnrichStatus(ctx context.Context, local pgmanager.Sta
 	out.Instances = make([]pgmanager.InstanceStatus, 0, len(replies))
 	for _, r := range replies {
 		inst := pgmanager.InstanceStatus{
-			NodeID:     pgmanager.NodeID(r.NodeID),
-			LastSeenAt: r.RespondedAt,
+			NodeID:     pgmanager.NodeID(r.nodeID),
+			LastSeenAt: r.respondedAt,
 		}
-		if r.Status == fanout.StatusOK && r.Data != nil {
-			var p peerSliceStatus
-			b, _ := json.Marshal(r.Data)
-			if jerr := json.Unmarshal(b, &p); jerr == nil {
-				if p.NodeID != "" {
-					inst.NodeID = pgmanager.NodeID(p.NodeID)
-				}
-				inst.Role = pgmanager.Role(p.Role)
-				inst.State = pgmanager.State(p.State)
-				inst.PostgresUp = p.Reachable &&
-					pgmanager.State(p.State) != pgmanager.StateFailed &&
-					pgmanager.State(p.State) != pgmanager.StateStopped &&
-					pgmanager.State(p.State) != pgmanager.StateUnknown
-				if !p.Timestamp.IsZero() {
-					inst.LastSeenAt = p.Timestamp
-				}
-				if pgmanager.Role(p.Role) == pgmanager.RolePrimary && out.PrimaryNodeID == "" {
-					out.PrimaryNodeID = pgmanager.NodeID(p.NodeID)
-				}
+		if p := r.status; r.ok {
+			inst.Role = pgmanager.Role(p.Role)
+			inst.State = pgmanager.State(p.State)
+			inst.PostgresUp = p.Reachable &&
+				pgmanager.State(p.State) != pgmanager.StateFailed &&
+				pgmanager.State(p.State) != pgmanager.StateStopped &&
+				pgmanager.State(p.State) != pgmanager.StateUnknown
+			if !p.Timestamp.IsZero() {
+				inst.LastSeenAt = p.Timestamp
+			}
+			if pgmanager.Role(p.Role) == pgmanager.RolePrimary && out.PrimaryNodeID == "" {
+				out.PrimaryNodeID = pgmanager.NodeID(p.NodeID)
 			}
 		}
 		out.Instances = append(out.Instances, inst)
@@ -135,6 +179,60 @@ func (a *statusAggregator) EnrichStatus(ctx context.Context, local pgmanager.Sta
 	return out
 }
 
+var _ control.PeerTimelineReader = (*statusAggregator)(nil)
+
+// PeerTimelines implements control.PeerTimelineReader: every peer's
+// own timeline-divergence report, from the same SliceStatus fan-out as
+// EnrichStatus.
+func (a *statusAggregator) PeerTimelines(ctx context.Context) ([]control.PeerTimeline, error) {
+	if a == nil || a.client == nil || len(a.peers) == 0 {
+		return nil, fmt.Errorf("status aggregator: no fan-out client")
+	}
+	replies, err := a.collect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]control.PeerTimeline, 0, len(replies))
+	for _, r := range replies {
+		out = append(out, control.PeerTimeline{
+			NodeID:     pgmanager.NodeID(r.nodeID),
+			Answered:   r.ok,
+			Divergence: r.status.TimelineDivergence.engine(),
+		})
+	}
+	return out, nil
+}
+
+// collect broadcasts a SliceStatus request to every peer and decodes
+// the replies.
+func (a *statusAggregator) collect(ctx context.Context) ([]peerReply, error) {
+	callCtx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
+	replies, err := a.client.Broadcast(callCtx, fanout.SliceStatus, nil, fanout.CallOptions{
+		PerSliceTimeout: a.timeout,
+		ExpectedNodes:   a.peers,
+		OperatorActor:   "system:status_aggregator",
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]peerReply, 0, len(replies))
+	for _, r := range replies {
+		pr := peerReply{nodeID: r.NodeID, respondedAt: r.RespondedAt}
+		if r.Status == fanout.StatusOK && r.Data != nil {
+			b, _ := json.Marshal(r.Data)
+			if jerr := json.Unmarshal(b, &pr.status); jerr == nil {
+				pr.ok = true
+				if pr.status.NodeID != "" {
+					pr.nodeID = pr.status.NodeID
+				}
+			}
+		}
+		out = append(out, pr)
+	}
+	return out, nil
+}
+
 // statusResponderHandler returns the fanout.Handler that answers a
 // SliceStatus request from a peer. It calls the local
 // Manager.Status() and projects the cluster-relevant per-peer fields
@@ -146,11 +244,12 @@ func statusResponderHandler(status func(ctx context.Context) (pgmanager.Status, 
 			return nil, err
 		}
 		return peerSliceStatus{
-			NodeID:    string(st.LocalNodeID),
-			Role:      int(st.LocalRole),
-			State:     int(st.LocalState),
-			Reachable: true,
-			Timestamp: time.Now().UTC(),
+			NodeID:             string(st.LocalNodeID),
+			Role:               int(st.LocalRole),
+			State:              int(st.LocalState),
+			Reachable:          true,
+			Timestamp:          time.Now().UTC(),
+			TimelineDivergence: wireTimelineDivergence(st.TimelineDivergence),
 		}, nil
 	}
 }

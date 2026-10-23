@@ -41,6 +41,7 @@ type HistorySink interface {
 //	pgmanager.<cluster_id>.auto_demote.>
 //	pgmanager.<cluster_id>.divergence.>
 //	pgmanager.<cluster_id>.conninfo.reconciled
+//	pgmanager.<cluster_id>.timeline.>
 //
 // pgman-proxy MUST NOT publish on these subjects (Constitution IV) —
 // it is a passive observer.
@@ -86,6 +87,12 @@ func SubscribeCoordinationEvents(
 		// identity (identity.mismatch / identity.mismatch_cleared).
 		"empty_peer",
 		"identity",
+		// pg-manager v0.7.3 (pgman-proxy issue #12): a standby whose WAL
+		// runs past the end of its timeline in the cluster history
+		// (timeline.diverged / timeline.divergence_cleared), and a primary
+		// whose history disagrees with the published fork record
+		// (timeline.fork_conflict).
+		"timeline",
 	}
 
 	subs := make([]*nats.Subscription, 0, len(exactTopics)+len(wildcardFamilies))

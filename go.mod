@@ -1,6 +1,6 @@
 module github.com/f1bonacc1/pgman-proxy
 
-// Go 1.26.9 minimum. Earlier versions hit the stdlib findings
+// Go 1.26.10 minimum. Earlier versions hit the stdlib findings
 // surfaced by `.github/workflows/govulncheck.yml`: GO-2026-5037
 // (crypto/x509) and GO-2026-5039 (net/textproto) fixed in go1.26.4,
 // GO-2026-5856 (crypto/tls) fixed in go1.26.5, and the go1.26.6 batch
@@ -9,10 +9,11 @@ module github.com/f1bonacc1/pgman-proxy
 // (encoding/asn1), GO-2026-5026 (net/http via x/net/idna), and the
 // go1.26.9 batch: GO-2026-6603, 6605, 6610, 6611, 6612, 6613, 6617
 // (net/http), GO-2026-6608 (net/textproto) and GO-2026-6607
-// (crypto/tls). Bump in lockstep with new govulncheck stdlib
-// findings. setup-go in CI uses this directive as the install version,
-// so a `toolchain` line would be redundant.
-go 1.26.9
+// (crypto/tls), and GO-2026-6809 (crypto/x509) fixed in go1.26.10.
+// Bump in lockstep with new govulncheck stdlib findings. setup-go in
+// CI uses this directive as the install version, so a `toolchain` line
+// would be redundant.
+go 1.26.10
 
 // The wrapped pg-manager engine is pinned to a tagged release. pg-manager is
 // a PRIVATE repo, so every build fetches it with GOPRIVATE + token auth:
