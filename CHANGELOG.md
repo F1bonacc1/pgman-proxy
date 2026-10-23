@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (engine): pg-manager v0.7.3, a diverged ex-primary is detected and re-cloned
+
+After a failover, an old primary that kept WAL no standby had received
+came back as a standby that never streamed (issue #12). Its walreceiver
+sat in `waiting`, the new primary listed it in `startup`, and neither a
+rewind nor an auto-rebootstrap ran. pg-manager v0.7.2 compared two
+checkpoint locations: the fork LSN it published was the promoting
+standby's last restartpoint, not the switch point, and the survivor side
+was its own last checkpoint. Both nodes usually share that checkpoint,
+so the check could not fire. A crashed or killed primary with WAL in
+flight leaves this state. The shutdown fix below removes the most common
+trigger (`docker stop`); `kill -9` and power loss remain.
+
+pg-manager v0.7.3:
+- publishes the real switch point from the new timeline's history file;
+- compares how far the standby's WAL goes (minimum recovery point,
+  replay LSN) with it, asking the leader for its history over a
+  replication connection, so a replication-only `pg_hba.conf` is enough;
+- has the clone source confirm the verdict before an auto-rebootstrap
+  wipes a node on that evidence alone. A coordination-store record never
+  authorizes the wipe by itself; an unconfirmed attempt is refused with
+  `divergence_unconfirmed`.
+
+With `PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true` the node is
+re-cloned after the persistence window. The ex-primary's unreplicated
+WAL is discarded; under quorum sync those commits were never
+acknowledged.
+
+What operators see in this release:
+- `/v1/status` carries the engine's new `TimelineDivergence` field while
+  a node is diverged.
+- `pgmctl doctor` fails `engine.diagnose-clean` with a Critical
+  `timeline` issue on that node, with auto-rebootstrap enabled or not.
+- Not yet wired: the `timeline.*` engine events are not logged, counted
+  or kept in `pgmctl history`; there is no dedicated gauge or doctor
+  check; and `tests/scaleout` has no diverged-ex-primary scenario. These
+  follow in a later release.
+
+While a standby is not streaming, pg-manager opens one replication
+connection per tick to the leader, which counts against the leader's
+`max_wal_senders`.
+
+Only the pg-manager lines move in go.mod/go.sum; v0.7.3 keeps v0.7.2's
+dependencies.
+
 ### Fixed (shutdown): stopping a node shuts PostgreSQL down cleanly
 
 pgman-proxy's drain never stopped PostgreSQL (issue #11). pg-manager's
