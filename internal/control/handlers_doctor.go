@@ -51,6 +51,15 @@ func (e *enrichedEngine) Status(ctx context.Context) (pgmanager.Status, error) {
 	return st, nil
 }
 
+// PeerTimelines implements PeerTimelineReader through the aggregator
+// when it supports it, else from the local engine alone.
+func (e *enrichedEngine) PeerTimelines(ctx context.Context) ([]PeerTimeline, error) {
+	if r, ok := e.agg.(PeerTimelineReader); ok {
+		return r.PeerTimelines(ctx)
+	}
+	return localTimeline(ctx, e.Engine)
+}
+
 // docFixRequest is the wire body of POST /v1/doctor/fix.
 type docFixRequest struct {
 	Fix       string         `json:"fix"`

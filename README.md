@@ -224,6 +224,24 @@ needs crash recovery on its next start:
 | Docker Compose | `stop_grace_period: 45s` |
 | systemd unit running `docker run` | `docker stop -t 45` in `ExecStop`, and `TimeoutStopSec=60` |
 
+### A diverged ex-primary
+
+A primary that dies with WAL no standby received (`kill -9`, power loss,
+a stop that overran its timeout) cannot follow the promoted standby's
+timeline when it comes back: its WAL runs past the point where its
+timeline ended. While it is in that state:
+- `pgman_proxy_timeline_diverged` reads 1 on that node;
+- `pgmctl doctor` fails `replication.timeline-consistent` on any node,
+  naming it;
+- the `timeline.diverged` event is in `pgmctl history`.
+
+With `PGMAN_PROXY_POLICY_AUTO_REBOOTSTRAP_ENABLED=true` the node
+re-clones itself after the persistence window, once the clone source
+confirms the divergence. Otherwise stop the node, move its data
+directory aside (recreate it empty, same owner and mode) and start it:
+it clones from the primary. Either way the commits only it held are
+discarded; under quorum sync they were never acknowledged.
+
 Both images **MUST run unprivileged**; `--user 0:0` is rejected at
 the orchestrator level (FR-013). The bundled image's default user is
 `postgres`.

@@ -18,6 +18,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -119,6 +120,24 @@ func DefaultDoctorChecks() []NamedCheck {
 				ApplyEndpoint:  "/v1/doctor/fix",
 			},
 			Run: checkClusterIdentity,
+		},
+		{
+			// pgman-proxy issue #12: appended last so pgmctl's
+			// check-by-name order stays stable.
+			Name:           "replication.timeline-consistent",
+			Description:    "No node's WAL runs past the end of its timeline in the cluster history.",
+			EvidenceSchema: "doctor.evidence.timeline-divergence/v1",
+			SuggestedFix: &SuggestedFix{
+				Name: "reclone-diverged-node",
+				Description: "The node holds WAL the cluster never received and cannot stream. With " +
+					"policy.auto_rebootstrap.enabled it re-clones itself once its clone source confirms the " +
+					"divergence; otherwise stop it, move its data directory aside and start it to clone from " +
+					"the primary. Its unreplicated WAL is discarded; see docs/scale-out-1-to-3/runbook.md.",
+				BlastRadius:    BlastAdvisory,
+				AppliesToCheck: "replication.timeline-consistent",
+				ApplyEndpoint:  "/v1/doctor/fix",
+			},
+			Run: checkTimelineConsistent,
 		},
 	}
 }
@@ -372,6 +391,85 @@ func checkClusterIdentity(ctx context.Context, e Engine) (Severity, string, map[
 	}
 	return SeverityFail, fmt.Sprintf("database identity %s differs from leader %s (%s)",
 		mm.LocalSystemIdentifier, mm.LeaderNodeID, mm.LeaderSystemIdentifier), ev
+}
+
+// checkTimelineConsistent fails while any node reports that its WAL
+// runs past the end of its timeline in the cluster history (pg-manager
+// v0.7.3 Status.TimelineDivergence, pgman-proxy issue #12): such a
+// standby cannot stream. It asks every peer when the engine reads peer
+// timelines (the doctor handler's enrichedEngine does), else only this
+// node. Peers that do not answer are listed but do not fail the check;
+// nodes.all-reachable covers them. Read-only.
+func checkTimelineConsistent(ctx context.Context, e Engine) (Severity, string, map[string]any) {
+	var peers []PeerTimeline
+	var err error
+	if r, ok := e.(PeerTimelineReader); ok {
+		peers, err = r.PeerTimelines(ctx)
+	} else {
+		peers, err = localTimeline(ctx, e)
+	}
+	if err != nil {
+		return SeverityUnknown, "peer timelines: " + err.Error(), nil
+	}
+	sort.Slice(peers, func(i, j int) bool { return peers[i].NodeID < peers[j].NodeID })
+	diverged := []map[string]any{}
+	var details, unanswered []string
+	checked := 0
+	for _, p := range peers {
+		if !p.Answered {
+			unanswered = append(unanswered, string(p.NodeID))
+			continue
+		}
+		checked++
+		d := p.Divergence
+		if d == nil {
+			continue
+		}
+		diverged = append(diverged, map[string]any{
+			"node_id":          string(p.NodeID),
+			"local_timeline":   d.LocalTimeline,
+			"local_end_lsn":    formatLSN(d.LocalEndLSN),
+			"cluster_timeline": d.ClusterTimeline,
+			"switch_lsn":       formatLSN(d.SwitchLSN),
+			"evidence":         d.Evidence,
+			"source_node_id":   string(d.SourceNodeID),
+			"since":            d.Since,
+		})
+		if d.SwitchLSN == 0 {
+			details = append(details, fmt.Sprintf("%s is on timeline %d, which is not in the history of the cluster's timeline %d",
+				p.NodeID, d.LocalTimeline, d.ClusterTimeline))
+			continue
+		}
+		details = append(details, fmt.Sprintf("%s holds timeline %d WAL to %s, past its end at %s in the cluster's timeline %d",
+			p.NodeID, d.LocalTimeline, formatLSN(d.LocalEndLSN), formatLSN(d.SwitchLSN), d.ClusterTimeline))
+	}
+	ev := map[string]any{"checked": checked, "diverged": diverged}
+	if len(unanswered) > 0 {
+		ev["unanswered"] = unanswered
+	}
+	if len(details) > 0 {
+		return SeverityFail, strings.Join(details, "; "), ev
+	}
+	msg := fmt.Sprintf("no divergence reported by %d node(s)", checked)
+	if len(unanswered) > 0 {
+		msg += "; not answering: " + strings.Join(unanswered, ", ")
+	}
+	return SeverityPass, msg, ev
+}
+
+// localTimeline is this node's own timeline report, for engines that
+// cannot ask their peers.
+func localTimeline(ctx context.Context, e Engine) ([]PeerTimeline, error) {
+	st, err := e.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []PeerTimeline{{NodeID: st.LocalNodeID, Answered: true, Divergence: st.TimelineDivergence}}, nil
+}
+
+// formatLSN renders a WAL position the way PostgreSQL prints it.
+func formatLSN(lsn uint64) string {
+	return fmt.Sprintf("%X/%X", lsn>>32, lsn&0xFFFFFFFF)
 }
 
 // runChecks executes the supplied check set against the engine,

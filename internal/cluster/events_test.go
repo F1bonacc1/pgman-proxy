@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -377,6 +378,63 @@ func TestHandleCoordinationEvent_Feature005Families(t *testing.T) {
 		}
 		if got := rec["outcome"]; got != want {
 			t.Errorf("%s outcome = %v, want %s", subject, got, want)
+		}
+	}
+}
+
+// chanHistorySink forwards each PublishEvent type to a channel; safe
+// for the concurrent per-subscription callbacks of a live NATS conn.
+type chanHistorySink chan string
+
+func (c chanHistorySink) PublishEvent(_ context.Context, _, evType, _ string, _ map[string]any) (string, error) {
+	c <- evType
+	return "fake-id", nil
+}
+
+// TestSubscribeCoordinationEvents_TimelineFamily pins that the
+// pg-manager v0.7.3 timeline events (pgman-proxy issue #12) reach the
+// history stream through a real subscription, not only through the
+// handler.
+func TestSubscribeCoordinationEvents_TimelineFamily(t *testing.T) {
+	nc := startJetStreamNATS(t)
+	buf := &obs.SafeBuffer{}
+	logger := obs.NewLogger(buf, "info", "pgso", "node-a", "test")
+	metrics := obs.NewMetrics("pgso", "node-a")
+	sink := make(chanHistorySink, 8)
+
+	subs, err := SubscribeCoordinationEvents(nc, "pgso", "node-a", logger, metrics, sink)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, s := range subs {
+			_ = s.Unsubscribe()
+		}
+	})
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	want := []string{"timeline.diverged", "timeline.divergence_cleared", "timeline.fork_conflict"}
+	payload, _ := json.Marshal(map[string]any{"node_id": "node-a"})
+	for _, topic := range want {
+		if err := nc.Publish("pgmanager.pgso."+topic, payload); err != nil {
+			t.Fatalf("publish %s: %v", topic, err)
+		}
+	}
+	got := map[string]bool{}
+	timeout := time.After(5 * time.Second)
+	for len(got) < len(want) {
+		select {
+		case evType := <-sink:
+			got[evType] = true
+		case <-timeout:
+			t.Fatalf("history saw %v, want all of %v", got, want)
+		}
+	}
+	for _, topic := range want {
+		if !got[topic] {
+			t.Errorf("history missed %s (saw %v)", topic, got)
 		}
 	}
 }
