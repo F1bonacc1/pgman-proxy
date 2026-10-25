@@ -99,6 +99,7 @@ pgmctl doctor            # all checks pass, including cluster.identity (pg-manag
 
   returns node-a's value from before the expansion.
 - **Sync set**: on node-a, `SHOW synchronous_standby_names;` names node-b and node-c once both stream. Until then, node-a runs asynchronously, with the same durability it had as a single node.
+- **Failover readiness**: until the sync set names at least one of node-b and node-c, the cluster cannot fail over. If node-a is lost in that window, neither new node promotes on its own, even one that has finished cloning and is streaming (pg-manager's join window). "Both standbys streaming" is not enough: do not stop, replace or decommission node-a, and do not let automation proceed, until this check passes. Recovering from a lost node-a before then needs an operator: pg-manager's documented override is removing node-a from the topology of every remaining node.
 
 Then delete `jetstream.standalone-*` under node-a's `cluster.jetstream_dir`.
 

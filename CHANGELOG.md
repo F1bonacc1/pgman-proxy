@@ -28,6 +28,17 @@ Breaking for scripts that called `pgmctl promote` or `POST /v1/promote`
 and checked only the exit status or HTTP 200: those calls never
 promoted, and now they fail visibly.
 
+### Fixed (docs): the scale-out runbook says when the cluster can fail over
+
+The 1→3 runbook's Verify section now states that the cluster cannot fail
+over until node-a's `synchronous_standby_names` names a new node. Until
+then, pg-manager treats node-a as the only holder of every write it
+acknowledged (the join window), so losing node-a leaves no automatic
+successor, even when both new nodes are streaming. Nothing should stop,
+replace or decommission node-a before that check passes. The nightly
+scale-out suite hit exactly this by killing the primary as soon as both
+standbys streamed (run 40176451731, fixed in #16).
+
 ### Fixed (engine): pg-manager v0.7.4, an expansion no longer moves the primary to a fresh clone
 
 During a 1→3 expansion, node-a (the node with the data) could end up
