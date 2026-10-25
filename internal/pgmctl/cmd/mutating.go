@@ -14,7 +14,8 @@ import (
 
 // Mutating ops (US6 / contracts/cli-commands.md):
 //   single-resource:        fence, unfence, set-config
-//   cluster-affecting:      failover, switchover, promote, restart, delete
+//   cluster-affecting:      failover, switchover, restart, delete
+//   refused outright:       promote (see promoteNotSupported)
 //
 // The clearest semantic split lives in the prompt shape — single-
 // resource ops get [y/N], cluster-affecting ops require the typed
@@ -294,33 +295,28 @@ typed cluster name (or --force --cluster <name>).`,
 	return c
 }
 
-func newPromoteCmd(app *AppContext) *cobra.Command {
+// promoteNotSupported is why `pgmctl promote` refuses. The command stays
+// registered so an operator who reaches for it in an outage reads this
+// instead of "unknown command".
+const promoteNotSupported = `pgmctl promote is not supported. It called POST /v1/promote, which
+reported success but never promoted anything: pg-manager records the
+request and does not act on it.
+
+Instead, with a cluster leader:
+
+    pgmctl switchover --target NODE   # move the primary to a chosen peer
+    pgmctl failover                   # let the cluster pick its best standby`
+
+// newPromoteCmd refuses before contacting any peer, so it also protects
+// operators whose servers still accept POST /v1/promote.
+func newPromoteCmd(_ *AppContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "promote",
-		Short: "Manually promote THIS peer (local-only override)",
-		Long: `Manual override: ask the local peer to promote regardless of
-consensus state. Cluster-affecting; requires typed cluster name.
-
-The --endpoint flag determines which peer is promoted (Promote is
-local-only per 001 — the operation acts on the peer receiving the
-request).`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := app.Setup(); err != nil {
-				return err
-			}
-			if err := clusterAffectingPrompt(app, "promote", ""); err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), commandTimeout(app))
-			defer cancel()
-			body := map[string]any{"request_id": client.NewRequestID()}
-			env, err := app.Client.PostJSON(ctx, "/v1/promote", body)
-			if err != nil {
-				return err
-			}
-			printRequestID(cmd, env)
-			return nil
+		Short: "Not supported: use switchover or failover",
+		Long:  promoteNotSupported,
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return WithExitCode(ExitUsage, errors.New(promoteNotSupported))
 		},
 	}
 }

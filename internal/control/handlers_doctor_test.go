@@ -317,7 +317,7 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	baselineDiagnose := pgmanager.Diagnosis{Healthy: true}
 
 	calls := struct {
-		switchover, failover, fence, unfence, promote, updateTopo,
+		switchover, failover, fence, unfence, updateTopo,
 		backup, prepareUpgrade, executeUpgrade int
 	}{}
 
@@ -337,7 +337,6 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 			calls.unfence++
 			return nil
 		},
-		promoteFn: func(_ context.Context) error { calls.promote++; return nil },
 		updateTopologyFn: func(_ context.Context, _ pgmanager.Topology, _ pgmanager.Policy) error {
 			calls.updateTopo++
 			return nil
@@ -362,7 +361,7 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	}
 
 	zero := struct {
-		switchover, failover, fence, unfence, promote, updateTopo,
+		switchover, failover, fence, unfence, updateTopo,
 		backup, prepareUpgrade, executeUpgrade int
 	}{}
 	if !reflect.DeepEqual(calls, zero) {

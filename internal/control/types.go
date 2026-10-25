@@ -38,7 +38,9 @@ type Engine interface {
 	Failover(ctx context.Context) error
 	Fence(ctx context.Context, target pgmanager.NodeID) error
 	Unfence(ctx context.Context, target pgmanager.NodeID) error
-	Promote(ctx context.Context) error
+	// No Promote: pg-manager's Manager.Promote records the request and
+	// never promotes, so POST /v1/promote refuses with not_supported
+	// instead of reaching it.
 	UpdateTopology(ctx context.Context, t pgmanager.Topology, p pgmanager.Policy) error
 	TriggerBackup(ctx context.Context) (pgmanager.BackupID, error)
 	PrepareUpgrade(ctx context.Context, plan pgmanager.UpgradePlan) error
@@ -138,6 +140,10 @@ const (
 	CodeSupervisorNotDetected  = "supervisor_not_detected"
 	CodeWrongPeer              = "wrong_peer"
 	CodeSetConfigKeyDisallowed = "set_config_key_disallowed"
+
+	// CodeNotSupported: the operation is routed but has no working
+	// engine behind it (POST /v1/promote).
+	CodeNotSupported = "not_supported"
 )
 
 // httpStatusForCode maps the documented error codes to their HTTP
@@ -160,6 +166,8 @@ func httpStatusForCode(code string) int {
 		return http.StatusBadRequest
 	case CodeLeaderRouteTimeout:
 		return http.StatusGatewayTimeout
+	case CodeNotSupported:
+		return http.StatusNotImplemented
 	}
 	return http.StatusInternalServerError
 }

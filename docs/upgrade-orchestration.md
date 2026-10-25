@@ -305,8 +305,8 @@ Postgres back up).
 - **A failed pre-swap leaves Postgres down** on that node — restore the
   old binary and restart before retrying.
 - **Lost a node mid-upgrade?** Operators must explicitly trigger
-  recovery (`pgmctl failover`, `pgmctl promote`, or `pgmctl
-  fence`/`unfence`). There is **no automated failover during an upgrade
+  recovery (`pgmctl failover`, `pgmctl switchover`, or `pgmctl
+  fence`/`unfence`; `pgmctl promote` is not supported). There is **no automated failover during an upgrade
   sequence** (Constitution II — fail-closed, no silent re-election).
 - **Per-node budget** bounds how long you wait before declaring a node
   step failed; size it with `PerNodeBudget` / `EstimateDuration`.
@@ -337,7 +337,7 @@ lifts.
 | Restart one node's Postgres | `POST /v1/restart` `target=postgres` | `Manager.RestartPostgres` | no (receiving peer) |
 | Move primary role | `POST /v1/switchover` | `Manager.Switchover` | **yes** |
 | Force a new primary | `POST /v1/failover` | `Manager.Failover` | **yes** |
-| Promote this node | `POST /v1/promote` | `Manager.Promote` | local-only |
+| Promote this node | `POST /v1/promote` | none: refused with `not_supported` | not applicable |
 | Fence / unfence a node | `POST /v1/fence` · `/v1/unfence` | `Manager.Fence` · `Unfence` | **yes** |
 
 Planning helpers (no side effects):

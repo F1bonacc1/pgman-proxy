@@ -61,11 +61,18 @@ func (s *Server) handleFailover(w http.ResponseWriter, r *http.Request, env *req
 	s.finishMutation(w, r, env, "", engineStart, err)
 }
 
+// promoteNotSupported is the refusal POST /v1/promote returns.
+const promoteNotSupported = "promote is not supported: pg-manager records a promote request " +
+	"but never acts on it, so this endpoint used to report success without promoting. " +
+	"Use POST /v1/switchover with a target, or POST /v1/failover to let the cluster pick " +
+	"(both need a leader)"
+
+// handlePromote refuses every request. pg-manager's Manager.Promote
+// writes a manual_promote key that nothing reads, so accepting the call
+// told operators a promotion was under way when none was. The refusal
+// is audited like any rejected mutation.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request, env *requestEnv) {
-	// Promote is explicitly local-only — never forwarded.
-	engineStart := time.Now()
-	err := s.engine.Promote(r.Context())
-	s.finishMutation(w, r, env, "", engineStart, err)
+	s.refuse(r.Context(), w, r, env.Op, env.ReqID, env.Start, env.Actor, CodeNotSupported, promoteNotSupported)
 }
 
 func (s *Server) handleFence(w http.ResponseWriter, r *http.Request, env *requestEnv) {

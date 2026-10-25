@@ -34,7 +34,6 @@ type fakeEngine struct {
 	failoverFn        func(context.Context) error
 	fenceFn           func(context.Context, pgmanager.NodeID) error
 	unfenceFn         func(context.Context, pgmanager.NodeID) error
-	promoteFn         func(context.Context) error
 	updateTopologyFn  func(context.Context, pgmanager.Topology, pgmanager.Policy) error
 	triggerBackupFn   func(context.Context) (pgmanager.BackupID, error)
 	prepareUpgradeFn  func(context.Context, pgmanager.UpgradePlan) error
@@ -75,12 +74,6 @@ func (f *fakeEngine) Fence(ctx context.Context, t pgmanager.NodeID) error {
 func (f *fakeEngine) Unfence(ctx context.Context, t pgmanager.NodeID) error {
 	if f.unfenceFn != nil {
 		return f.unfenceFn(ctx, t)
-	}
-	return nil
-}
-func (f *fakeEngine) Promote(ctx context.Context) error {
-	if f.promoteFn != nil {
-		return f.promoteFn(ctx)
 	}
 	return nil
 }
@@ -398,19 +391,26 @@ func TestAuditFailClose_RecoveryRestoresMutation(t *testing.T) {
 	_ = w
 }
 
-func TestPromote_NotLeader_StillExecutesLocally(t *testing.T) {
-	called := false
-	engine := &fakeEngine{promoteFn: func(_ context.Context) error {
-		called = true
-		return nil
-	}}
-	srv := newTestServer(t, engine, &fakeLeader{leader: false, id: "other"}, &fakeNATS{}, "")
-	w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/promote", "")
-	if w.Code != http.StatusOK {
-		t.Errorf("Promote at non-leader must execute locally, got %d", w.Code)
-	}
-	if !called {
-		t.Errorf("engine.Promote was not invoked at non-leader")
+// TestPromote_RefusedNotSupported: POST /v1/promote used to return 200
+// while pg-manager's Promote did nothing. It must now refuse on every
+// peer, leader or not, never forward, and name the working alternatives.
+func TestPromote_RefusedNotSupported(t *testing.T) {
+	for _, leader := range []bool{true, false} {
+		srv := newTestServer(t, &fakeEngine{}, &fakeLeader{leader: leader, id: "other"}, &fakeNATS{}, "")
+		w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/promote", "")
+		if w.Code != http.StatusNotImplemented {
+			t.Errorf("leader=%v: want 501, got %d (body=%s)", leader, w.Code, w.Body.String())
+		}
+		var env envelope
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("leader=%v: decode envelope: %v", leader, err)
+		}
+		if env.Outcome != OutcomeRejected || env.Error == nil || env.Error.Code != CodeNotSupported {
+			t.Errorf("leader=%v: want rejected/%s, got outcome=%q error=%+v", leader, CodeNotSupported, env.Outcome, env.Error)
+		}
+		if env.Error != nil && (!strings.Contains(env.Error.Message, "switchover") || !strings.Contains(env.Error.Message, "failover")) {
+			t.Errorf("leader=%v: message should name switchover and failover, got %q", leader, env.Error.Message)
+		}
 	}
 }
 

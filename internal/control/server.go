@@ -233,8 +233,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/fence", s.wrap("Fence", true, true, s.handleFence))
 	mux.Handle("POST /v1/unfence", s.wrap("Unfence", true, true, s.handleUnfence))
 
-	// Promote: explicitly NOT leader-only — semantics is "promote THIS node"
-	// (matches manager.Manager.Promote).
+	// Promote: kept routed so callers get an audited not_supported
+	// refusal instead of a 404 (see handlePromote).
 	mux.Handle("POST /v1/promote", s.wrap("Promote", true, false, s.handlePromote))
 
 	// Topology + backup + upgrade (leader-only).

@@ -300,6 +300,13 @@ required.
 
 Calls `POST /v1/promote` (existing; local-only per 001). Same prompt.
 
+**Amended (2026-10-26)**: refuses before contacting any peer, exit
+`EX_USAGE` (64), and names `pgmctl switchover --target <node-id>` and
+`pgmctl failover`. The call it made never promoted anything (001
+`contracts/lcm.md` § `Promote`, amended the same day), so the command
+no longer prompts or prints a request id. Positional arguments and
+flags are accepted and ignored so every form gets the same explanation.
+
 ---
 
 ### `pgmctl restart <node> [--target postgres|proxy] [--force --cluster <name>]`

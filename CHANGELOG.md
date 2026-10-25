@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (pgmctl): `pgmctl promote` no longer reports success without promoting
+
+`pgmctl promote` called `POST /v1/promote`, which called pg-manager's
+`Manager.Promote`. That method only records a `manual_promote` key that
+nothing in pg-manager reads, so the command printed a request id and
+nothing was promoted. An operator reaching for it in an outage believed
+they had acted.
+
+- **`pgmctl promote`** now refuses before contacting any peer, exits
+  `64` (EX_USAGE), and names the commands that work:
+  `pgmctl switchover --target <node-id>` and `pgmctl failover`. Because
+  it refuses client-side, it also protects operators whose servers still
+  accept the call.
+- **`POST /v1/promote`** stays routed but answers `501` with the new
+  error code `not_supported`. The refusal is audited like any rejected
+  mutation. pgman-proxy no longer calls `Manager.Promote`.
+
+Breaking for scripts that called `pgmctl promote` or `POST /v1/promote`
+and checked only the exit status or HTTP 200: those calls never
+promoted, and now they fail visibly.
+
 ### Fixed (engine): pg-manager v0.7.4, an expansion no longer moves the primary to a fresh clone
 
 During a 1→3 expansion, node-a (the node with the data) could end up

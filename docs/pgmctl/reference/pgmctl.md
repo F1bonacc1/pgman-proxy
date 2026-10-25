@@ -45,7 +45,7 @@ Spec: specs/003-pgmctl-cli/spec.md
 * [pgmctl health](pgmctl_health.md)	 - One-line-per-component health rollup
 * [pgmctl lag](pgmctl_lag.md)	 - Per-standby replication lag in bytes
 * [pgmctl list](pgmctl_list.md)	 - List a resource (alias of `get` for collection-shaped resources)
-* [pgmctl promote](pgmctl_promote.md)	 - Manually promote THIS peer (local-only override)
+* [pgmctl promote](pgmctl_promote.md)	 - Not supported: use switchover or failover
 * [pgmctl restart](pgmctl_restart.md)	 - Restart a peer's PostgreSQL or the pgman-proxy process itself
 * [pgmctl set-config](pgmctl_set-config.md)	 - Trigger an in-process reload of a hot-reload-allow-listed key
 * [pgmctl status](pgmctl_status.md)	 - One-glance cluster health

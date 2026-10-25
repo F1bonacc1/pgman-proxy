@@ -87,7 +87,7 @@ Request/response bodies are JSON. Endpoints are versioned under `/v1/`.
 | `Diagnose`        | GET    | `/v1/diagnose`             | —                                                        | no           | yes   |
 | `Switchover`      | POST   | `/v1/switchover`           | `target` (NodeID, required)                              | yes          | yes   |
 | `Failover`        | POST   | `/v1/failover`             | —                                                        | yes          | yes   |
-| `Promote`         | POST   | `/v1/promote`              | —                                                        | local-only   | yes   |
+| `Promote`         | POST   | `/v1/promote`              | —  (refused: `not_supported`, see below)                 | local-only   | yes   |
 | `Fence`           | POST   | `/v1/fence`                | `target` (NodeID, required)                              | yes          | yes   |
 | `Unfence`         | POST   | `/v1/unfence`              | `target` (NodeID, required)                              | yes          | yes   |
 | `UpdateTopology`  | POST   | `/v1/topology`             | `topology` (Topology), `policy` (Policy)                 | yes          | yes   |
@@ -113,6 +113,14 @@ in one of two configurable ways:
 `Promote` is **local-only** — it executes on the receiving peer
 regardless of leadership state, because its semantics are "promote *this
 node* to leader." This matches `../pg-manager`'s `Manager.Promote`.
+
+**Amended (2026-10-26)**: `Manager.Promote` only records a
+`manual_promote` key that pg-manager never reads, so this operation
+returned `accepted` and promoted nothing. `POST /v1/promote` now refuses
+every request with `not_supported` (HTTP 501) and no longer calls the
+engine; the refusal is audited. Use `Switchover` or `Failover`. An
+operator-forced promotion with working semantics is proposed upstream as
+pg-manager B-025.
 
 ## Response envelope
 
@@ -149,6 +157,7 @@ All non-redirect responses share an envelope:
 | `engine_error`                  | `../pg-manager` returned an error; details in `error.message`                                | 500         |
 | `invalid_argument`              | Malformed body, unknown enum value, NodeID not a peer, etc.                                  | 400         |
 | `leader_route_timeout`          | Forward-mode request to the leader did not return within `control.leader_route_timeout` (FR-034) | 504         |
+| `not_supported`                 | The operation is routed but has no working engine behind it (`Promote`; amended 2026-10-26)  | 501         |
 | `internal`                      | Unexpected internal failure                                                                  | 500         |
 
 ## Audit record (FR-027)

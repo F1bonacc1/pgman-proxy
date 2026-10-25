@@ -1,15 +1,17 @@
 ## pgmctl promote
 
-Manually promote THIS peer (local-only override)
+Not supported: use switchover or failover
 
 ### Synopsis
 
-Manual override: ask the local peer to promote regardless of
-consensus state. Cluster-affecting; requires typed cluster name.
+pgmctl promote is not supported. It called POST /v1/promote, which
+reported success but never promoted anything: pg-manager records the
+request and does not act on it.
 
-The --endpoint flag determines which peer is promoted (Promote is
-local-only per 001 — the operation acts on the peer receiving the
-request).
+Instead, with a cluster leader:
+
+    pgmctl switchover --target NODE   # move the primary to a chosen peer
+    pgmctl failover                   # let the cluster pick its best standby
 
 ```
 pgmctl promote [flags]

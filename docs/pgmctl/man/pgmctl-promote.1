@@ -1,8 +1,8 @@
 .nh
-.TH "PGMCTL" "1" "May 2026" "pgman-proxy" "pgmctl Manual"
+.TH "PGMCTL" "1" "Oct 2026" "pgman-proxy" "pgmctl Manual"
 
 .SH NAME
-pgmctl-promote - Manually promote THIS peer (local-only override)
+pgmctl-promote - Not supported: use switchover or failover
 
 
 .SH SYNOPSIS
@@ -10,13 +10,17 @@ pgmctl-promote - Manually promote THIS peer (local-only override)
 
 
 .SH DESCRIPTION
-Manual override: ask the local peer to promote regardless of
-consensus state. Cluster-affecting; requires typed cluster name.
+pgmctl promote is not supported. It called POST /v1/promote, which
+reported success but never promoted anything: pg-manager records the
+request and does not act on it.
 
 .PP
-The --endpoint flag determines which peer is promoted (Promote is
-local-only per 001 — the operation acts on the peer receiving the
-request).
+Instead, with a cluster leader:
+
+.EX
+pgmctl switchover --target NODE   # move the primary to a chosen peer
+pgmctl failover                   # let the cluster pick its best standby
+.EE
 
 
 .SH OPTIONS
