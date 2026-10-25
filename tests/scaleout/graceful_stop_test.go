@@ -49,7 +49,8 @@ func (tp *topo) walReceiver(node string) string {
 }
 
 // formThree starts three empty nodes and waits for one primary with
-// two streaming standbys. It returns the primary and the standbys.
+// two streaming standbys, named in its synchronous set. It returns the
+// primary and the standbys.
 func formThree(tp *topo) (string, []string) {
 	tp.t.Helper()
 	nodes := []string{"a", "b", "c"}
@@ -90,6 +91,20 @@ func formThree(tp *topo) (string, []string) {
 			standbys = append(standbys, n)
 		}
 	}
+	// Streaming is not failover-ready. Until the primary's failover
+	// record names a peer it is a join-window record, and only its
+	// publisher may promote (pg-manager milestone 015): a primary lost
+	// now leaves the survivors deferring to it for good (nightly run
+	// 40176451731). The record and synchronous_standby_names are built
+	// from the same tick's peer reports.
+	waitFor(tp.t, time.Minute, time.Second, "node-"+primary+" sync set names both standbys", func() (bool, string) {
+		ssn, err := tp.ssn(primary)
+		ok := err == nil
+		for _, s := range standbys {
+			ok = ok && strings.Contains(ssn, "node-"+s)
+		}
+		return ok, "synchronous_standby_names=" + ssn
+	})
 	return primary, standbys
 }
 

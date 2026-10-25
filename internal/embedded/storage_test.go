@@ -46,12 +46,12 @@ func TestStorageMonitor_DetectsUnwritablePath(t *testing.T) {
 	defer cancel()
 	mon.Start(ctx)
 
-	// Wait for the monitor to trip.
+	// Wait for the fence callback to finish, not for Tripped(): trip()
+	// marks the monitor tripped before it invokes the fence, and the
+	// callback counts the call before it records the kind. The kind is
+	// the last write, so once it is visible the other two are too.
 	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if mon.Tripped() {
-			break
-		}
+	for time.Now().Before(deadline) && fenceKind.Load() == nil {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if !mon.Tripped() {
