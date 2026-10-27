@@ -42,6 +42,7 @@ type HistorySink interface {
 //	pgmanager.<cluster_id>.divergence.>
 //	pgmanager.<cluster_id>.conninfo.reconciled
 //	pgmanager.<cluster_id>.timeline.>
+//	pgmanager.<cluster_id>.promotion_authorization.>
 //
 // pgman-proxy MUST NOT publish on these subjects (Constitution IV) —
 // it is a passive observer.
@@ -93,6 +94,10 @@ func SubscribeCoordinationEvents(
 		// whose history disagrees with the published fork record
 		// (timeline.fork_conflict).
 		"timeline",
+		// pg-manager B-025: an operator's join-window promotion
+		// authorization (created, consumed, rejected, expired,
+		// cancelled), written by `pgmctl promote`.
+		"promotion_authorization",
 	}
 
 	subs := make([]*nats.Subscription, 0, len(exactTopics)+len(wildcardFamilies))

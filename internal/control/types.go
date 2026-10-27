@@ -38,9 +38,12 @@ type Engine interface {
 	Failover(ctx context.Context) error
 	Fence(ctx context.Context, target pgmanager.NodeID) error
 	Unfence(ctx context.Context, target pgmanager.NodeID) error
-	// No Promote: pg-manager's Manager.Promote records the request and
-	// never promotes, so POST /v1/promote refuses with not_supported
-	// instead of reaching it.
+	// No Promote: pg-manager's Manager.Promote never had an effect, so
+	// POST /v1/promote refuses with not_supported instead of reaching
+	// it. Ending a join window whose publisher is lost goes through the
+	// promotion authorization below (pg-manager B-025).
+	AuthorizeJoinWindowPromotion(ctx context.Context, req pgmanager.PromotionAuthorizationRequest) (pgmanager.PromotionAuthorization, error)
+	CancelPromotionAuthorization(ctx context.Context) (*pgmanager.PromotionAuthorization, error)
 	UpdateTopology(ctx context.Context, t pgmanager.Topology, p pgmanager.Policy) error
 	TriggerBackup(ctx context.Context) (pgmanager.BackupID, error)
 	PrepareUpgrade(ctx context.Context, plan pgmanager.UpgradePlan) error
@@ -144,6 +147,17 @@ const (
 	// CodeNotSupported: the operation is routed but has no working
 	// engine behind it (POST /v1/promote).
 	CodeNotSupported = "not_supported"
+
+	// Promotion authorization codes (pg-manager B-025), all HTTP 409.
+	// CodeNoJoinWindow: the cluster is not in a join window, so the
+	// ordinary switchover/failover paths apply.
+	CodeNoJoinWindow = "no_join_window"
+	// CodePromotionRefused: a precondition failed (publisher not silent,
+	// target behind, fenced, different database, ...); the message
+	// names it.
+	CodePromotionRefused = "promotion_refused"
+	// CodePromotionAuthorizationPending: one is already stored.
+	CodePromotionAuthorizationPending = "promotion_authorization_pending"
 )
 
 // httpStatusForCode maps the documented error codes to their HTTP
@@ -168,6 +182,8 @@ func httpStatusForCode(code string) int {
 		return http.StatusGatewayTimeout
 	case CodeNotSupported:
 		return http.StatusNotImplemented
+	case CodeNoJoinWindow, CodePromotionRefused, CodePromotionAuthorizationPending:
+		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }

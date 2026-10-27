@@ -33,6 +33,9 @@ type pgmanagerStatus struct {
 	SyncStandbys       []string         `json:"SyncStandbys,omitempty"`
 	LastFailoverAt     time.Time        `json:"LastFailoverAt"`
 	LastFailoverReason string           `json:"LastFailoverReason,omitempty"`
+	// JoinWindow / PromotionAuthorization: pg-manager B-025 (promote.go).
+	JoinWindow             *joinWindowStatus       `json:"JoinWindow,omitempty"`
+	PromotionAuthorization *promotionAuthorization `json:"PromotionAuthorization,omitempty"`
 }
 
 type instanceStatus struct {

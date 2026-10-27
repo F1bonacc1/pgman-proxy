@@ -139,7 +139,87 @@ func DefaultDoctorChecks() []NamedCheck {
 			},
 			Run: checkTimelineConsistent,
 		},
+		{
+			// pg-manager B-025: appended last so pgmctl's check-by-name
+			// order stays stable.
+			Name: "cluster.join-window",
+			Description: "The cluster is not stuck in a join window whose publisher is lost " +
+				"(no node may promote until an operator authorizes one).",
+			EvidenceSchema: "doctor.evidence.join-window/v1",
+			SuggestedFix: &SuggestedFix{
+				Name: "authorize-join-window-promotion",
+				Description: "Only the join-window publisher may promote, and it has been silent past the " +
+					"abandon window. If it is lost for good, run the pgmctl promote command in this check's " +
+					"message: it abandons the publisher's unreplicated writes and fences it. See " +
+					"docs/scale-out-1-to-3/runbook.md.",
+				BlastRadius:    BlastAdvisory,
+				AppliesToCheck: "cluster.join-window",
+				ApplyEndpoint:  "/v1/doctor/fix",
+			},
+			Run: checkJoinWindow,
+		},
 	}
+}
+
+// checkJoinWindow fails while the cluster's failover record is a
+// join-window record whose publisher has been silent past pg-manager's
+// default abandon window (B-025): no survivor promotes until an
+// operator runs `pgmctl promote`. It warns while the publisher is
+// silent but inside the window, or an authorization is pending. Read
+// from the StateStore by the engine, so any node answers.
+func checkJoinWindow(ctx context.Context, e Engine) (Severity, string, map[string]any) {
+	st, err := e.Status(ctx)
+	if err != nil {
+		return SeverityUnknown, "Status: " + err.Error(), nil
+	}
+	jw := st.JoinWindow
+	if jw == nil {
+		return SeverityPass, "the cluster is not in a join window", map[string]any{"join_window": false}
+	}
+	ev := map[string]any{
+		"join_window":           true,
+		"publisher":             string(jw.Publisher),
+		"record_revision":       jw.RecordRevision,
+		"publisher_holds_lease": jw.PublisherHoldsLease,
+		"publisher_silent_for":  jw.PublisherSilentFor.Round(time.Second).String(),
+	}
+	if a := st.PromotionAuthorization; a != nil {
+		ev["authorization_target"] = string(a.Target)
+		return SeverityWarn, fmt.Sprintf("join window of %s: promotion of %s authorized (request %s), waiting for it",
+			jw.Publisher, a.Target, a.RequestID), ev
+	}
+	if jw.PublisherHoldsLease || jw.PublisherSilentFor < pgmanager.DefaultJoinWindowAbandonSilence {
+		if jw.PublisherHoldsLease {
+			return SeverityPass, fmt.Sprintf("join window of %s, which holds the lease", jw.Publisher), ev
+		}
+		return SeverityWarn, fmt.Sprintf("join window of %s, silent for %s: only it may promote",
+			jw.Publisher, jw.PublisherSilentFor.Round(time.Second)), ev
+	}
+	best := bestJoinWindowCandidate(jw)
+	if best == "" {
+		return SeverityFail, fmt.Sprintf("join window of %s, silent for %s, and no other node holds a complete copy",
+			jw.Publisher, jw.PublisherSilentFor.Round(time.Second)), ev
+	}
+	ev["best_candidate"] = string(best)
+	return SeverityFail, fmt.Sprintf(
+		"join window of %s, silent for %s: no node will promote. If %s is lost for good: "+
+			"pgmctl promote %s --accept-data-loss --reason '...'",
+		jw.Publisher, jw.PublisherSilentFor.Round(time.Second), jw.Publisher, best), ev
+}
+
+// bestJoinWindowCandidate is the unfenced, complete non-publisher with
+// the highest published LSN ("" when none).
+func bestJoinWindowCandidate(jw *pgmanager.JoinWindowStatus) pgmanager.NodeID {
+	var best pgmanager.JoinWindowPeer
+	for _, p := range jw.Peers {
+		if p.NodeID == jw.Publisher || p.Fenced || p.DataState != pgmanager.DataStateComplete || !p.HasLSN {
+			continue
+		}
+		if best.NodeID == "" || p.LSN > best.LSN {
+			best = p
+		}
+	}
+	return best.NodeID
 }
 
 // The 10 v1-target checks not yet implemented (each entry names the

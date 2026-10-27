@@ -158,6 +158,12 @@ func (c *Client) PostJSON(ctx context.Context, path string, body any) (*Envelope
 	return c.do(ctx, http.MethodPost, path, &buf)
 }
 
+// DeleteJSON does a DELETE and expects a 200-OK LCM envelope. Like
+// PostJSON it never retries.
+func (c *Client) DeleteJSON(ctx context.Context, path string) (*Envelope, error) {
+	return c.do(ctx, http.MethodDelete, path, nil)
+}
+
 // NewRequestID returns a fresh ULID for the X-Request-Id header /
 // audit correlation. FR-039: never reuse on retry.
 func NewRequestID() string {

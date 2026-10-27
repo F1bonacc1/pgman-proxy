@@ -39,6 +39,22 @@ type fakeEngine struct {
 	prepareUpgradeFn  func(context.Context, pgmanager.UpgradePlan) error
 	executeUpgradeFn  func(context.Context, pgmanager.UpgradePlan, upgrade.PreSwap) error
 	restartPostgresFn func(context.Context) error
+	authorizeFn       func(context.Context, pgmanager.PromotionAuthorizationRequest) (pgmanager.PromotionAuthorization, error)
+	cancelAuthFn      func(context.Context) (*pgmanager.PromotionAuthorization, error)
+}
+
+func (f *fakeEngine) AuthorizeJoinWindowPromotion(ctx context.Context, req pgmanager.PromotionAuthorizationRequest) (pgmanager.PromotionAuthorization, error) {
+	if f.authorizeFn != nil {
+		return f.authorizeFn(ctx, req)
+	}
+	return pgmanager.PromotionAuthorization{Target: req.Target}, nil
+}
+
+func (f *fakeEngine) CancelPromotionAuthorization(ctx context.Context) (*pgmanager.PromotionAuthorization, error) {
+	if f.cancelAuthFn != nil {
+		return f.cancelAuthFn(ctx)
+	}
+	return nil, nil
 }
 
 func (f *fakeEngine) Status(ctx context.Context) (pgmanager.Status, error) {
@@ -408,9 +424,97 @@ func TestPromote_RefusedNotSupported(t *testing.T) {
 		if env.Outcome != OutcomeRejected || env.Error == nil || env.Error.Code != CodeNotSupported {
 			t.Errorf("leader=%v: want rejected/%s, got outcome=%q error=%+v", leader, CodeNotSupported, env.Outcome, env.Error)
 		}
-		if env.Error != nil && (!strings.Contains(env.Error.Message, "switchover") || !strings.Contains(env.Error.Message, "failover")) {
-			t.Errorf("leader=%v: message should name switchover and failover, got %q", leader, env.Error.Message)
+		if env.Error != nil && (!strings.Contains(env.Error.Message, "switchover") || !strings.Contains(env.Error.Message, "failover") ||
+			!strings.Contains(env.Error.Message, "promotion-authorization")) {
+			t.Errorf("leader=%v: message should name switchover, failover and promotion-authorization, got %q", leader, env.Error.Message)
 		}
+	}
+}
+
+// B-025: the promotion authorization works on any peer (the case it
+// exists for has no leader), carries the authenticated actor and the
+// server's request id to the engine, and returns the stored record.
+func TestAuthorizePromotion_AnyPeerPassesActorAndRequestID(t *testing.T) {
+	for _, leader := range []bool{true, false} {
+		var got pgmanager.PromotionAuthorizationRequest
+		eng := &fakeEngine{authorizeFn: func(_ context.Context, req pgmanager.PromotionAuthorizationRequest) (pgmanager.PromotionAuthorization, error) {
+			got = req
+			return pgmanager.PromotionAuthorization{Target: req.Target, AbandonedPublisher: "node-c", Revision: 9}, nil
+		}}
+		srv := newTestServer(t, eng, &fakeLeader{leader: leader, id: "other"}, &fakeNATS{}, "")
+		w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/promotion-authorization",
+			`{"target":"node-a","reason":"node-c lost","ttl_seconds":90,"accept_data_loss":true}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("leader=%v: want 200, got %d (body=%s)", leader, w.Code, w.Body.String())
+		}
+		var env envelope
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatal(err)
+		}
+		if got.Target != "node-a" || got.Reason != "node-c lost" || got.TTL != 90*time.Second ||
+			got.RequestID != env.RequestID || !strings.HasPrefix(got.Actor, "bearer:") {
+			t.Errorf("leader=%v: engine got %+v (envelope request_id %s)", leader, got, env.RequestID)
+		}
+		if !strings.Contains(w.Body.String(), `"abandoned_publisher":"node-c"`) {
+			t.Errorf("leader=%v: engine_result missing the record: %s", leader, w.Body.String())
+		}
+	}
+}
+
+func TestAuthorizePromotion_RequiresAcceptDataLoss(t *testing.T) {
+	called := false
+	eng := &fakeEngine{authorizeFn: func(context.Context, pgmanager.PromotionAuthorizationRequest) (pgmanager.PromotionAuthorization, error) {
+		called = true
+		return pgmanager.PromotionAuthorization{}, nil
+	}}
+	srv := newTestServer(t, eng, &fakeLeader{leader: true}, &fakeNATS{}, "")
+	for _, body := range []string{
+		`{"target":"node-a","reason":"x"}`,
+		`{"target":"node-a","accept_data_loss":true}`,
+		`{"reason":"x","accept_data_loss":true}`,
+	} {
+		w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/promotion-authorization", body)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: want 400, got %d", body, w.Code)
+		}
+	}
+	if called {
+		t.Error("the engine must not be called without target, reason and accept_data_loss")
+	}
+}
+
+func TestAuthorizePromotion_ErrorCodes(t *testing.T) {
+	cases := map[error]string{
+		pgmanager.ErrNoJoinWindow:                                                   CodeNoJoinWindow,
+		pgmanager.ErrPromotionAuthorizationPending:                                  CodePromotionAuthorizationPending,
+		&pgmanager.PublisherNotSilentError{Publisher: "node-c", Evidence: "leader"}: CodePromotionRefused,
+		&pgmanager.TargetBehindError{Target: "node-a", Better: "node-b"}:            CodePromotionRefused,
+		pgmanager.ErrTargetIdentityMismatch:                                         CodePromotionRefused,
+		pgmanager.ErrConfigInvalid:                                                  CodeInvalidArgument,
+	}
+	for engErr, want := range cases {
+		eng := &fakeEngine{authorizeFn: func(context.Context, pgmanager.PromotionAuthorizationRequest) (pgmanager.PromotionAuthorization, error) {
+			return pgmanager.PromotionAuthorization{}, engErr
+		}}
+		srv := newTestServer(t, eng, &fakeLeader{leader: false, id: "other"}, &fakeNATS{}, "")
+		w := doAuthed(t, srv.Handler(), http.MethodPost, "/v1/promotion-authorization",
+			`{"target":"node-a","reason":"x","accept_data_loss":true}`)
+		var env envelope
+		_ = json.Unmarshal(w.Body.Bytes(), &env)
+		if env.Error == nil || env.Error.Code != want || w.Code != httpStatusForCode(want) {
+			t.Errorf("%v: got HTTP %d %+v, want %s", engErr, w.Code, env.Error, want)
+		}
+	}
+}
+
+func TestCancelPromotionAuthorization(t *testing.T) {
+	eng := &fakeEngine{cancelAuthFn: func(context.Context) (*pgmanager.PromotionAuthorization, error) {
+		return &pgmanager.PromotionAuthorization{Target: "node-a", RequestID: "r1"}, nil
+	}}
+	srv := newTestServer(t, eng, &fakeLeader{leader: false, id: "other"}, &fakeNATS{}, "")
+	w := doAuthed(t, srv.Handler(), http.MethodDelete, "/v1/promotion-authorization", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"request_id":"r1"`) {
+		t.Fatalf("want 200 with the cancelled record, got %d %s", w.Code, w.Body.String())
 	}
 }
 
