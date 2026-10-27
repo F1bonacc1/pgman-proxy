@@ -34,9 +34,28 @@ S10b), and the only way out was editing every survivor's topology.
 - Scale-out scenario S11 kills the publisher inside the join window and
   recovers with `pgmctl promote`.
 
-Requires the pg-manager release carrying B-025. `pgmctl promote` without
-NODE, `--accept-data-loss` and `--reason` is still a usage error (exit
-64); `POST /v1/promote` still answers `501 not_supported`.
+Requires pg-manager v0.7.5 (below). `pgmctl promote` without NODE,
+`--accept-data-loss` and `--reason` is still a usage error (exit 64);
+`POST /v1/promote` still answers `501 not_supported`.
+
+### Fixed (engine): pg-manager v0.7.5
+
+pg-manager v0.7.5 carries B-025 (above) and two fixes that scale-out S11
+found while proving it:
+
+- **A deferring node reported an evicted leader.** Once the leader key
+  was gone, a node that declined to campaign kept naming the last holder
+  as leader in `/v1/status` and `pgmctl status`, indefinitely. It now
+  reports no leader.
+- **A fenced node could unfence itself.** A store error while reading
+  the fence list read as "not fenced", so a fenced node left the fenced
+  state whenever the KV blipped. A returning abandoned join-window
+  publisher did exactly that two seconds after boot. It now stays
+  fenced.
+
+Only the pg-manager lines move in go.mod/go.sum; v0.7.5 keeps v0.7.4's
+dependencies. Verified with the full `tests/scaleout` suite against the
+release candidate (S1-S10 pass) and S11 three times in a row.
 
 ### Fixed (pgmctl): `pgmctl promote` no longer reports success without promoting
 
