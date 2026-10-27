@@ -23,9 +23,14 @@ Two surfaces in one binary:
    gratuitous ARP. Clients connect directly to a peer's `host:port`.
 2. **Lifecycle-management control plane** — authenticated HTTP API
    that exposes `pg-manager`'s `Manager` operations (`Status`,
-   `Diagnose`, `Switchover`, `Failover`, `Promote`, `Fence`,
-   `Unfence`, `UpdateTopology`, `TriggerBackup`, `PrepareUpgrade`,
-   `ExecuteUpgrade`). Every LCM action goes through `pg-manager`;
+   `Diagnose`, `Switchover`, `Failover`, `Fence`, `Unfence`,
+   `UpdateTopology`, `TriggerBackup`, `PrepareUpgrade`,
+   `ExecuteUpgrade`), and the join-window promotion authorization
+   (`pgmctl promote NODE --accept-data-loss`, for a cluster whose only
+   data holder was lost while its peers were joining). `POST /v1/promote`
+   is refused with `not_supported`: pg-manager's `Promote` never
+   promoted anything.
+   Every LCM action goes through `pg-manager`;
    this repository only adds auth, leader-routing, audit, and
    observability glue.
 

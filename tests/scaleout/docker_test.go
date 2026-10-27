@@ -53,6 +53,9 @@ type topo struct {
 	// history holds the logs of containers removed by a restart into
 	// another config, keyed by node, oldest first.
 	history map[string][]string
+	// netAdmin starts containers with CAP_NET_ADMIN so a scenario can
+	// shape or cut a node's traffic (rootExec tc / iptables).
+	netAdmin bool
 }
 
 // newTopo creates the scenario's network and registers cleanup. On a
@@ -157,6 +160,9 @@ func (tp *topo) start(node string, env map[string]string) {
 		"--hostname", "node-" + node, "--network", tp.net, "--network-alias", "node-" + node,
 		"-v", tp.volume(node, "data") + ":" + dataDir,
 		"-v", tp.volume(node, "js") + ":" + storeDir}
+	if tp.netAdmin {
+		args = append(args, "--cap-add=NET_ADMIN")
+	}
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)
@@ -214,6 +220,12 @@ func (tp *topo) wait(node string, budget time.Duration) (int, error) {
 		return -1, err
 	}
 	return strconv.Atoi(strings.TrimSpace(out))
+}
+
+// rootExec runs a command inside node's container as root.
+func (tp *topo) rootExec(node string, args ...string) {
+	tp.t.Helper()
+	tp.mustDocker(time.Minute, append([]string{"exec", "-u", "root", tp.container(node)}, args...)...)
 }
 
 // exec runs a command inside node's container as the postgres user.

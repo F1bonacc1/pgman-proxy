@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (pgmctl): `pgmctl promote NODE --accept-data-loss` ends a join window whose publisher is lost
+
+pg-manager B-025. During a 1→3 expansion, until node-a names a new node
+in its sync set, only node-a may promote. If node-a is lost for good in
+that window, no node ever promotes on its own (nightly run 40176451731,
+S10b), and the only way out was editing every survivor's topology.
+
+- **`pgmctl promote NODE --accept-data-loss --reason TEXT`** prints the
+  join window, every node's data state, identity, LSN and fence, and
+  what is lost. It asks for the typed cluster name, records pg-manager's
+  promotion authorization on the node it talks to (no leader needed),
+  and waits until NODE is primary. pg-manager fences the abandoned
+  publisher. `pgmctl promote --cancel` withdraws a pending one.
+- **`POST` / `DELETE /v1/promotion-authorization`**: not leader-only,
+  audited. Refusals are `409` with `no_join_window`, `promotion_refused`
+  (the message names the failing precondition, or the better candidate)
+  or `promotion_authorization_pending`.
+- **`GET /v1/status`** carries pg-manager's `JoinWindow` and
+  `PromotionAuthorization` blocks.
+- **Doctor check `cluster.join-window`** fails when the publisher has
+  been silent past the 60 s abandon window, naming the best candidate
+  and the command.
+- The history stream records `promotion_authorization.*` events.
+- Runbook: "node-a lost during the join window".
+- Scale-out scenario S11 kills the publisher inside the join window and
+  recovers with `pgmctl promote`.
+
+Requires pg-manager v0.7.5 (below). `pgmctl promote` without NODE,
+`--accept-data-loss` and `--reason` is still a usage error (exit 64);
+`POST /v1/promote` still answers `501 not_supported`.
+
+### Fixed (engine): pg-manager v0.7.5
+
+pg-manager v0.7.5 carries B-025 (above) and two fixes that scale-out S11
+found while proving it:
+
+- **A deferring node reported an evicted leader.** Once the leader key
+  was gone, a node that declined to campaign kept naming the last holder
+  as leader in `/v1/status` and `pgmctl status`, indefinitely. It now
+  reports no leader.
+- **A fenced node could unfence itself.** A store error while reading
+  the fence list read as "not fenced", so a fenced node left the fenced
+  state whenever the KV blipped. A returning abandoned join-window
+  publisher did exactly that two seconds after boot. It now stays
+  fenced.
+
+Only the pg-manager lines move in go.mod/go.sum; v0.7.5 keeps v0.7.4's
+dependencies. Verified with the full `tests/scaleout` suite against the
+release candidate (S1-S10 pass) and S11 three times in a row.
+
+### Fixed (pgmctl): `pgmctl promote` no longer reports success without promoting
+
+`pgmctl promote` called `POST /v1/promote`, which called pg-manager's
+`Manager.Promote`. That method only records a `manual_promote` key that
+nothing in pg-manager reads, so the command printed a request id and
+nothing was promoted. An operator reaching for it in an outage believed
+they had acted.
+
+- **`pgmctl promote`** now refuses before contacting any peer, exits
+  `64` (EX_USAGE), and names the commands that work:
+  `pgmctl switchover --target <node-id>` and `pgmctl failover`. Because
+  it refuses client-side, it also protects operators whose servers still
+  accept the call.
+- **`POST /v1/promote`** stays routed but answers `501` with the new
+  error code `not_supported`. The refusal is audited like any rejected
+  mutation. pgman-proxy no longer calls `Manager.Promote`.
+
+Breaking for scripts that called `pgmctl promote` or `POST /v1/promote`
+and checked only the exit status or HTTP 200: those calls never
+promoted, and now they fail visibly.
+
+### Fixed (docs): the scale-out runbook says when the cluster can fail over
+
+The 1→3 runbook's Verify section now states that the cluster cannot fail
+over until node-a's `synchronous_standby_names` names a new node. Until
+then, pg-manager treats node-a as the only holder of every write it
+acknowledged (the join window), so losing node-a leaves no automatic
+successor, even when both new nodes are streaming. Nothing should stop,
+replace or decommission node-a before that check passes. The nightly
+scale-out suite hit exactly this by killing the primary as soon as both
+standbys streamed (run 40176451731, fixed in #16).
+
 ### Fixed (engine): pg-manager v0.7.4, an expansion no longer moves the primary to a fresh clone
 
 During a 1→3 expansion, node-a (the node with the data) could end up

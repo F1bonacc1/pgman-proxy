@@ -12,9 +12,10 @@
 //     leader's control-plane address. Used when operators want clients
 //     to chase the leader themselves.
 //
-// `Promote` is local-only and never routes (its semantics are "promote
-// THIS node"). The caller decides which ops are leader-only and passes
-// `leaderOnly=true` only for those.
+// `Promote` never routes: it is refused locally with not_supported.
+// The promotion authorization never routes either: it is for a cluster
+// with no leader. The caller decides which ops are leader-only and
+// passes `leaderOnly=true` only for those.
 
 package control
 

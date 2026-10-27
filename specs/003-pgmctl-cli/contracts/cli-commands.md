@@ -296,9 +296,41 @@ required.
 
 ---
 
-### `pgmctl promote [--force --cluster <name>]`
+### `pgmctl promote NODE --accept-data-loss --reason TEXT [--ttl D] [--no-wait] [--replace] [--force --cluster <name>]`
+### `pgmctl promote --cancel`
 
-Calls `POST /v1/promote` (existing; local-only per 001). Same prompt.
+**Amended (2026-10-27, pg-manager B-025)**: ends a join window whose
+publisher is lost, by promoting NODE. Calls `POST
+/v1/promotion-authorization` (001 `contracts/lcm.md`), which is not
+leader-only: any live node works, and the case it exists for has no
+leader. Replaces the 2026-10-26 refusal, which replaced a call to
+`POST /v1/promote` that never promoted anything.
+
+Flow:
+
+1. NODE, `--accept-data-loss` and a non-empty `--reason` are required;
+   missing any of them is `EX_USAGE` (64) before contacting a peer. No
+   other flag implies `--accept-data-loss`.
+2. `GET /v1/status`. No `JoinWindow` block: exit `4` (subject N/A),
+   naming `pgmctl switchover --target` and `pgmctl failover`.
+3. Print the pre-flight summary: the publisher, the record revision, how
+   long the publisher has been silent, a table of every node's data
+   state, database identity, LSN and fence, and the loss: the WAL bytes
+   the publisher published that NODE lacks, plus every write it
+   acknowledged after its last published position (unknown).
+4. Cluster-affecting prompt (typed cluster name, or `--force --cluster`).
+5. POST. Precondition refusals (`409 promotion_refused`, `409
+   promotion_authorization_pending`) exit `2` with the engine's message,
+   which names the failing precondition and, when a peer is ahead, the
+   better candidate. `409 no_join_window` exits `4`.
+6. Print `request_id=<id>` and the deadline. Unless `--no-wait`, poll
+   `/v1/status` every 2 s: NODE primary and the join window closed exits
+   `0`; the authorization gone with the window still open (rejected or
+   expired) exits `2`; past the TTL plus 30 s exits `124`.
+
+`--ttl` defaults to the cluster policy (2 m). `--replace` overwrites a
+pending authorization. `--cancel` sends `DELETE
+/v1/promotion-authorization`; the abandoned publisher stays fenced.
 
 ---
 

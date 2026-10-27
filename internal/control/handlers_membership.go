@@ -1,6 +1,9 @@
 // Membership-mutation handlers — Switchover, Failover, Promote, Fence,
-// Unfence (T058). All except Promote are leader-only; Promote is
-// local-only by design (matches manager.Manager.Promote).
+// Unfence (T058), and the promotion authorization (pg-manager B-025).
+// Switchover, Failover, Fence and Unfence are leader-only. Promote is
+// refused locally. The promotion authorization is not leader-only: it
+// exists for a cluster with no leader, and its record is cluster-wide,
+// so any node can write it.
 //
 // Engine errors map to `engine_error` (HTTP 500). Body decode errors
 // map to `invalid_argument` (HTTP 400).
@@ -9,6 +12,7 @@ package control
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -61,11 +65,112 @@ func (s *Server) handleFailover(w http.ResponseWriter, r *http.Request, env *req
 	s.finishMutation(w, r, env, "", engineStart, err)
 }
 
+// promoteNotSupported is the refusal POST /v1/promote returns.
+const promoteNotSupported = "promote is not supported: pg-manager's Manager.Promote never " +
+	"acted on a request, so this endpoint used to report success without promoting. " +
+	"To end a join window whose publisher is lost, use POST /v1/promotion-authorization " +
+	"(pgmctl promote NODE --accept-data-loss). To move the primary, use POST /v1/switchover " +
+	"or POST /v1/failover (both need a leader)"
+
+// handlePromote refuses every request. pg-manager's Manager.Promote
+// writes nothing and returns ErrPromoteDeprecated; accepting the call
+// used to tell operators a promotion was under way when none was. The
+// refusal is audited like any rejected mutation.
 func (s *Server) handlePromote(w http.ResponseWriter, r *http.Request, env *requestEnv) {
-	// Promote is explicitly local-only — never forwarded.
+	s.refuse(r.Context(), w, r, env.Op, env.ReqID, env.Start, env.Actor, CodeNotSupported, promoteNotSupported)
+}
+
+// promotionAuthorizationReq is the body for POST
+// /v1/promotion-authorization. AcceptDataLoss must be true: the
+// operation abandons every write the join-window publisher
+// acknowledged that the target lacks. RequestID is accepted but the
+// server's ULID is what pg-manager records and every event carries.
+type promotionAuthorizationReq struct {
+	Target         string `json:"target"`
+	Reason         string `json:"reason"`
+	TTLSeconds     int    `json:"ttl_seconds,omitempty"`
+	AcceptDataLoss bool   `json:"accept_data_loss"`
+	Replace        bool   `json:"replace,omitempty"`
+	RequestID      string `json:"request_id,omitempty"`
+}
+
+// handleAuthorizePromotion writes pg-manager's promotion authorization
+// on the receiving node (B-025). The engine checks every precondition
+// against the cluster's StateStore; its refusals map to 409 codes the
+// CLI can render.
+func (s *Server) handleAuthorizePromotion(w http.ResponseWriter, r *http.Request, env *requestEnv) {
+	var body promotionAuthorizationReq
+	if err := decodeJSON(r, &body); err != nil {
+		s.rejectInvalid(r.Context(), w, r, env, "decode body: "+err.Error())
+		return
+	}
+	switch {
+	case body.Target == "":
+		s.rejectInvalid(r.Context(), w, r, env, "target is required")
+		return
+	case body.Reason == "":
+		s.rejectInvalid(r.Context(), w, r, env, "reason is required")
+		return
+	case !body.AcceptDataLoss:
+		s.rejectInvalid(r.Context(), w, r, env, fmt.Sprintf(
+			"accept_data_loss must be true: promoting %s abandons every write the join-window publisher acknowledged that %s has not received",
+			body.Target, body.Target))
+		return
+	case body.TTLSeconds < 0:
+		s.rejectInvalid(r.Context(), w, r, env, "ttl_seconds must be >= 0")
+		return
+	}
 	engineStart := time.Now()
-	err := s.engine.Promote(r.Context())
-	s.finishMutation(w, r, env, "", engineStart, err)
+	auth, err := s.engine.AuthorizeJoinWindowPromotion(r.Context(), pgmanager.PromotionAuthorizationRequest{
+		Target:    pgmanager.NodeID(body.Target),
+		Actor:     env.Actor,
+		Reason:    body.Reason,
+		RequestID: env.ReqID,
+		TTL:       time.Duration(body.TTLSeconds) * time.Second,
+		Replace:   body.Replace,
+	})
+	if err != nil {
+		s.completeFail(r.Context(), w, r, env, body.Target, promotionErrorCode(err), err.Error(),
+			time.Since(engineStart), "")
+		return
+	}
+	s.completeOK(r.Context(), w, r, env, body.Target, auth, time.Since(engineStart))
+}
+
+// handleCancelPromotionAuthorization deletes the pending authorization.
+// engine_result is the cancelled record, omitted when there was none.
+func (s *Server) handleCancelPromotionAuthorization(w http.ResponseWriter, r *http.Request, env *requestEnv) {
+	engineStart := time.Now()
+	auth, err := s.engine.CancelPromotionAuthorization(r.Context())
+	if err != nil {
+		s.completeFail(r.Context(), w, r, env, "", CodeEngineError, err.Error(), time.Since(engineStart), "")
+		return
+	}
+	if auth == nil {
+		s.completeOK(r.Context(), w, r, env, "", nil, time.Since(engineStart))
+		return
+	}
+	s.completeOK(r.Context(), w, r, env, string(auth.Target), auth, time.Since(engineStart))
+}
+
+// promotionErrorCode maps AuthorizeJoinWindowPromotion's errors to
+// documented codes.
+func promotionErrorCode(err error) string {
+	switch {
+	case errors.Is(err, pgmanager.ErrConfigInvalid):
+		return CodeInvalidArgument
+	case errors.Is(err, pgmanager.ErrNoJoinWindow):
+		return CodeNoJoinWindow
+	case errors.Is(err, pgmanager.ErrPromotionAuthorizationPending):
+		return CodePromotionAuthorizationPending
+	case errors.Is(err, pgmanager.ErrTargetIsPublisher),
+		errors.Is(err, pgmanager.ErrTargetNotEligible),
+		errors.Is(err, pgmanager.ErrPublisherNotSilent),
+		errors.Is(err, pgmanager.ErrTargetIdentityMismatch),
+		errors.Is(err, pgmanager.ErrTargetBehind):
+		return CodePromotionRefused
+	}
+	return CodeEngineError
 }
 
 func (s *Server) handleFence(w http.ResponseWriter, r *http.Request, env *requestEnv) {

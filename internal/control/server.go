@@ -233,9 +233,15 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/fence", s.wrap("Fence", true, true, s.handleFence))
 	mux.Handle("POST /v1/unfence", s.wrap("Unfence", true, true, s.handleUnfence))
 
-	// Promote: explicitly NOT leader-only — semantics is "promote THIS node"
-	// (matches manager.Manager.Promote).
+	// Promote: kept routed so callers get an audited not_supported
+	// refusal instead of a 404 (see handlePromote).
 	mux.Handle("POST /v1/promote", s.wrap("Promote", true, false, s.handlePromote))
+
+	// Promotion authorization (pg-manager B-025). Mutating, not
+	// leader-only: it ends a join window whose publisher is lost, when
+	// the cluster has no leader, and the record is cluster-wide.
+	mux.Handle("POST /v1/promotion-authorization", s.wrap("AuthorizePromotion", true, false, s.handleAuthorizePromotion))
+	mux.Handle("DELETE /v1/promotion-authorization", s.wrap("CancelPromotionAuthorization", true, false, s.handleCancelPromotionAuthorization))
 
 	// Topology + backup + upgrade (leader-only).
 	mux.Handle("POST /v1/topology", s.wrap("UpdateTopology", true, true, s.handleUpdateTopology))

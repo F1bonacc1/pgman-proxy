@@ -99,6 +99,7 @@ pgmctl doctor            # all checks pass, including cluster.identity (pg-manag
 
   returns node-a's value from before the expansion.
 - **Sync set**: on node-a, `SHOW synchronous_standby_names;` names node-b and node-c once both stream. Until then, node-a runs asynchronously, with the same durability it had as a single node.
+- **Failover readiness**: until the sync set names at least one of node-b and node-c, the cluster cannot fail over. If node-a is lost in that window, neither new node promotes on its own, even one that has finished cloning and is streaming (pg-manager's join window). "Both standbys streaming" is not enough: do not stop, replace or decommission node-a, and do not let automation proceed, until this check passes. Recovering from a lost node-a before then needs an operator: see [node-a lost during the join window](#node-a-lost-during-the-join-window).
 
 Then delete `jetstream.standalone-*` under node-a's `cluster.jetstream_dir`.
 
@@ -115,12 +116,51 @@ What happens next:
 
 node-b and node-c can then be wiped and reused.
 
+## node-a lost during the join window
+
+Until node-a names node-b or node-c in its sync set, it is the only node allowed to promote (the join window). If node-a dies in that window and comes back, it resumes as primary: wait for it. If it is lost for good (disk, volume or host gone), no node promotes on its own, and an operator must decide to abandon the writes only node-a acknowledged.
+
+**Diagnose.** On any surviving node:
+
+```bash
+pgmctl doctor
+```
+
+`cluster.join-window` fails once node-a has been silent for 60 s, and names the best candidate and the exact command. `pgmctl status -o json` shows the `JoinWindow` block: the publisher, how long it has been silent, and each node's data state, database identity, LSN and fence.
+
+**Promote.** On any surviving node (no leader is needed):
+
+```bash
+pgmctl promote node-b --accept-data-loss --reason "node-a volume lost, INC-1234"
+```
+
+pgmctl prints what is lost (the WAL node-a published that node-b lacks, plus every write node-a acknowledged after its last published position, which nobody can count), asks for the typed cluster name, records the authorization, and waits until node-b is primary. pg-manager refuses, and changes nothing, when:
+
+- node-a holds the lease or published anything in the last 60 s: it may only be partitioned;
+- node-b holds a different database, or has no fresh complete copy;
+- another live node is ahead of node-b: the refusal names it; promote that one instead.
+
+node-a is fenced in the same step. node-c follows node-b like after any failover.
+
+**Verify.** node-b answers `SELECT pg_is_in_recovery();` with `f` and takes writes, `pgmctl doctor` passes `cluster.join-window`, and node-c streams from node-b.
+
+**node-a returns.** It is fenced: it neither promotes nor starts Postgres. Its data directory holds the abandoned writes; copy it aside if they matter, then:
+
+```bash
+pgmctl unfence node-a
+```
+
+With `policy.auto_rebootstrap.enabled`, it then re-clones from node-b; otherwise move its data directory aside and restart it.
+
+The older override, removing node-a from the topology of every remaining node and restarting them, still works, but needs one edit per node and records no acknowledgment.
+
 ## Troubleshooting
 
 | Symptom | Meaning | Action |
 |---|---|---|
 | A node exits 75 after about 120 s | The route mesh did not form: not every peer was reachable | Check routes port reachability, `cluster.route_peers`, credentials and TLS on all three hosts |
 | node-b or node-c logged `initdb: starting` | A new database was created (engine older than v0.7.0, or a gate failure) | Stop all three. Do not let clients write. node-a's data is intact. Roll back (above), then retry on pg-manager v0.7.0 or later |
+| `pgmctl doctor` fails `cluster.join-window` | node-a was lost before naming a new node; no node will promote | [node-a lost during the join window](#node-a-lost-during-the-join-window) |
 | `pgmctl doctor` fails `cluster.identity` | A standby follows a primary with a different database identity | Do not wipe either node before identifying which one holds the acknowledged writes |
 | node-a refuses to start: `archive incompatible jetstream store` | The store could not be moved aside (permissions or a read-only mount) | Fix permissions on `cluster.jetstream_dir`; the directory itself is never renamed, only `jetstream/` inside it |
 | node-a refuses to start: `managed postgres config blocks` | A managed block could not be written, or the markers are malformed | Fix the file. Each BEGIN needs exactly one matching END |

@@ -14,7 +14,8 @@ import (
 
 // Mutating ops (US6 / contracts/cli-commands.md):
 //   single-resource:        fence, unfence, set-config
-//   cluster-affecting:      failover, switchover, promote, restart, delete
+//   cluster-affecting:      failover, switchover, restart, delete,
+//                           promote (promote.go)
 //
 // The clearest semantic split lives in the prompt shape — single-
 // resource ops get [y/N], cluster-affecting ops require the typed
@@ -292,37 +293,6 @@ typed cluster name (or --force --cluster <name>).`,
 	}
 	c.Flags().StringVar(&target, "target", "", "Node id to promote")
 	return c
-}
-
-func newPromoteCmd(app *AppContext) *cobra.Command {
-	return &cobra.Command{
-		Use:   "promote",
-		Short: "Manually promote THIS peer (local-only override)",
-		Long: `Manual override: ask the local peer to promote regardless of
-consensus state. Cluster-affecting; requires typed cluster name.
-
-The --endpoint flag determines which peer is promoted (Promote is
-local-only per 001 — the operation acts on the peer receiving the
-request).`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := app.Setup(); err != nil {
-				return err
-			}
-			if err := clusterAffectingPrompt(app, "promote", ""); err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), commandTimeout(app))
-			defer cancel()
-			body := map[string]any{"request_id": client.NewRequestID()}
-			env, err := app.Client.PostJSON(ctx, "/v1/promote", body)
-			if err != nil {
-				return err
-			}
-			printRequestID(cmd, env)
-			return nil
-		},
-	}
 }
 
 // --- restart -----------------------------------------------------------

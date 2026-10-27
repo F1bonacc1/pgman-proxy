@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -317,7 +318,7 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	baselineDiagnose := pgmanager.Diagnosis{Healthy: true}
 
 	calls := struct {
-		switchover, failover, fence, unfence, promote, updateTopo,
+		switchover, failover, fence, unfence, updateTopo,
 		backup, prepareUpgrade, executeUpgrade int
 	}{}
 
@@ -337,7 +338,6 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 			calls.unfence++
 			return nil
 		},
-		promoteFn: func(_ context.Context) error { calls.promote++; return nil },
 		updateTopologyFn: func(_ context.Context, _ pgmanager.Topology, _ pgmanager.Policy) error {
 			calls.updateTopo++
 			return nil
@@ -362,7 +362,7 @@ func TestDoctorChecks_ReadOnly_Invariant(t *testing.T) {
 	}
 
 	zero := struct {
-		switchover, failover, fence, unfence, promote, updateTopo,
+		switchover, failover, fence, unfence, updateTopo,
 		backup, prepareUpgrade, executeUpgrade int
 	}{}
 	if !reflect.DeepEqual(calls, zero) {
@@ -502,9 +502,47 @@ func TestCheckTimelineConsistent(t *testing.T) {
 	}
 
 	catalog := DefaultDoctorChecks()
-	last := catalog[len(catalog)-1]
-	if last.Name != "replication.timeline-consistent" || last.SuggestedFix == nil || last.SuggestedFix.BlastRadius != BlastAdvisory {
-		t.Fatalf("replication.timeline-consistent must be registered last with an advisory suggested fix, got %+v", last)
+	tl := catalog[len(catalog)-2]
+	if tl.Name != "replication.timeline-consistent" || tl.SuggestedFix == nil || tl.SuggestedFix.BlastRadius != BlastAdvisory {
+		t.Fatalf("replication.timeline-consistent must stay registered before cluster.join-window with an advisory suggested fix, got %+v", tl)
+	}
+}
+
+// pg-manager B-025: cluster.join-window fails once the publisher has
+// been silent past the abandon window and names the command, warns
+// inside it or while an authorization is pending, and passes outside a
+// join window.
+func TestCheckJoinWindow(t *testing.T) {
+	ctx := context.Background()
+	peers := []pgmanager.JoinWindowPeer{
+		{NodeID: "node-a", DataState: pgmanager.DataStateComplete, LSN: 500, HasLSN: true},
+		{NodeID: "node-b", DataState: pgmanager.DataStateComplete, LSN: 400, HasLSN: true},
+		{NodeID: "node-c", DataState: pgmanager.DataStateComplete, LSN: 900, HasLSN: true},
+	}
+	engine := func(jw *pgmanager.JoinWindowStatus, auth *pgmanager.PromotionAuthorization) Engine {
+		return &fakeEngine{statusFn: func(context.Context) (pgmanager.Status, error) {
+			return pgmanager.Status{JoinWindow: jw, PromotionAuthorization: auth}, nil
+		}}
+	}
+	if sev, _, _ := checkJoinWindow(ctx, engine(nil, nil)); sev != SeverityPass {
+		t.Errorf("no join window: %v, want pass", sev)
+	}
+	young := &pgmanager.JoinWindowStatus{Publisher: "node-c", PublisherSilentFor: 10 * time.Second, Peers: peers}
+	if sev, _, _ := checkJoinWindow(ctx, engine(young, nil)); sev != SeverityWarn {
+		t.Errorf("silent 10s: %v, want warn", sev)
+	}
+	lost := &pgmanager.JoinWindowStatus{Publisher: "node-c", PublisherSilentFor: 5 * time.Minute, Peers: peers}
+	sev, msg, ev := checkJoinWindow(ctx, engine(lost, nil))
+	if sev != SeverityFail || !strings.Contains(msg, "pgmctl promote node-a --accept-data-loss") || ev["best_candidate"] != "node-a" {
+		t.Errorf("lost publisher: %v %q %v, want fail naming node-a (the publisher's higher LSN does not count)", sev, msg, ev)
+	}
+	pending := &pgmanager.PromotionAuthorization{Target: "node-a", RequestID: "r1"}
+	if sev, _, _ := checkJoinWindow(ctx, engine(lost, pending)); sev != SeverityWarn {
+		t.Errorf("authorization pending: %v, want warn", sev)
+	}
+	catalog := DefaultDoctorChecks()
+	if last := catalog[len(catalog)-1]; last.Name != "cluster.join-window" || last.SuggestedFix == nil || last.SuggestedFix.BlastRadius != BlastAdvisory {
+		t.Fatalf("cluster.join-window must be registered last with an advisory suggested fix, got %+v", last)
 	}
 }
 
