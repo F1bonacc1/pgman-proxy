@@ -50,10 +50,14 @@ RUN CGO_ENABLED=0 go build \
         -trimpath \
         -ldflags="-s -w -X main.version=integration-test" \
         -o /out/pgman-proxy ./cmd/pgman-proxy
+# pgmctl rides along so scenarios can drive the operator CLI inside a
+# node (scale-out S11: pgmctl promote).
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pgmctl ./cmd/pgmctl
 
 FROM postgres:${POSTGRES_VERSION}-bookworm
 ARG POSTGRES_VERSION
 COPY --from=build /out/pgman-proxy /usr/local/bin/pgman-proxy
+COPY --from=build /out/pgmctl /usr/local/bin/pgmctl
 
 ENV PGDATA=/var/lib/postgresql/data
 ENV POSTGRES_BIN_DIR=/usr/lib/postgresql/${POSTGRES_VERSION}/bin
