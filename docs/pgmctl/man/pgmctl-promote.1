@@ -2,30 +2,74 @@
 .TH "PGMCTL" "1" "Oct 2026" "pgman-proxy" "pgmctl Manual"
 
 .SH NAME
-pgmctl-promote - Not supported: use switchover or failover
+pgmctl-promote - Promote NODE out of a join window whose publisher is lost (abandons writes)
 
 
 .SH SYNOPSIS
-\fBpgmctl promote [flags]\fP
+\fBpgmctl promote NODE --accept-data-loss --reason TEXT [flags]\fP
 
 
 .SH DESCRIPTION
-pgmctl promote is not supported. It called POST /v1/promote, which
-reported success but never promoted anything: pg-manager records the
-request and does not act on it.
+End a join window whose publisher is lost, by promoting NODE.
 
 .PP
-Instead, with a cluster leader:
+A join window is the state where the cluster's failover record lets only
+its publisher promote: every other peer was still cloning when it was
+published, so only the publisher holds every write it acknowledged. If
+the publisher is gone for good, no survivor ever promotes on its own.
 
-.EX
-pgmctl switchover --target NODE   # move the primary to a chosen peer
-pgmctl failover                   # let the cluster pick its best standby
-.EE
+.PP
+This command abandons every write the publisher acknowledged that NODE
+has not received. It:
+.IP "  1." 5
+reads the join window from the cluster and prints what is lost;
+.IP "  2." 5
+asks for the typed cluster name (or --force --cluster NAME);
+.IP "  3." 5
+records the authorization (POST /v1/promotion-authorization) on the
+ node it talks to; any live node works, no leader is needed;
+.IP "  4." 5
+waits until NODE is primary, unless --no-wait.
+
+.PP
+pg-manager refuses unless the publisher has been silent for its policy's
+abandon window (60s by default), NODE holds the publisher's database,
+and no live peer is ahead of NODE. It fences the publisher, so it cannot
+promote when it returns; its abandoned writes can be inspected first.
+Unfence it to let it re-clone.
+
+.PP
+Outside a join window, use 'pgmctl switchover --target NODE' or
+\&'pgmctl failover'.
 
 
 .SH OPTIONS
+\fB--accept-data-loss\fP[=false]
+	Required: accept losing the publisher's unreplicated writes
+
+.PP
+\fB--cancel\fP[=false]
+	Cancel the pending authorization (the publisher stays fenced)
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for promote
+
+.PP
+\fB--no-wait\fP[=false]
+	Return once the authorization is recorded
+
+.PP
+\fB--reason\fP=""
+	Required: why the publisher is abandoned (recorded)
+
+.PP
+\fB--replace\fP[=false]
+	Replace a pending authorization
+
+.PP
+\fB--ttl\fP=0s
+	How long the authorization may wait for NODE to promote (default: the cluster policy, 2m)
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -83,6 +127,13 @@ pgmctl failover                   # let the cluster pick its best standby
 .PP
 \fB-y\fP, \fB--yes\fP[=false]
 	Skip single-resource confirmation prompts
+
+
+.SH EXAMPLE
+.EX
+  pgmctl promote node-a --accept-data-loss --reason "node-c volume lost, INC-1234"
+  pgmctl promote --cancel
+.EE
 
 
 .SH SEE ALSO

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (pgmctl): `pgmctl promote NODE --accept-data-loss` ends a join window whose publisher is lost
+
+pg-manager B-025. During a 1→3 expansion, until node-a names a new node
+in its sync set, only node-a may promote. If node-a is lost for good in
+that window, no node ever promotes on its own (nightly run 40176451731,
+S10b), and the only way out was editing every survivor's topology.
+
+- **`pgmctl promote NODE --accept-data-loss --reason TEXT`** prints the
+  join window, every node's data state, identity, LSN and fence, and
+  what is lost. It asks for the typed cluster name, records pg-manager's
+  promotion authorization on the node it talks to (no leader needed),
+  and waits until NODE is primary. pg-manager fences the abandoned
+  publisher. `pgmctl promote --cancel` withdraws a pending one.
+- **`POST` / `DELETE /v1/promotion-authorization`**: not leader-only,
+  audited. Refusals are `409` with `no_join_window`, `promotion_refused`
+  (the message names the failing precondition, or the better candidate)
+  or `promotion_authorization_pending`.
+- **`GET /v1/status`** carries pg-manager's `JoinWindow` and
+  `PromotionAuthorization` blocks.
+- **Doctor check `cluster.join-window`** fails when the publisher has
+  been silent past the 60 s abandon window, naming the best candidate
+  and the command.
+- The history stream records `promotion_authorization.*` events.
+- Runbook: "node-a lost during the join window".
+- Scale-out scenario S11 kills the publisher inside the join window and
+  recovers with `pgmctl promote`.
+
+Requires the pg-manager release carrying B-025. `pgmctl promote` without
+NODE, `--accept-data-loss` and `--reason` is still a usage error (exit
+64); `POST /v1/promote` still answers `501 not_supported`.
+
 ### Fixed (pgmctl): `pgmctl promote` no longer reports success without promoting
 
 `pgmctl promote` called `POST /v1/promote`, which called pg-manager's

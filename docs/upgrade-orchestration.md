@@ -306,7 +306,8 @@ Postgres back up).
   old binary and restart before retrying.
 - **Lost a node mid-upgrade?** Operators must explicitly trigger
   recovery (`pgmctl failover`, `pgmctl switchover`, or `pgmctl
-  fence`/`unfence`; `pgmctl promote` is not supported). There is **no automated failover during an upgrade
+  fence`/`unfence`; `pgmctl promote` applies only to a join window, see
+  the scale-out runbook). There is **no automated failover during an upgrade
   sequence** (Constitution II — fail-closed, no silent re-election).
 - **Per-node budget** bounds how long you wait before declaring a node
   step failed; size it with `PerNodeBudget` / `EstimateDuration`.
@@ -338,6 +339,7 @@ lifts.
 | Move primary role | `POST /v1/switchover` | `Manager.Switchover` | **yes** |
 | Force a new primary | `POST /v1/failover` | `Manager.Failover` | **yes** |
 | Promote this node | `POST /v1/promote` | none: refused with `not_supported` | not applicable |
+| End a join window whose publisher is lost | `POST /v1/promotion-authorization` | `Manager.AuthorizeJoinWindowPromotion` | no (any peer) |
 | Fence / unfence a node | `POST /v1/fence` · `/v1/unfence` | `Manager.Fence` · `Unfence` | **yes** |
 
 Planning helpers (no side effects):

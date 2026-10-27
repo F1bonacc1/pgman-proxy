@@ -88,6 +88,8 @@ Request/response bodies are JSON. Endpoints are versioned under `/v1/`.
 | `Switchover`      | POST   | `/v1/switchover`           | `target` (NodeID, required)                              | yes          | yes   |
 | `Failover`        | POST   | `/v1/failover`             | —                                                        | yes          | yes   |
 | `Promote`         | POST   | `/v1/promote`              | —  (refused: `not_supported`, see below)                 | local-only   | yes   |
+| `AuthorizePromotion` | POST | `/v1/promotion-authorization` | `target`, `reason`, `accept_data_loss` (must be true), `ttl_seconds`, `replace` | no | yes |
+| `CancelPromotionAuthorization` | DELETE | `/v1/promotion-authorization` | — | no | yes |
 | `Fence`           | POST   | `/v1/fence`                | `target` (NodeID, required)                              | yes          | yes   |
 | `Unfence`         | POST   | `/v1/unfence`              | `target` (NodeID, required)                              | yes          | yes   |
 | `UpdateTopology`  | POST   | `/v1/topology`             | `topology` (Topology), `policy` (Policy)                 | yes          | yes   |
@@ -121,6 +123,19 @@ every request with `not_supported` (HTTP 501) and no longer calls the
 engine; the refusal is audited. Use `Switchover` or `Failover`. An
 operator-forced promotion with working semantics is proposed upstream as
 pg-manager B-025.
+
+**Amended (2026-10-27, pg-manager B-025)**: `AuthorizePromotion` calls
+`Manager.AuthorizeJoinWindowPromotion` on the receiving peer. It ends a
+join window whose publisher is lost by promoting `target`, abandoning
+every write the publisher acknowledged that `target` lacks; the engine
+fences the publisher. It is not leader-only: it exists for a cluster with
+no leader, and its record is cluster-wide. The engine receives the
+authenticated `actor` and this request's `request_id`, so its
+`promotion_authorization.*` events correlate with the audit record.
+`engine_result` is the stored record. `CancelPromotionAuthorization`
+deletes a pending one; `engine_result` is the cancelled record, omitted
+when there was none. `POST /v1/promote` still refuses; its message names
+the new route.
 
 ## Response envelope
 
@@ -158,6 +173,9 @@ All non-redirect responses share an envelope:
 | `invalid_argument`              | Malformed body, unknown enum value, NodeID not a peer, etc.                                  | 400         |
 | `leader_route_timeout`          | Forward-mode request to the leader did not return within `control.leader_route_timeout` (FR-034) | 504         |
 | `not_supported`                 | The operation is routed but has no working engine behind it (`Promote`; amended 2026-10-26)  | 501         |
+| `no_join_window`                | `AuthorizePromotion` outside a join window: switchover/failover apply (B-025)                | 409         |
+| `promotion_refused`             | `AuthorizePromotion` precondition failed; `error.message` names it (B-025)                   | 409         |
+| `promotion_authorization_pending` | `AuthorizePromotion` while one is pending and `replace` is false (B-025)                   | 409         |
 | `internal`                      | Unexpected internal failure                                                                  | 500         |
 
 ## Audit record (FR-027)
