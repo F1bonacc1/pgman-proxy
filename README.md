@@ -179,8 +179,8 @@ Two production-shape Dockerfiles, addressing two deployment topologies:
 
 | File | Purpose | Base | Tag (ghcr.io/f1bonacc1/pgman-proxy) |
 |------|---------|------|--------------------------------------|
-| `deploy/docker/Dockerfile` | distroless static — pgman-proxy binary only. Use as a sidecar to an externally-managed Postgres. | `gcr.io/distroless/static:nonroot` | published by goreleaser on tag |
-| `deploy/docker/Dockerfile.bundle` | bundled — pgman-proxy + PostgreSQL 18 in one container. Each peer in the active/active topology runs this. | `postgres:18-bookworm` | `:vX.Y.Z`, `:vX.Y`, `:latest` on tag; `:edge` on `workflow_dispatch` |
+| `deploy/docker/Dockerfile` | distroless static — pgman-proxy binary only. Use as a sidecar to an externally-managed Postgres. | `gcr.io/distroless/static:nonroot` | `:X.Y.Z-distroless`, `:distroless` on tag |
+| `deploy/docker/Dockerfile.bundle` | bundled — pgman-proxy + PostgreSQL 18 in one container. Each peer in the active/active topology runs this. | `postgres:18-bookworm` | `:X.Y.Z`, `:X.Y`, `:latest` on tag; `:edge` on `workflow_dispatch` |
 
 The bundled image is built by `.github/workflows/release-image.yml`
 (triggers: tag `v*` and manual `workflow_dispatch`). Multi-arch

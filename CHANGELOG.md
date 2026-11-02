@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (release): the bundled and distroless images no longer share tags
+
+The `release` and `release-image` workflows both pushed
+`ghcr.io/f1bonacc1/pgman-proxy:X.Y.Z` and `:latest`, so each tag held
+whichever image was pushed last. That was the bundled image only because
+its build is slower. Had GoReleaser finished last, `:latest` would have
+been an image with no PostgreSQL in it.
+
+- **The bundled image** alone owns `:X.Y.Z`, `:X.Y` and `:latest`. Nothing
+  changes for anyone pulling those.
+- **The distroless image** moves to `:X.Y.Z-distroless` and `:distroless`,
+  and per architecture to `:X.Y.Z-distroless-amd64` and
+  `:X.Y.Z-distroless-arm64`. Those replace `:X.Y.Z-amd64` and
+  `:X.Y.Z-arm64`, so anyone pinned to the old per-architecture tags must
+  change them when they upgrade.
+
+Images already published keep their tags. The new tags first appear with
+the next release.
+
 ### Added (pgmctl): `pgmctl promote NODE --accept-data-loss` ends a join window whose publisher is lost
 
 pg-manager B-025. During a 1→3 expansion, until node-a names a new node

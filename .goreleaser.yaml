@@ -7,6 +7,11 @@
 # Static linux/amd64 + linux/arm64 binaries, tar.gz archives, checksums,
 # and multi-arch distroless OCI images pushed to GHCR.
 #
+# Image tags: this file owns only the `distroless` ones. The plain
+# :X.Y.Z, :X.Y and :latest belong to the bundled image pushed by
+# .github/workflows/release-image.yml on the same git tag. Pushing a plain
+# tag from here makes it hold whichever workflow finishes last.
+#
 # Usage:
 #   goreleaser release --snapshot --clean   # local test
 #   goreleaser release --clean              # CI (tags trigger)
@@ -71,7 +76,7 @@ archives:
 
 dockers:
   - image_templates:
-      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-amd64"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless-amd64"
     use: buildx
     ids:
       - pgman-proxy
@@ -84,7 +89,7 @@ dockers:
       - "--label=org.opencontainers.image.version={{.Version}}"
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
   - image_templates:
-      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-arm64"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless-arm64"
     use: buildx
     ids:
       - pgman-proxy
@@ -98,14 +103,14 @@ dockers:
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
 
 docker_manifests:
-  - name_template: "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}"
+  - name_template: "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless"
     image_templates:
-      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-amd64"
-      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-arm64"
-  - name_template: "ghcr.io/f1bonacc1/pgman-proxy:latest"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless-amd64"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless-arm64"
+  - name_template: "ghcr.io/f1bonacc1/pgman-proxy:distroless"
     image_templates:
-      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-amd64"
-      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-arm64"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless-amd64"
+      - "ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless-arm64"
 
 checksum:
   name_template: "checksums.txt"
@@ -128,8 +133,12 @@ release:
     | `pgmctl_{{.Version}}_darwin_amd64.tar.gz` | Operator CLI (macOS/amd64) |
     | `pgmctl_{{.Version}}_darwin_arm64.tar.gz` | Operator CLI (macOS/arm64) |
 
-    ### Container Image
+    ### Container Images
 
     ```bash
+    # pgman-proxy + PostgreSQL 18, one container per peer
     docker pull ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}
+
+    # pgman-proxy only, for an externally managed PostgreSQL
+    docker pull ghcr.io/f1bonacc1/pgman-proxy:{{.Version}}-distroless
     ```
