@@ -3,8 +3,12 @@
 #
 #   - workflow_dispatch — manual ad-hoc builds, e.g. when iterating on
 #     the Dockerfile. Tagged as `:edge-<sha>` and `:edge` (overwrites).
-#   - push tag matching v* — release builds. Tagged as `:vX.Y.Z`,
-#     `:vX.Y`, and `:latest`.
+#   - push tag matching v* — release builds. Tagged as `:X.Y.Z`,
+#     `:X.Y`, and `:latest`.
+#
+# This workflow alone owns those plain tags. The `release` workflow runs on
+# the same git tag and pushes the distroless image to the same package, so
+# it must stay on its `distroless` tags (.goreleaser.yaml).
 #
 # Multi-arch (linux/amd64, linux/arm64) via QEMU. The build context holds
 # only pgman-proxy/. The pinned, private pg-manager module is fetched inside
