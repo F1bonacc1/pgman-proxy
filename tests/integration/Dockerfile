@@ -74,6 +74,7 @@ RUN apt-get update \
          iproute2 \
          procps \
          libcap2-bin \
+         openssl \
     && rm -rf /var/lib/apt/lists/*
 # Chaos-testing convenience: grant the non-root `postgres` user the
 # capabilities needed to manipulate iptables inside the container, so
@@ -88,6 +89,24 @@ RUN apt-get update \
 RUN setcap CAP_NET_ADMIN,CAP_NET_RAW+ep /usr/sbin/xtables-nft-multi \
  && setcap CAP_NET_ADMIN,CAP_NET_RAW+ep /usr/sbin/xtables-legacy-multi
 RUN install -d -o postgres -g postgres -m 0700 "$PGDATA"
+# Peer TLS (spec 001 FR-018). A throwaway CA and one server certificate
+# naming every compose peer, minted at build time so all peers built
+# from this image share the CA. The integration rig runs Postgres with
+# ssl=on and pgman-proxy's default postgres.tls_mode=verify-full against
+# this CA, so replication between peers is verified TLS. The CA key is
+# discarded. TEST IMAGE ONLY.
+RUN install -d -o postgres -g postgres -m 0700 /etc/pgman-tls \
+ && cd /etc/pgman-tls \
+ && openssl req -x509 -newkey rsa:2048 -nodes -days 36500 -subj "/CN=pgman-proxy-it-ca" \
+      -keyout ca.key -out ca.crt \
+ && openssl req -newkey rsa:2048 -nodes -subj "/CN=pgman-proxy-it-peer" \
+      -keyout server.key -out server.csr \
+ && printf 'subjectAltName=DNS:node-a,DNS:node-b,DNS:node-c,DNS:localhost,IP:127.0.0.1\n' > san.ext \
+ && openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 36500 \
+      -extfile san.ext -out server.crt \
+ && rm -f ca.key ca.srl server.csr san.ext \
+ && chown postgres:postgres ca.crt server.crt server.key \
+ && chmod 0600 server.key
 
 USER postgres
 ENTRYPOINT ["/usr/local/bin/pgman-proxy"]

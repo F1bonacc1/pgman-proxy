@@ -45,6 +45,10 @@ services:
       # the documented defaults to 127.0.0.1:* automatically.
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
+      # Peer TLS (FR-018): this demo runs without it. Production keeps
+      # the verify-full default and sets PGMAN_PROXY_POSTGRES_TLS_CA_FILE.
+      PGMAN_PROXY_POSTGRES_TLS_MODE: disable
+      PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK: "true"
       PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV: LOCAL_DSN
       LOCAL_DSN: "host=/var/run/postgresql user=postgres sslmode=disable"
       PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV: PGMAN_PROXY_CONTROL_TOKEN

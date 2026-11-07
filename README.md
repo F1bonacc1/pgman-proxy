@@ -213,12 +213,39 @@ docker run --rm \
     -e PGMAN_CLUSTER_PASSWORD="$(pgman-proxy cluster-secret-gen)" \
     -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
     -e PGMAN_PROXY_CONTROL_TOKEN=<bearer-token> \
+    -e PGMAN_PROXY_POSTGRES_TLS_CA_FILE=/etc/pgman-tls/ca.crt \
     # …+ the rest of the config (see process-compose.yaml for the full env)
     -p 6432:6432 -p 9090:9090 -p 9091:9091 \
     -v node-a-data:/var/lib/postgresql/data \
+    -v ./pg-tls:/etc/pgman-tls:ro \
     --stop-timeout 45 \
     ghcr.io/f1bonacc1/pgman-proxy:latest
 ```
+
+### Peer Postgres TLS
+
+Replication between peers, base backups, rewinds and peer probes use
+libpq with `sslmode=<postgres.tls_mode>`. The default is `verify-full`
+(spec 001 FR-018). That needs:
+
+- `postgres.tls_ca_file` (`PGMAN_PROXY_POSTGRES_TLS_CA_FILE`): the CA
+  that signed the peers' Postgres server certificates. Startup fails
+  without it.
+- `ssl = on` with a server certificate on every peer that names the host
+  other peers dial: the peer ID, or the host of its
+  `postgres.replication_addr`. For example, set it through
+  `postgres.conf_extras`:
+  `ssl = on`, `ssl_cert_file = '/etc/pgman-tls/server.crt'`,
+  `ssl_key_file = '/etc/pgman-tls/server.key'`. The key must be owned by
+  the postgres user with mode 0600.
+- Optionally a client certificate (`postgres.tls_cert_file` and
+  `postgres.tls_key_file`) for `hostssl ... cert` rules.
+
+To run without TLS, set `postgres.tls_mode=disable` and
+`postgres.tls_disable_explicit_ack=true`. Every setting below
+`verify-full`, including a weaker `sslmode` in a hand-written
+`postgres.peer_dsns` entry, is logged at startup as
+`postgres.tls_weakened`.
 
 ### Stopping a peer
 

@@ -42,11 +42,14 @@ postgres:
   port: 5432                              # default 5432
   tls_mode: verify-full                   # default verify-full ; "disable" requires the ack
   tls_disable_explicit_ack: false         # default false
+  tls_ca_file: /etc/pgman-proxy/pg-ca.pem # required for verify-ca / verify-full (sslrootcert)
+  tls_cert_file: ""                       # optional client certificate (sslcert); with tls_key_file
+  tls_key_file: ""                        # optional client key (sslkey); with tls_cert_file
   peer_dsns: {}                           # optional override; otherwise derived from peers
 
 policy:
-  failover_delay: 30s
-  switchover_delay: 30s
+  failover_delay: 0s                      # 0 = off; else min. old-primary silence before an unplanned promotion
+  switchover_delay: 30s                   # smart switchover: wait for a lagging target, then cancel
   promote_timeout: 60s
   liveness_interval: 5s
   liveness_failures: 3
@@ -102,6 +105,9 @@ with `.` replaced by `_`. Examples:
 | `postgres.bin_dir`                 | `PGMAN_PROXY_POSTGRES_BIN_DIR`             |
 | `postgres.data_dir`                | `PGMAN_PROXY_POSTGRES_DATA_DIR`            |
 | `postgres.tls_mode`                | `PGMAN_PROXY_POSTGRES_TLS_MODE`            |
+| `postgres.tls_ca_file`             | `PGMAN_PROXY_POSTGRES_TLS_CA_FILE`         |
+| `postgres.tls_cert_file`           | `PGMAN_PROXY_POSTGRES_TLS_CERT_FILE`       |
+| `postgres.tls_key_file`            | `PGMAN_PROXY_POSTGRES_TLS_KEY_FILE`        |
 | `obs.metrics_addr`                 | `PGMAN_PROXY_OBS_METRICS_ADDR`             |
 | `control.listen_addr`              | `PGMAN_PROXY_CONTROL_LISTEN_ADDR`          |
 | `control.leader_route_mode`        | `PGMAN_PROXY_CONTROL_LEADER_ROUTE_MODE`    |
@@ -172,6 +178,9 @@ replace the value of any secret-bearing key with the string
 | Required key missing             | exit `EX_CONFIG` (78); log a single `error` with the offending key path  |
 | Type/regex/enum violation        | exit `EX_CONFIG` (78); log offending key + observed value (redacted)     |
 | TLS-disable without explicit ack | exit `EX_CONFIG` (78); log `tls_mode=disable rejected without ack` (FR-018) |
+| `tls_mode` verify-ca / verify-full (the default) without `tls_ca_file` | exit `EX_CONFIG` (78); the error names `postgres.tls_ca_file` and the `tls_mode=disable` + ack alternative (FR-018) |
+| `tls_ca_file` / `tls_cert_file` / `tls_key_file` unreadable | exit `EX_CONFIG` (78); the error names the key |
+| `tls_mode` below verify-full, or a `peer_dsns` entry with a weaker `sslmode` | starts; one `postgres.tls_weakened` warning per weakening (FR-018 audit log) |
 | Inline secret detected           | exit `EX_CONFIG` (78); log `inline secret refused` with the key path     |
 | YAML parse error                 | exit `EX_CONFIG` (78); log file path and parser error                    |
 | `control.auth.token_env` and `control.auth.token_file` both set | exit `EX_CONFIG` (78); log `control.auth tokens are mutually exclusive`  |

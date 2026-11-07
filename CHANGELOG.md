@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (breaking): peer Postgres TLS follows `postgres.tls_mode`
+
+Spec 001 FR-018 makes `verify-full` the default for upstream Postgres
+TLS. `postgres.tls_mode` defaulted to `verify-full`, and `disable` needed
+an explicit ack, but nothing read the setting: both peer-DSN builders
+hardcoded `sslmode=disable`. Replication, base backups, rewinds and peer
+probes between nodes were plaintext whatever the config said.
+
+- The peer DSNs pg-manager uses now carry `sslmode=<tls_mode>`. That
+  covers the static map and the `replication_addr` resolver.
+- New settings: `postgres.tls_ca_file` (`sslrootcert`), plus an optional
+  `postgres.tls_cert_file` / `postgres.tls_key_file` pair (`sslcert` /
+  `sslkey`). Env: `PGMAN_PROXY_POSTGRES_TLS_{CA,CERT,KEY}_FILE`.
+- A hand-written `postgres.peer_dsns` entry without `sslmode` inherits
+  `tls_mode`. An entry that sets `sslmode` is left as written.
+- **Startup now fails** (exit 78) when `tls_mode` is `verify-ca` or
+  `verify-full` (the default) and `tls_ca_file` is unset, or when a
+  configured certificate file is unreadable. The error names both ways
+  out. A deployment without Postgres certificates must either supply
+  them or set `postgres.tls_mode=disable` and
+  `postgres.tls_disable_explicit_ack=true`.
+- Every weakening below `verify-full` is logged at startup as
+  `postgres.tls_weakened`.
+- `verify-full` checks the peer's certificate against the host this
+  node dials: the peer ID, or the host of its published
+  `postgres.replication_addr`. Peers need `ssl = on` with a certificate
+  naming that host, for example via `postgres.conf_extras`.
+- The integration suite now replicates over `verify-full` with a test CA
+  baked into its image (`TestPeerReplicationUsesVerifyFullTLS`). The
+  scale-out, smoke, process-compose and deploy-compose rigs set
+  `disable` plus the ack explicitly.
+
+### Changed: failover and switchover timing settings take effect (pg-manager v0.7.6)
+
+pg-manager's `Policy.FailoverDelay`, `SwitchoverDelay` and
+`LivenessFailures` were never read, so `policy.failover_delay`,
+`policy.switchover_delay` and `policy.liveness_failures` did nothing. With
+pg-manager v0.7.6 they do:
+
+- **`policy.liveness_failures`** (default 3) is the number of
+  consecutive confirmed-down checks before the local Postgres counts as
+  crashed. It was effectively 2.
+- **`policy.failover_delay`** is the minimum silence of the old primary
+  before an unplanned promotion. **Its default changes from 30 s to 0
+  (off)**, which keeps today's failover time.
+- **`policy.switchover_delay`** (default 30 s) is how long the primary
+  keeps serving while a lagging switchover target catches up. Past it,
+  the switchover is cancelled with `switchover.expired` reason
+  `target_not_ready`, instead of leaving the cluster without a primary.
+
+The same bump makes automatic promotion pick the most advanced standby
+under async replication too (no 16 MiB slack). It also implements the
+disk-full rules: no failover away from a full-disk primary that still
+holds its lease, no promotion onto a full disk, and a demote for a
+full-disk primary that loses its lease. See pg-manager's CHANGELOG.
+
 ### Added (docs): field guide
 
 `docs/field-guide.html`, linked from the README, is a single offline HTML

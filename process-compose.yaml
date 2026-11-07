@@ -177,6 +177,8 @@ processes:
         -e PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin \
         -e PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
         -e PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN \
+        -e PGMAN_PROXY_POSTGRES_TLS_MODE=disable \
+        -e PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK=true \
         -e "LOCAL_DSN=host=/var/run/postgresql user=postgres sslmode=disable" \
         -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-a:5432 \
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
@@ -240,6 +242,8 @@ processes:
         -e PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin \
         -e PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
         -e PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN \
+        -e PGMAN_PROXY_POSTGRES_TLS_MODE=disable \
+        -e PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK=true \
         -e "LOCAL_DSN=host=/var/run/postgresql user=postgres sslmode=disable" \
         -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-b:5432 \
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \
@@ -305,6 +309,8 @@ processes:
         -e PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/18/bin \
         -e PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data \
         -e PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN \
+        -e PGMAN_PROXY_POSTGRES_TLS_MODE=disable \
+        -e PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK=true \
         -e "LOCAL_DSN=host=/var/run/postgresql user=postgres sslmode=disable" \
         -e PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR=node-c:5432 \
         -e PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=PGMAN_PROXY_CONTROL_TOKEN \

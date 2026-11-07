@@ -1326,7 +1326,7 @@ const FLOWS = [
       [0, 1, 'switchover --target node-b', 'ctl', 'POST /v1/switchover on any peer. It is forwarded to the leader. The target must hold data.'],
       [1, 2, 'put switchover_request', 'ctl', 'A timestamped record, valid for 30 s by default.'],
       [2, 4, 'node-c sees the request', 'lease', 'Peers that are not the target stop campaigning, so the target gets an uncontested run.'],
-      [1, 1, 'hold one tick, then resign', 'lease', 'The primary waits until the request is one tick old, so peers have seen it before the lease frees up (B-022).'],
+      [1, 1, 'wait for the target, then resign', 'lease', 'The primary keeps serving until the target has replayed past where the primary stood when asked (or is within 16 MiB), for up to policy.switchover_delay (30 s). If the target never gets there, the switchover is cancelled (target_not_ready) and nothing went down. Then it holds one more tick so peers have seen the request (B-022).'],
       [1, 2, 'release lease', 'lease', 'The leader key is deleted. This is a clean hand-over, not a lease expiry.'],
       [1, 1, 'demote: fast stop', 'data', 'Losing the lease triggers a demote. Fast shutdown ships all WAL to connected standbys.'],
       [3, 2, 'create leader: wins', 'lease', 'With deference wired, handover completes in one election cycle.'],
@@ -1929,12 +1929,14 @@ const CONCEPTS = [
     [
       ['Holds the lease', 'Compare-and-swap in the KV store. Advisory on its own.'],
       ['Not fenced', 'A fenced node sits in Fenced and takes no action.'],
+      ['Failover delay', 'Unplanned only: the old primary must have been silent for policy.failover_delay. The winner keeps the lease while it waits. Default 0, off.'],
+      ['Room on disk', 'No promotion onto a full disk (candidate_disk_full), nor while the old primary freshly reports one (primary_disk_full, FR-017).'],
       ['Failover record exists', 'missing_quorum_snapshot otherwise. Published by the primary each tick.'],
       ['Join window', 'While every peer is empty or partial, only the record\'s publisher may promote: join_window_not_publisher.'],
       ['Named in the record', 'If the record is fresh, the node must be its publisher or in its sync set: no_quorum_candidate_available.'],
       ['No pending re-clone', 'A node marked stale, with a live primary to clone from, vetoes itself.'],
       ['Own LSN published', 'It will not decide without knowing its own position.'],
-      ['No sync peer ahead', 'sync_peer_ahead. Any amount counts in sync mode. Async clusters allow 16 MiB.'],
+      ['No live peer ahead', 'sync_peer_ahead. Any amount counts, sync or async, unless PromoteLSNTolerance is set. Fenced and full-disk peers do not count. A behind winner resigns and sits out three ticks so the peer ahead wins.'],
       ['No silent sync peer', 'sync_peer_silent, while the record is fresh. A stale record means the primary is gone, and the most-current survivor may go.'],
     ].forEach(([t, tip]) => gl.append(E('li', { 'data-tip': tip, text: t })));
     body.append(gl);
@@ -1971,7 +1973,7 @@ const CONCEPTS = [
       ['Acknowledged data lost', 'None', 'None under QuorumSync. Under AsyncOnly, up to the unreplicated tail'],
       ['Write outage', 'About one election cycle', '10 to 15 s typical, 45 s budget'],
       ['Old primary rejoins by', 'Just following', 'Following, rewind or re-clone'],
-      ['If the plan fails', 'Request expires after 30 s, normal election resumes', 'Named refusal event, node retries or resigns'],
+      ['If the plan fails', 'Target not caught up within switchover_delay (30 s): cancelled, the primary keeps serving', 'Named refusal event, node retries or resigns'],
     ];
     body.append(E('div', { class: 'table-wrap' }, E('table', null,
       E('thead', null, E('tr', null, cmp[0].map(h => E('th', { text: h })))),
@@ -2266,13 +2268,15 @@ const FEATURES = [
   { g: 'Replication and safety', c: 'var(--wal)', sub: 'What protects acknowledged writes', items: [
     ['Replication mode from peer count', 'One peer runs AsyncOnly, more run QuorumSync. There is no broken in-between setting.', 'p', 'on', 'layers', '005', GH_P + 'internal/runtime/replication_policy.go'],
     ['Sync set never degrades silently', 'If the set cannot be met, Postgres blocks commits. It does not fall back to async.', 'e', 'on', 'lock', 'failover', GH_E + 'docs/failover.md'],
-    ['Sync-aware promotion gate', 'A candidate behind a sync peer, or next to a silent one, refuses to promote.', 'e', 'on', 'shield', '012', GH_E + 'docs/failover-safety.md#1-sync-aware-promotion'],
+    ['Most advanced standby promotes', 'A candidate behind any live, unfenced peer refuses and defers to it, under async too. Under sync, a silent sync peer also blocks.', 'e', 'on', 'shield', '012', GH_E + 'docs/failover.md'],
+    ['Failover delay', 'Optional: an unplanned promotion waits until the old primary has been silent this long. The winner holds the lease meanwhile. Off by default.', 'b', 'on', 'clock', 'policy', GH_E + 'docs/failover.md'],
+    ['Peer Postgres TLS', 'Replication, clones, rewinds and probes between peers use postgres.tls_mode, verify-full by default. Startup fails without a CA.', 'p', 'on', 'lock', 'FR-018', GH_P + 'README.md#peer-postgres-tls'],
     ['Failover record', 'Each tick the primary publishes who may promote, so survivors can decide alone.', 'e', 'on', 'file', '003', GH_E + 'reconciler/quorum_snapshot.go'],
     ['Exactly one initdb', 'Data-state records stop an empty node creating a second database.', 'e', 'on', 'db', '015', GH_E + 'docs/failover-safety.md#7-empty-peer-safety-milestone-015'],
     ['Join window', 'Until a clone is in the sync set, only the node with the data may promote.', 'e', 'on', 'stop', '015', GH_E + 'specs/015-empty-peer-safety'],
     ['Promotion lease hold', 'A leader waits a few ticks for a just-cloned peer rather than handing it the lease.', 'e', 'on', 'clock', 'B-027', GH_E + 'specs/B-027-promotion-resigns-on-unreported-peer.md'],
     ['Read-only restart', 'A demoted node that cannot confirm a leader restarts in recovery, or stays stopped.', 'e', 'on', 'lock', 'failover-safety', GH_E + 'docs/failover-safety.md'],
-    ['Disk guard', 'Below 5% free on PGDATA, Diagnose warns and a primary does not start a demote.', 'e', 'on', 'gauge', 'FR-017', GH_E + 'docs/architecture.md'],
+    ['Disk-full hold', 'A full-disk primary keeps its lease and is not failed over. Standbys never promote onto a full disk. A full-disk primary that loses its lease still demotes.', 'e', 'on', 'gauge', 'FR-017', GH_E + 'docs/runbook.md#disk-full-incident'],
     ['Identity mismatch report', 'A standby following a different database shows up in doctor and on a gauge. Nothing is wiped.', 'b', 'on', 'eye', '015', GH_E + 'docs/failover-safety.md#7-empty-peer-safety-milestone-015'],
     ['Timeline divergence report', 'Event, gauge and doctor check, with or without auto-recovery.', 'b', 'on', 'branch', 'B-026', GH_E + 'docs/auto-rebootstrap.md#timeline-divergence'],
     ['Operator fence', 'A sticky fence list in KV. It survives restarts and store blips.', 'e', 'on', 'ban', 'operator', GH_E + 'manager/operator.go'],
@@ -2289,7 +2293,7 @@ const FEATURES = [
     ['Orphan slot cleanup', 'Drops pgmgr_ slots for removed peers after a grace period. Off unless SlotCleanupGrace is set, which the proxy does not do.', 'e', 'lib', 'wipe', '003', GH_E + 'reconciler/slot_cleanup.go'],
   ] },
   { g: 'Planned change', c: 'var(--ctl)', sub: 'Changing a running cluster', items: [
-    ['Switchover', 'Named target, 30 s request TTL, campaign deference and a one-tick handover hold.', 'b', 'on', 'swap', '013', GH_E + 'docs/switchover-deference.md'],
+    ['Switchover', 'Named target, campaign deference, and a primary that keeps serving until the target catches up. If it does not within 30 s, the switchover is cancelled.', 'b', 'on', 'swap', '013', GH_E + 'docs/switchover-deference.md'],
     ['Operator failover', 'Leader picks the best-LSN standby and hands over. Needs a live leader.', 'b', 'on', 'route', 'operator', GH_E + 'manager/operator.go'],
     ['Join-window forced promotion', 'pgmctl promote --accept-data-loss, for when the only data holder is gone for good.', 'b', 'on', 'bell', 'B-025', GH_E + 'specs/B-025-join-window-forced-promotion.md'],
     ['1 to 3 expansion and rollback', 'Push config, restart once. node-a keeps its data. Outage 7.6 to 14.1 s.', 'b', 'on', 'scale', '005', GH_P + 'docs/scale-out-1-to-3/runbook.md'],
@@ -2759,7 +2763,7 @@ Views.terms = function () {
   });
 };
 
-$('#foot').innerHTML = `Written against pgman-proxy at <code>224824e</code> (pg-manager v0.7.5) on 2026-11-03. Links into the private pg-manager repository need access. Measured figures come from the linked suites and will drift, so treat the repos as the source of truth.`;
+$('#foot').innerHTML = `Written against pgman-proxy at <code>224824e</code> (pg-manager v0.7.5) on 2026-11-03, updated on 2026-11-07 for peer TLS, failover delay, smart switchover, highest-LSN promotion and disk-full handling. Links into the private pg-manager repository need access. Measured figures come from the linked suites and will drift, so treat the repos as the source of truth.`;
 // ---------- Boot ----------
 Ticker.start();
 setupTabs();

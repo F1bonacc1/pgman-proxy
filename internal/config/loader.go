@@ -87,6 +87,9 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		"PGMAN_PROXY_POSTGRES_REPLICATION_ADDR": func(v string) { cfg.Postgres.ReplicationAddr = v },
 		"PGMAN_PROXY_POSTGRES_LOCAL_PG_ADDR":    func(v string) { cfg.Postgres.LocalPGAddr = v },
 		"PGMAN_PROXY_POSTGRES_TLS_MODE":         func(v string) { cfg.Postgres.TLSMode = v },
+		"PGMAN_PROXY_POSTGRES_TLS_CA_FILE":      func(v string) { cfg.Postgres.TLSCAFile = v },
+		"PGMAN_PROXY_POSTGRES_TLS_CERT_FILE":    func(v string) { cfg.Postgres.TLSCertFile = v },
+		"PGMAN_PROXY_POSTGRES_TLS_KEY_FILE":     func(v string) { cfg.Postgres.TLSKeyFile = v },
 		"PGMAN_PROXY_POSTGRES_HBA_EXTRAS":       func(v string) { cfg.Postgres.HBAExtras = parseLines(v) },
 		"PGMAN_PROXY_POSTGRES_CONF_EXTRAS":      func(v string) { cfg.Postgres.ConfExtras = parseLines(v) },
 		"PGMAN_PROXY_OBS_LOG_LEVEL":             func(v string) { cfg.Obs.LogLevel = v },
@@ -130,10 +133,8 @@ func applyEnv(cfg *Config, src *Sources, env func(string) string) error {
 		// the chaos rig to shorten cold-restart recovery; production
 		// keeps the 5s default.
 		"PGMAN_PROXY_POLICY_LIVENESS_INTERVAL": durSet(&cfg.Policy.LivenessInterval),
-		// Wait between confirmed primary failure and triggering
-		// failover. The yaml key (`policy.failover_delay`) existed
-		// without an env binding; test topologies tighten it to meet
-		// the SC-002 failover budget. Production keeps the 30s default.
+		// Minimum silence of the old primary before an unplanned
+		// promotion (pg-manager Policy.FailoverDelay). Default 0 = off.
 		"PGMAN_PROXY_POLICY_FAILOVER_DELAY": durSet(&cfg.Policy.FailoverDelay),
 		// Leadership lease TTL (Constitution III tuning knob). Zero =
 		// pg-manager adapter default (5s). Stale-lease eviction takes

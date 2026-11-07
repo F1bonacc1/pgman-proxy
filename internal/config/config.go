@@ -158,10 +158,27 @@ type PostgresConfig struct {
 	// will trip auth. Set this to the docker-network alias / pod IP /
 	// service DNS so the proxy's forwarded connection appears to PG
 	// from a routable address that matches the operator's HBA rules.
-	LocalPGAddr           string            `yaml:"local_pg_addr"            json:"local_pg_addr"`
-	TLSMode               string            `yaml:"tls_mode"                 json:"tls_mode"`
-	TLSDisableExplicitAck bool              `yaml:"tls_disable_explicit_ack" json:"tls_disable_explicit_ack"`
-	PeerDSNs              map[string]string `yaml:"peer_dsns"                json:"peer_dsns"`
+	LocalPGAddr string `yaml:"local_pg_addr"            json:"local_pg_addr"`
+	// TLSMode is the libpq sslmode for this node's connections to its
+	// peers' Postgres: replication (primary_conninfo), base backup,
+	// rewind and peer probes. One of disable, allow, prefer, require,
+	// verify-ca, verify-full (default, FR-018). The verify modes need
+	// TLSCAFile. disable needs TLSDisableExplicitAck. Anything below
+	// verify-full is logged at startup.
+	TLSMode               string `yaml:"tls_mode"                 json:"tls_mode"`
+	TLSDisableExplicitAck bool   `yaml:"tls_disable_explicit_ack" json:"tls_disable_explicit_ack"`
+	// TLSCAFile is the CA bundle that signed the peers' Postgres server
+	// certificates (libpq sslrootcert). Required for verify-ca and
+	// verify-full; with verify-full each peer's certificate must also
+	// name the host this node dials (the peer ID, or its published
+	// postgres.replication_addr host).
+	TLSCAFile string `yaml:"tls_ca_file" json:"tls_ca_file"`
+	// TLSCertFile and TLSKeyFile are an optional client certificate and
+	// key (libpq sslcert / sslkey) for peers whose pg_hba.conf requires
+	// cert authentication. Set both or neither.
+	TLSCertFile string            `yaml:"tls_cert_file"            json:"tls_cert_file"`
+	TLSKeyFile  string            `yaml:"tls_key_file"             json:"tls_key_file"`
+	PeerDSNs    map[string]string `yaml:"peer_dsns"                json:"peer_dsns"`
 	// HBAExtras lists pg_hba.conf lines appended after initdb on the
 	// elected bootstrap leader. Followers inherit the rewritten file via
 	// pg_basebackup, so this field is only consulted on whichever peer
@@ -308,7 +325,14 @@ func Defaults() Config {
 		},
 		Topology: TopologyConfig{Port: 5432},
 		Policy: PolicyConfig{
-			FailoverDelay:   30 * time.Second,
+			// FailoverDelay 0: an unplanned failover proceeds as soon
+			// as the lease changes hands. A positive value makes the
+			// lease winner wait until the old primary has been silent
+			// that long (pg-manager Policy.FailoverDelay).
+			FailoverDelay: 0,
+			// SwitchoverDelay: how long the primary keeps serving
+			// while a lagging switchover target catches up before it
+			// cancels the switchover (pg-manager smart switchover).
 			SwitchoverDelay: 30 * time.Second,
 			PromoteTimeout:  60 * time.Second,
 			// LivenessInterval drives reconciler tick cadence + the

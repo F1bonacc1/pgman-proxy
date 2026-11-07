@@ -50,6 +50,10 @@ func commonEnv() map[string]string {
 		"PGMAN_PROXY_POSTGRES_BIN_DIR":                   binDir,
 		"PGMAN_PROXY_POSTGRES_DATA_DIR":                  dataDir,
 		"PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV":             "LOCAL_DSN",
+		// Peer TLS off: the rig's container names are not in the
+		// integration image's test certificate (FR-018 ack).
+		"PGMAN_PROXY_POSTGRES_TLS_MODE":                 "disable",
+		"PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK": "true",
 		"LOCAL_DSN":                                      "host=/var/run/postgresql user=postgres sslmode=disable",
 		"PGMAN_PROXY_OBS_LOG_LEVEL":                      "info",
 		"PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV":             "PGMAN_PROXY_CONTROL_TOKEN",
