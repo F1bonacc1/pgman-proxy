@@ -131,9 +131,7 @@ func Validate(cfg Config) error {
 			m.Add(fmt.Errorf("postgres.replication_addr %q must be host:port: %w", cfg.Postgres.ReplicationAddr, err))
 		}
 	}
-	if cfg.Postgres.TLSMode == "disable" && !cfg.Postgres.TLSDisableExplicitAck {
-		m.Add(errors.New("postgres.tls_mode=disable rejected without postgres.tls_disable_explicit_ack=true (FR-018)"))
-	}
+	validatePostgresTLS(cfg.Postgres, m)
 
 	// Control plane (FR-021..FR-034)
 	if cfg.Control.Auth.TokenEnv != "" && cfg.Control.Auth.TokenFile != "" {

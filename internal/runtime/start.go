@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -84,6 +85,15 @@ func Start(ctx context.Context, cfg config.Config, version string, shutdown func
 	// Gate #3: Observability bootstrap.
 	res.Logger = obs.NewLogger(nil, cfg.Obs.LogLevel, cfg.Cluster.ID, cfg.Node.ID, "runtime")
 	res.Logger.Info("config loaded", pgmanager.Field{Key: "version", Value: version})
+	// FR-018: peer Postgres TLS. Certificate files must be readable now,
+	// not at the first replication connection; every weakening below
+	// verify-full is logged so operators can audit it.
+	if err := checkPostgresTLSFiles(cfg.Postgres); err != nil {
+		return res, &StartupError{Code: ExitConfig, Err: err}
+	}
+	for _, w := range cfg.Postgres.TLSWeakenings() {
+		res.Logger.Warn("postgres.tls_weakened", pgmanager.Field{Key: "detail", Value: w})
+	}
 	res.Metrics = obs.NewMetrics(cfg.Cluster.ID, cfg.Node.ID)
 	res.Health = obs.NewHealth()
 	res.ObsSrv = obs.NewServer(cfg.Obs.HealthAddr, res.Health, res.Metrics.Registry)
@@ -233,7 +243,7 @@ func Start(ctx context.Context, cfg config.Config, version string, shutdown func
 		res.Logger.Info("published peer replication address",
 			pgmanager.Field{Key: "node_id", Value: cfg.Node.ID},
 			pgmanager.Field{Key: "addr", Value: cfg.Postgres.ReplicationAddr})
-		peerDSNResolver = cluster.PeerAddressResolver(clusterKV)
+		peerDSNResolver = cluster.PeerAddressResolver(clusterKV, cfg.Postgres.PeerSSLParams())
 	}
 
 	// Now that the leadership handle exists, wire the storage monitor
@@ -650,18 +660,22 @@ func nodeIDs(peers []string) []pgmanager.NodeID {
 
 func peerDSNsForConfig(cfg config.Config) map[pgmanager.NodeID]string {
 	out := make(map[pgmanager.NodeID]string, len(cfg.Peers))
+	ssl := cfg.Postgres.PeerSSLParams()
 	if len(cfg.Postgres.PeerDSNs) == 0 {
 		// Default: derive a libpq conninfo per peer from the topology
-		// port. This matches the pg-manager three_node_nats example.
+		// port, with postgres.tls_mode's TLS parameters (FR-018).
 		for _, p := range cfg.Peers {
-			out[pgmanager.NodeID(p)] = fmt.Sprintf(
-				"host=%s port=%d user=postgres dbname=postgres sslmode=disable",
-				p, cfg.Topology.Port,
-			)
+			out[pgmanager.NodeID(p)] = cluster.PeerDSN(p, strconv.Itoa(cfg.Topology.Port), ssl)
 		}
 		return out
 	}
+	// Hand-written DSNs: one that sets sslmode itself is the operator's
+	// choice (logged at startup when weaker than verify-full); one that
+	// does not inherits postgres.tls_mode.
 	for k, v := range cfg.Postgres.PeerDSNs {
+		if !config.DSNHasSSLMode(v) {
+			v = strings.TrimSpace(v) + " " + ssl
+		}
 		out[pgmanager.NodeID(k)] = v
 	}
 	return out

@@ -126,6 +126,9 @@ func singlePeerEnv() []string {
 		"PGMAN_PROXY_POSTGRES_BIN_DIR=/usr/lib/postgresql/17/bin",
 		"PGMAN_PROXY_POSTGRES_DATA_DIR=/var/lib/postgresql/data",
 		"PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV=LOCAL_DSN",
+		// Peer TLS off for this single-container test (FR-018 ack).
+		"PGMAN_PROXY_POSTGRES_TLS_MODE=disable",
+		"PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK=true",
 		"PGMAN_PROXY_CONTROL_LISTEN_ADDR=127.0.0.1:9091",
 		"PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV=TOK",
 	}

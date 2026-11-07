@@ -84,12 +84,14 @@ func minimalEnv() map[string]string {
 		"PGMAN_PROXY_NODE_ID":    "node-a",
 		"PGMAN_PROXY_PEERS":      "node-a",
 		// Feature 002: external NATS removed; embedded coordination plane.
-		"PGMAN_PROXY_CLUSTER_DECLARED_SIZE":  "1",
-		"PGMAN_PROXY_PROXY_LISTEN_ADDR":      "0.0.0.0:6432",
-		"PGMAN_PROXY_POSTGRES_BIN_DIR":       "/usr/lib/postgresql/17/bin",
-		"PGMAN_PROXY_POSTGRES_DATA_DIR":      "/var/lib/postgresql/data",
-		"PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV": "LOCAL_DSN",
-		"PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV": "TOK",
+		"PGMAN_PROXY_CLUSTER_DECLARED_SIZE":             "1",
+		"PGMAN_PROXY_PROXY_LISTEN_ADDR":                 "0.0.0.0:6432",
+		"PGMAN_PROXY_POSTGRES_BIN_DIR":                  "/usr/lib/postgresql/17/bin",
+		"PGMAN_PROXY_POSTGRES_DATA_DIR":                 "/var/lib/postgresql/data",
+		"PGMAN_PROXY_POSTGRES_LOCAL_DSN_ENV":            "LOCAL_DSN",
+		"PGMAN_PROXY_POSTGRES_TLS_MODE":                 "disable",
+		"PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK": "true",
+		"PGMAN_PROXY_CONTROL_AUTH_TOKEN_ENV":            "TOK",
 	}
 }
 

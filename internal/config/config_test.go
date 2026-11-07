@@ -28,6 +28,9 @@ func validBaseConfig() Config {
 	cfg.Postgres.DataDir = "/var/lib/postgresql/data"
 	cfg.Postgres.LocalDSNEnv = "LOCAL_DSN"
 	cfg.Control.Auth.TokenEnv = "PGMAN_PROXY_CONTROL_TOKEN"
+	// FR-018: the default postgres.tls_mode is verify-full, which needs
+	// the CA that signed the peers' Postgres server certificates.
+	cfg.Postgres.TLSCAFile = "/etc/pgman-proxy/pg-ca.pem"
 	return cfg
 }
 
@@ -319,4 +322,115 @@ func TestValidate_DeploymentMode(t *testing.T) {
 
 func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
+}
+
+// FR-018: verify-full is the default, and libpq cannot verify a server
+// certificate without the CA that signed it. Startup must refuse a
+// verify mode with no CA file and name both ways out, instead of every
+// replication connection failing later.
+func TestValidate_TLSVerifyModesRequireCAFile(t *testing.T) {
+	for _, mode := range []string{"", "verify-full", "verify-ca"} {
+		cfg := validBaseConfig()
+		cfg.Postgres.TLSMode = mode
+		cfg.Postgres.TLSCAFile = ""
+		err := Validate(cfg)
+		if err == nil {
+			t.Fatalf("tls_mode=%q without tls_ca_file: want validation error, got nil", mode)
+		}
+		for _, want := range []string{"postgres.tls_ca_file", "tls_mode=disable"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("tls_mode=%q: error %q missing %q", mode, err.Error(), want)
+			}
+		}
+	}
+}
+
+func TestValidate_TLSModeMustBeKnown(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.Postgres.TLSMode = "verify_full"
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "postgres.tls_mode") {
+		t.Fatalf("want an unknown-tls_mode error, got %v", err)
+	}
+	for _, mode := range []string{"allow", "prefer", "require"} {
+		cfg := validBaseConfig()
+		cfg.Postgres.TLSMode = mode
+		if err := Validate(cfg); err != nil {
+			t.Errorf("tls_mode=%q should validate, got %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_TLSClientCertAndKeyTogether(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.Postgres.TLSCertFile = "/etc/pgman-proxy/client.crt"
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "postgres.tls_key_file") {
+		t.Fatalf("cert without key: want error naming tls_key_file, got %v", err)
+	}
+	cfg.Postgres.TLSKeyFile = "/etc/pgman-proxy/client.key"
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("cert with key should validate, got %v", err)
+	}
+}
+
+func TestPostgresConfig_PeerSSLParams(t *testing.T) {
+	cases := []struct {
+		name string
+		pg   PostgresConfig
+		want string
+	}{
+		{"default_is_verify_full", PostgresConfig{TLSCAFile: "/ca.pem"}, "sslmode=verify-full sslrootcert=/ca.pem"},
+		{"disable", PostgresConfig{TLSMode: "disable"}, "sslmode=disable"},
+		{"require_no_ca", PostgresConfig{TLSMode: "require"}, "sslmode=require"},
+		{"client_cert", PostgresConfig{TLSMode: "verify-ca", TLSCAFile: "/ca.pem", TLSCertFile: "/c.crt", TLSKeyFile: "/c.key"},
+			"sslmode=verify-ca sslrootcert=/ca.pem sslcert=/c.crt sslkey=/c.key"},
+		{"disable_ignores_files", PostgresConfig{TLSMode: "disable", TLSCAFile: "/ca.pem"}, "sslmode=disable"},
+	}
+	for _, tc := range cases {
+		if got := tc.pg.PeerSSLParams(); got != tc.want {
+			t.Errorf("%s: PeerSSLParams() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Every weakening of peer TLS below verify-full is logged at startup
+// (FR-018), including an explicit sslmode in a hand-written peer DSN.
+func TestPostgresConfig_TLSWeakenings(t *testing.T) {
+	strong := PostgresConfig{TLSCAFile: "/ca.pem", PeerDSNs: map[string]string{"node-b": "host=b sslmode=verify-full"}}
+	if got := strong.TLSWeakenings(); len(got) != 0 {
+		t.Fatalf("verify-full everywhere: want no weakenings, got %v", got)
+	}
+	weak := PostgresConfig{
+		TLSMode: "require",
+		PeerDSNs: map[string]string{
+			"node-b": "host=b sslmode=disable",
+			"node-c": "host=c",
+		},
+	}
+	got := strings.Join(weak.TLSWeakenings(), "\n")
+	for _, want := range []string{"postgres.tls_mode=require", "node-b", "sslmode=disable"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("weakenings %q missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "node-c") {
+		t.Errorf("node-c inherits tls_mode and needs no entry of its own: %q", got)
+	}
+}
+
+func TestLoad_PostgresTLSFilesFromEnv(t *testing.T) {
+	cfg, _, err := Load(LoadOptions{Env: envFn(map[string]string{
+		"PGMAN_PROXY_POSTGRES_TLS_CA_FILE":   "/run/secrets/pg-ca.pem",
+		"PGMAN_PROXY_POSTGRES_TLS_CERT_FILE": "/run/secrets/client.crt",
+		"PGMAN_PROXY_POSTGRES_TLS_KEY_FILE":  "/run/secrets/client.key",
+	})})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Postgres.TLSCAFile != "/run/secrets/pg-ca.pem" ||
+		cfg.Postgres.TLSCertFile != "/run/secrets/client.crt" ||
+		cfg.Postgres.TLSKeyFile != "/run/secrets/client.key" {
+		t.Fatalf("TLS file env bindings not applied: %+v", cfg.Postgres)
+	}
 }

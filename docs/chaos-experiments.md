@@ -883,6 +883,11 @@ Surfaced during chaos sessions; not yet executed. Append as we run them.
 - **CR-012 — Standby disk full.** `dd` a large file into the standby's
   PG data dir until the volume is at 99 %. Tests whether replication
   blocks gracefully and whether the primary backs off correctly.
+  Expected since the disk-full change (pg-manager FR-017 with FR-019):
+  the full standby publishes `disk_full`, never campaigns, refuses
+  promotion (`candidate_disk_full`), and emits `disk.full`. The same
+  fill on the PRIMARY must produce no failover while it holds the
+  lease, and Postgres restarts once space is freed. Not yet run.
 - **CR-013 — Double failover in quick succession.** Kill primary,
   wait for failover to complete, kill the *new* primary within 5 s.
   Tests whether the state machine handles back-to-back transitions

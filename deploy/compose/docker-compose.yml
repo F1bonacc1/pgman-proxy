@@ -45,6 +45,10 @@ services:
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
+      # Peer TLS (FR-018): this demo runs without it. Production keeps
+      # the verify-full default and sets PGMAN_PROXY_POSTGRES_TLS_CA_FILE.
+      PGMAN_PROXY_POSTGRES_TLS_MODE: disable
+      PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK: "true"
       LOCAL_DSN: host=pg-a port=5432 user=postgres sslmode=disable
     ports:
       - "6432:6432"
@@ -62,6 +66,10 @@ services:
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
+      # Peer TLS (FR-018): this demo runs without it. Production keeps
+      # the verify-full default and sets PGMAN_PROXY_POSTGRES_TLS_CA_FILE.
+      PGMAN_PROXY_POSTGRES_TLS_MODE: disable
+      PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK: "true"
       LOCAL_DSN: host=pg-b port=5432 user=postgres sslmode=disable
     ports:
       - "6433:6432"
@@ -77,6 +85,10 @@ services:
       PGMAN_PROXY_PROXY_LISTEN_ADDR: 0.0.0.0:6432
       PGMAN_PROXY_POSTGRES_BIN_DIR: /usr/lib/postgresql/17/bin
       PGMAN_PROXY_POSTGRES_DATA_DIR: /var/lib/postgresql/data
+      # Peer TLS (FR-018): this demo runs without it. Production keeps
+      # the verify-full default and sets PGMAN_PROXY_POSTGRES_TLS_CA_FILE.
+      PGMAN_PROXY_POSTGRES_TLS_MODE: disable
+      PGMAN_PROXY_POSTGRES_TLS_DISABLE_EXPLICIT_ACK: "true"
       LOCAL_DSN: host=pg-c port=5432 user=postgres sslmode=disable
     ports:
       - "6434:6432"

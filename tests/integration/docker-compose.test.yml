@@ -126,7 +126,13 @@ services:
         # no WAL archive in this harness — `false` is never actually
         # invoked because wal_keep_size retains every needed segment
         # locally on a test-sized cluster.
-        PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB\nrestore_command = 'false'"
+        #
+        # ssl = on with the image's test certificate (tests/integration/
+        # Dockerfile): peers replicate over TLS, verified against the
+        # image's CA under the default postgres.tls_mode=verify-full
+        # (FR-018). TestPeerReplicationUsesVerifyFullTLS pins it.
+        PGMAN_PROXY_POSTGRES_CONF_EXTRAS: "wal_keep_size = 128MB\nrestore_command = 'false'\nssl = on\nssl_cert_file = '/etc/pgman-tls/server.crt'\nssl_key_file = '/etc/pgman-tls/server.key'"
+        PGMAN_PROXY_POSTGRES_TLS_CA_FILE: /etc/pgman-tls/ca.crt
         PGMAN_PROXY_CLUSTER_ID: pgman-proxy-it
         PGMAN_PROXY_PEERS: node-a,node-b,node-c
       PGMAN_PROXY_NODE_ID: node-a

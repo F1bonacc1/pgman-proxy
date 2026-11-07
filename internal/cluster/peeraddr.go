@@ -62,8 +62,9 @@ func PublishPeerAddress(ctx context.Context, kv jetstream.KeyValue, nodeID, addr
 // product of the two.
 //
 // The DSN format matches peerDSNsForConfig in start.go so behaviour is
-// identical to the static-map path when the lookup succeeds.
-func PeerAddressResolver(kv jetstream.KeyValue) func(ctx context.Context, peer pgmanager.NodeID) (string, error) {
+// identical to the static-map path when the lookup succeeds. sslParams
+// is config.PostgresConfig.PeerSSLParams (postgres.tls_mode, FR-018).
+func PeerAddressResolver(kv jetstream.KeyValue, sslParams string) func(ctx context.Context, peer pgmanager.NodeID) (string, error) {
 	return func(ctx context.Context, peer pgmanager.NodeID) (string, error) {
 		if kv == nil {
 			return "", errors.New("PeerAddressResolver: kv is nil")
@@ -82,10 +83,7 @@ func PeerAddressResolver(kv jetstream.KeyValue) func(ctx context.Context, peer p
 				if splitErr != nil {
 					return "", fmt.Errorf("peer %s addr %q: %w", peer, addr, splitErr)
 				}
-				return fmt.Sprintf(
-					"host=%s port=%s user=postgres dbname=postgres sslmode=disable",
-					host, port,
-				), nil
+				return PeerDSN(host, port, sslParams), nil
 			}
 			if !errors.Is(err, jetstream.ErrKeyNotFound) {
 				return "", fmt.Errorf("peer %s KV lookup: %w", peer, err)
@@ -99,6 +97,13 @@ func PeerAddressResolver(kv jetstream.KeyValue) func(ctx context.Context, peer p
 		}
 		return "", fmt.Errorf("peer %s address not in KV after %d attempts: %w", peer, attempts, lastErr)
 	}
+}
+
+// PeerDSN renders the libpq DSN this node uses to reach a peer's
+// Postgres at host:port, with the configured TLS parameters
+// (config.PostgresConfig.PeerSSLParams).
+func PeerDSN(host, port, sslParams string) string {
+	return fmt.Sprintf("host=%s port=%s user=postgres dbname=postgres %s", host, port, sslParams)
 }
 
 // sanitizePeerKey lower-cases and replaces NATS-KV-illegal characters
