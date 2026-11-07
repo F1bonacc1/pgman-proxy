@@ -14,7 +14,7 @@ Deployable as a standalone process, microservice, or sidecar.
 
 ## Field guide
 
-**[Open the field guide](https://raw.githack.com/F1bonacc1/pgman-proxy/main/docs/field-guide.html)**:
+**[Open the field guide](https://htmlpreview.github.io/?https://github.com/F1bonacc1/pgman-proxy/blob/main/docs/field-guide.html)**:
 an interactive tour of pgman-proxy and pg-manager, covering the
 architecture, step-through failure flows, PostgreSQL HA concepts,
 features, operations and terminology. It is one self-contained HTML file
