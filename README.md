@@ -12,6 +12,16 @@ Deployable as a standalone process, microservice, or sidecar.
 > Constitution: `.specify/memory/constitution.md` (v1.2.0)
 > Reference assembly: `../pg-manager/examples/three_node_nats/main.go`
 
+## Field guide
+
+**[Open the field guide](https://htmlpreview.github.io/?https://github.com/F1bonacc1/pgman-proxy/blob/main/docs/field-guide.html)**:
+an interactive tour of pgman-proxy and pg-manager, covering the
+architecture, step-through failure flows, PostgreSQL HA concepts,
+features, operations and terminology. It is one self-contained HTML file
+([`docs/field-guide.html`](docs/field-guide.html)) that also works
+offline. GitHub shows that file as source, so use the first link to view
+the page.
+
 ## What this binary is (and is not)
 
 Two surfaces in one binary:
