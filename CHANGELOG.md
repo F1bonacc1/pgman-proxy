@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (docs): field guide
+
+`docs/field-guide.html`, linked from the README, is a single offline HTML
+page for architects and engineers. It has eight tabs: an animated cluster
+with a failover walk-through, architecture and state machine, PostgreSQL
+HA concepts, 13 step-through sequence diagrams, a feature map, problems
+solved with measured figures, operations reference, and terminology.
+
 ### Fixed (release): the bundled and distroless images no longer share tags
 
 The `release` and `release-image` workflows both pushed
