@@ -1326,7 +1326,7 @@ const FLOWS = [
       [0, 1, 'switchover --target node-b', 'ctl', 'POST /v1/switchover on any peer. It is forwarded to the leader. The target must hold data.'],
       [1, 2, 'put switchover_request', 'ctl', 'A timestamped record, valid for 30 s by default.'],
       [2, 4, 'node-c sees the request', 'lease', 'Peers that are not the target stop campaigning, so the target gets an uncontested run.'],
-      [1, 1, 'wait for the target, then resign', 'lease', 'The primary keeps serving until the target\'s published position is fresh and within 16 MiB, for up to policy.switchover_delay (30 s). If the target never gets there, the switchover is cancelled (target_not_ready) and nothing went down. Then it holds one more tick so peers have seen the request (B-022).'],
+      [1, 1, 'wait for the target, then resign', 'lease', 'The primary keeps serving until the target has replayed past where the primary stood when asked (or is within 16 MiB), for up to policy.switchover_delay (30 s). If the target never gets there, the switchover is cancelled (target_not_ready) and nothing went down. Then it holds one more tick so peers have seen the request (B-022).'],
       [1, 2, 'release lease', 'lease', 'The leader key is deleted. This is a clean hand-over, not a lease expiry.'],
       [1, 1, 'demote: fast stop', 'data', 'Losing the lease triggers a demote. Fast shutdown ships all WAL to connected standbys.'],
       [3, 2, 'create leader: wins', 'lease', 'With deference wired, handover completes in one election cycle.'],
