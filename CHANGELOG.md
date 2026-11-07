@@ -39,12 +39,12 @@ probes between nodes were plaintext whatever the config said.
   scale-out, smoke, process-compose and deploy-compose rigs set
   `disable` plus the ack explicitly.
 
-### Changed: failover and switchover timing settings take effect (pg-manager bump)
+### Changed: failover and switchover timing settings take effect (pg-manager v0.7.6)
 
 pg-manager's `Policy.FailoverDelay`, `SwitchoverDelay` and
 `LivenessFailures` were never read, so `policy.failover_delay`,
 `policy.switchover_delay` and `policy.liveness_failures` did nothing. With
-the pg-manager bump they do:
+pg-manager v0.7.6 they do:
 
 - **`policy.liveness_failures`** (default 3) is the number of
   consecutive confirmed-down checks before the local Postgres counts as
