@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed: an expired switchover request is reported even when the store's delete reply is lost (pg-manager v0.7.8)
+
+When a switchover request expires, pg-manager deletes it and then logs
+`switchover: request expired` and emits `switchover.expired`. A delete
+that the embedded NATS store applied but answered with an error left the
+request gone with nothing logged or emitted. With pg-manager v0.7.8 the
+expiry is reported whenever the request is confirmed gone, with the
+store error in a `delete_error` field.
+
+### Fixed: a TLS change on a running cluster reaches existing standbys (pg-manager v0.7.7)
+
+Changing `postgres.tls_mode`, `tls_ca_file`, `tls_cert_file` or
+`tls_key_file` on a running cluster changed the peer DSNs, but pg-manager
+rewrote a standby's `primary_conninfo` only when the host, port, user,
+database or password changed. A cluster moved from `disable` to
+`verify-full` kept replicating in plaintext on every existing standby
+until that standby was re-cloned or a new primary was elected. With
+pg-manager v0.7.7, a TLS-only change rewrites `primary_conninfo` on the
+next reconcile. A standby whose CA or certificate file was missing also
+stops rewriting it, and emitting `conninfo.reconciled`, on every tick.
+
 ### Changed (breaking): peer Postgres TLS follows `postgres.tls_mode`
 
 Spec 001 FR-018 makes `verify-full` the default for upstream Postgres
