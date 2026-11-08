@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/f1bonacc1/pgman-proxy/tests/integration/conninfo"
 )
 
 // TestPeerReplicationUsesVerifyFullTLS pins spec 001 FR-018 end to end:
@@ -37,18 +39,29 @@ func TestPeerReplicationUsesVerifyFullTLS(t *testing.T) {
 		t.Fatalf("on primary %s: (ssl streams | streams) = %q, want 2|2: every standby must stream over TLS", primary, strings.TrimSpace(out))
 	}
 
-	// Each standby connects with the configured sslmode and CA.
+	// Each standby connects with the configured sslmode and CA. Compare
+	// parsed values: pg_basebackup -R writes sslmode='verify-full'
+	// quoted, pg-manager's own rewrite writes it bare, and which one a
+	// standby holds depends on how it last joined (2026-11-08 nightly).
 	for _, p := range Peers() {
 		if p.Name == primary {
 			continue
 		}
-		conninfo, err := localPsql(ctx, p.Name, "SHOW primary_conninfo")
+		raw, err := localPsql(ctx, p.Name, "SHOW primary_conninfo")
 		if err != nil {
 			t.Fatalf("SHOW primary_conninfo on %s: %v", p.Name, err)
 		}
-		for _, want := range []string{"sslmode=verify-full", "sslrootcert=/etc/pgman-tls/ca.crt"} {
-			if !strings.Contains(conninfo, want) {
-				t.Errorf("%s primary_conninfo %q: missing %q", p.Name, strings.TrimSpace(conninfo), want)
+		raw = strings.TrimSpace(raw)
+		kv, err := conninfo.Parse(raw)
+		if err != nil {
+			t.Fatalf("%s primary_conninfo %q: %v", p.Name, raw, err)
+		}
+		for key, want := range map[string]string{
+			"sslmode":     "verify-full",
+			"sslrootcert": "/etc/pgman-tls/ca.crt",
+		} {
+			if got := kv[key]; got != want {
+				t.Errorf("%s primary_conninfo %s = %q, want %q (conninfo %q)", p.Name, key, got, want, raw)
 			}
 		}
 	}
