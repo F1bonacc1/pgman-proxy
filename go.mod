@@ -1,6 +1,6 @@
 module github.com/f1bonacc1/pgman-proxy
 
-// Go 1.26.10 minimum. Earlier versions hit the stdlib findings
+// Go 1.26.11 minimum. Earlier versions hit the stdlib findings
 // surfaced by `.github/workflows/govulncheck.yml`: GO-2026-5037
 // (crypto/x509) and GO-2026-5039 (net/textproto) fixed in go1.26.4,
 // GO-2026-5856 (crypto/tls) fixed in go1.26.5, and the go1.26.6 batch
@@ -9,11 +9,12 @@ module github.com/f1bonacc1/pgman-proxy
 // (encoding/asn1), GO-2026-5026 (net/http via x/net/idna), and the
 // go1.26.9 batch: GO-2026-6603, 6605, 6610, 6611, 6612, 6613, 6617
 // (net/http), GO-2026-6608 (net/textproto) and GO-2026-6607
-// (crypto/tls), and GO-2026-6809 (crypto/x509) fixed in go1.26.10.
+// (crypto/tls), GO-2026-6809 (crypto/x509) fixed in go1.26.10, and
+// GO-2026-6859 (net/http) fixed in go1.26.11.
 // Bump in lockstep with new govulncheck stdlib findings. setup-go in
 // CI uses this directive as the install version, so a `toolchain` line
 // would be redundant.
-go 1.26.10
+go 1.26.11
 
 // The wrapped pg-manager engine is pinned to a tagged release. pg-manager is
 // a PRIVATE repo, so every build fetches it with GOPRIVATE + token auth:
@@ -34,7 +35,7 @@ go 1.26.10
 // a `replace` onto the sibling checkout (tests/integration/Dockerfile),
 // so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
-	github.com/f1bonacc1/pg-manager v0.7.8
+	github.com/f1bonacc1/pg-manager v0.7.9
 	github.com/fatih/color v1.19.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-isatty v0.0.22
