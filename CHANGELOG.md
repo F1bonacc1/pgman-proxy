@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed: the original node stays primary when a new node boots slowly during an expansion (pg-manager v0.7.9)
+
+During a 1→3 expansion, node-a could lose the primary role to a node that
+had just cloned from it. This happened when another new node was still
+booting, as in the 2026-11-14 nightly (run 43585096410, scale-out S3),
+where one node spent 12.6 s in its JetStream setup.
+- A node that has not started its engine yet has published no data
+  record, so pg-manager keeps it in node-a's synchronous set.
+- node-a's promotion was therefore refused with `sync_peer_silent`, and
+  node-a gave up the lease after each refusal.
+- No data was lost, but the primary moved, which spec 005 SC-002
+  forbids.
+
+With pg-manager v0.7.9, node-a keeps the lease for up to 15 ticks (30 s)
+while such a peer has published nothing. It promotes as soon as the
+peer reports. No node could have promoted during that wait anyway. New
+log line on node-a:
+`promote: holding lease for a sync peer that has not published a data record`.
+New scale-out scenario S12 (`TestExpandWithUnreportedPeer`) holds a
+new node unreported for 8 s after node-a's first refusal. It requires
+node-a to become primary without resigning.
+
 ### Fixed: an expired switchover request is reported even when the store's delete reply is lost (pg-manager v0.7.8)
 
 When a switchover request expires, pg-manager deletes it and then logs
