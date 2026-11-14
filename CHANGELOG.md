@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security: Go toolchain bumped to 1.26.11 (GO-2026-6859, net/http)
+
+`govulncheck` flagged GO-2026-6859 in go1.26.10: a race on
+`MaxBytesReader` headers could crash an HTTP/1 server in `net/http`. It
+is reached through the control plane (`control.Server.Start` →
+`http.Server.Serve`), the health server, and the embedded NATS server's
+monitoring. go1.26.11 fixes it.
+
+No source changes. The `go.mod` `go` directive, which every workflow's
+`setup-go` installs from, now requires 1.26.11.
+`deploy/docker/Dockerfile.bundle` and `tests/integration/Dockerfile`
+track it in lockstep (`golang:1.26.11-bookworm`).
+
 ### Fixed: the original node stays primary when a new node boots slowly during an expansion (pg-manager v0.7.9)
 
 During a 1→3 expansion, node-a could lose the primary role to a node that
