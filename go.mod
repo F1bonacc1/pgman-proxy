@@ -35,7 +35,7 @@ go 1.26.11
 // a `replace` onto the sibling checkout (tests/integration/Dockerfile),
 // so it resolves pg-manager's requirements against THIS module's go.sum.
 require (
-	github.com/f1bonacc1/pg-manager v0.7.9
+	github.com/f1bonacc1/pg-manager v0.7.10
 	github.com/fatih/color v1.19.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/mattn/go-isatty v0.0.22

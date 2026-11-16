@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed: the original node stays primary when a new node reports just after the promotion check (pg-manager v0.7.10)
+
+During a 1→3 expansion, node-a could still lose the primary role to a
+node that had just cloned from it, as in the 2026-11-16 nightly (run
+43856064197, scale-out S6).
+- pg-manager's promotion check read a new node's position as missing and
+  refused with `sync_peer_silent`.
+- A few milliseconds later the new node published its first position.
+- The lease hold added in v0.7.4 then looked again, found a position,
+  took the node for a dead one, and node-a gave up the lease.
+- No data was lost, but the primary moved, which spec 005 SC-002
+  forbids.
+
+With pg-manager v0.7.10, node-a keeps the lease when the new node's
+position is fresh (written within two ticks, 4 s) and promotes on its
+next tick. A stale position still releases the lease at once. When
+node-a does release the lease after a `sync_peer_silent` refusal, it now
+logs why:
+`promote: not holding the lease for a silent sync peer` (fields `peer`,
+`why`). The race needs two nodes' ticks to line up within a few
+milliseconds, so pg-manager's unit tests cover it and no scale-out
+scenario was added.
+
 ### Security: Go toolchain bumped to 1.26.11 (GO-2026-6859, net/http)
 
 `govulncheck` flagged GO-2026-6859 in go1.26.10: a race on
